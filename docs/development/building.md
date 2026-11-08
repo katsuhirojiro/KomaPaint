@@ -1,0 +1,117 @@
+# Building KomaPaint
+
+These notes describe how to build KomaPaint from source for the currently
+supported targets.
+
+## Primary target: Windows (MSVC)
+
+### 1. Install dependencies
+
+* Visual Studio 2022 with the **Desktop development with C++** workload.
+* CMake ≥ 3.21 (bundled with Visual Studio or from <https://cmake.org>).
+* Ninja (optional, recommended for fast incremental builds).
+* Qt 6.5 or newer, with the following modules:
+  * qtbase (Core, Gui, Widgets)
+  * qtdeclarative (Qml, Quick, Quick Controls 2, Quick Layouts)
+  * qttools (for `windeployqt`)
+
+The easiest way to install a reproducible Qt toolchain is
+[aqtinstall](https://github.com/miurahr/aqtinstall):
+
+```powershell
+pip install aqtinstall
+aqt install-qt windows desktop 6.7.3 win64_msvc2019_64 -m qtdeclarative qttools
+```
+
+This installs Qt under e.g. `C:\Qt\6.7.3\msvc2019_64`.
+
+### 2. Configure
+
+From a developer command prompt that has MSVC, CMake and Ninja on PATH:
+
+```powershell
+cmake -S . -B build -G Ninja ^
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
+  -DCMAKE_PREFIX_PATH=C:/Qt/6.7.3/msvc2019_64
+```
+
+If you are building from Visual Studio's built-in CMake support, point the
+`CMakeSettings.json` `cmakeCommandArgs` to the same prefix path.
+
+### 3. Build
+
+```powershell
+cmake --build build
+```
+
+The output binary is `build/bin/komapaint.exe`.
+
+### 4. Deploy Qt dependencies
+
+For running outside of a Qt command prompt, copy Qt dependencies
+alongside the executable:
+
+```powershell
+C:/Qt/6.7.3/msvc2019_64/bin/windeployqt.exe --qmldir ui build/bin/komapaint.exe
+```
+
+### 5. Run the tests
+
+```powershell
+ctest --test-dir build --output-on-failure -C RelWithDebInfo
+```
+
+## Linux (unsupported in Phase 1, portable build)
+
+The codebase is expected to build on Linux with `apt-get install qt6-base-dev
+qt6-declarative-dev qt6-tools-dev ninja-build cmake` followed by the usual:
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
+ctest --test-dir build --output-on-failure
+./build/bin/komapaint
+```
+
+Linux and macOS are planned targets but are not validated as part of the
+Phase 1 milestone. Package names will differ across distributions; please
+open an issue if you maintain a Linux packaging recipe.
+
+## macOS (planned)
+
+macOS builds will use `macdeployqt` similarly to Windows. Instructions
+will be added when macOS is formally supported.
+
+## Quick QML preview via PySide6
+
+For iterating on the UI without rebuilding the C++ binary, the repository
+includes a small launcher script that uses PySide6 (Python bindings for
+Qt 6) to load the same QML files:
+
+```bash
+pip install PySide6
+python3 tools/run_qml.py
+```
+
+This launcher uses Python stand-ins for the C++ backend and is a
+convenience for designers, not a supported runtime. Do not rely on it
+for functional testing.
+
+## Static analysis / linters
+
+* `qmllint` is part of the Qt installation and can be run directly:
+
+  ```bash
+  qmllint -I ui ui/workspaces/MainWindow.qml
+  ```
+
+* C++ code is expected to compile cleanly at high warning levels
+  (`/W4` on MSVC, `-Wall -Wextra -Wpedantic` on GCC/Clang once those
+  are wired in the project options).
+
+## Build options
+
+| Option                    | Default | Description |
+| ------------------------- | ------- | ----------- |
+| `KOMAPAINT_BUILD_TESTS`   | ON      | Build the QtTest unit-test suite. |
+| `KOMAPAINT_ENABLE_WARNINGS`| ON      | Enable strict compiler warnings. |
