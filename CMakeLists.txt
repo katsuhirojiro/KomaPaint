@@ -55,12 +55,17 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
 
 qt_standard_project_setup()
 
+# ---- Testing must be enabled at the top level before adding tests/ ----------
+if(KOMAPAINT_BUILD_TESTS)
+    enable_testing()
+    include(CTest)
+endif()
+
 # ---- Subdirectories ---------------------------------------------------------
 add_subdirectory(src)
 add_subdirectory(apps/desktop)
 
 if(KOMAPAINT_BUILD_TESTS)
-    enable_testing()
     add_subdirectory(tests)
 endif()
 
@@ -70,4 +75,5 @@ install(TARGETS komapaint
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     BUNDLE  DESTINATION .
 )
-qt_finalize_executable(komapaint)
+# Note: qt_finalize_executable() is intentionally called in apps/desktop/CMakeLists.txt
+# (the directory scope where the `komapaint` target is declared), where Qt recommends it.

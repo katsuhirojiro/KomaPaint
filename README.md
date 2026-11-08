@@ -65,37 +65,59 @@ the canonical build procedure for Windows.
 ### Prerequisites
 
 * Windows 10 or 11 (64-bit).
-* **Qt 6.5+** for MSVC, including:
+* **Qt 6.5 or newer** built for MSVC 2022 (64-bit). At minimum install:
   * `qtbase` (Core, Gui, Widgets)
   * `qtdeclarative` (Qml, Quick, Quick Controls 2, Quick Layouts)
-  * `qttools` (for `windeployqt` / linguist)
-* **CMake ≥ 3.21** and **Ninja** (or Visual Studio 2022 with the C++ desktop workload).
-* A C++20-capable compiler: MSVC 2022 (recommended), or Clang 15+.
+  * `qttools` (for `windeployqt` / Linguist)
+* **CMake ≥ 3.21** and **Ninja** (or the Visual Studio 2022 CMake integration).
+* **Visual Studio 2022** with the *Desktop development with C++* workload
+  (MSVC v143 toolset, Windows 10/11 SDK). Qt and MSVC versions must match:
+  install the `msvc2022_64` Qt kit (e.g. `6.7.3/msvc2022_64`). Older
+  `msvc2019_64` kits are *not* binary-compatible with MSVC 2022 builds.
 
 Qt can be installed via the [Qt Online Installer](https://www.qt.io/download)
-or with `aqtinstall`.
+or, for scripted installs, with `aqtinstall`:
+
+```powershell
+pip install aqtinstall
+aqt install-qt windows desktop 6.7.3 win64_msvc2022_64 -m qtdeclarative qttools
+```
 
 ### Configure & build
 
 ```powershell
 # from the repository root
-cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/6.7.3/msvc2019_64
-cmake --build build --config Release
+cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/6.7.3/msvc2022_64 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
 ```
 
-The executable will be placed at `build/bin/komapaint.exe`.
+The executable will be placed at `build/bin/komapaint.exe`. All QML files
+are compiled into the executable via a Qt resource (`resources/qml.qrc`),
+so there is no separate `ui/` folder that needs to be shipped alongside
+the binary.
 
-After building, deploy Qt libraries next to the executable:
+After building, deploy Qt dependencies next to the executable:
 
 ```powershell
-C:/Qt/6.7.3/msvc2019_64/bin/windeployqt.exe --qmldir ui build/bin/komapaint.exe
+C:/Qt/6.7.3/msvc2022_64/bin/windeployqt.exe build/bin/komapaint.exe
 ```
+
+No `--qmldir` flag is necessary because QML is bundled via qt_add_executable
++ AUTORCC; `windeployqt` discovers the required QML plugins automatically.
 
 ### Running tests
 
+Unit tests are registered with CTest and are executed with:
+
 ```powershell
-ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure -C RelWithDebInfo
 ```
+
+Phase 1 validation note: the C++ build and test run have not yet been
+executed in this sandbox because the full Qt 6 MSVC development kit is
+not present in the Linux CI container used to author this commit. The
+tests are expected to build and pass once the Windows/MSVC prerequisites
+are installed locally.
 
 ## 4. Building / iterating on Linux (unsupported in Phase 1)
 
@@ -104,16 +126,19 @@ development packages are available. The Linux toolchain is not the Phase 1
 priority, and Linux packages are not yet validated.
 
 For fast UI iteration without compiling C++, a PySide6-based QML launcher is
-provided:
+provided. It reads the QML directly from the source tree (so edits to `.qml`
+files are reflected without rebuilding the C++ binary) but uses Python
+stand-ins for the C++ backend — it is a designer aid, not a supported
+runtime.
+
+System requirements: Python 3.10+, plus graphics libraries required by Qt
+(on Linux this typically means `libgl1`, `libegl1` and `libxkbcommon0`;
+on Windows/macOS the PySide6 wheels ship these dependencies).
 
 ```bash
-pip install PySide6 python3 tools/run_qml.py
+pip install PySide6
+python3 tools/run_qml.py
 ```
-
-This loads the same QML interface (`ui/workspaces/MainWindow.qml`) but uses
-Python stand-ins for the C++ backend services — it is useful for designers
-and for quickly iterating on themes/layouts, but is not a replacement for
-the production executable.
 
 ## 5. Architecture overview
 
@@ -213,14 +238,25 @@ disabled and are never falsely presented as working.
 
 ## 9. Validation
 
-* Unit tests: the `tests/unit` directory contains QtTest-based unit tests
-  for the undo stack, layer model, timeline state, canvas document and
-  recent-files list. They can be built and executed via `ctest` after the
-  normal CMake build.
-* QML: QML files are syntactically validated with `qmllint` as part of
-  local development.
-* The Qt 6 C++ build is what is validated; `tools/run_qml.py` is a UI
-  prototyping convenience only.
+* **Unit tests:** the `tests/unit` directory contains QtTest-based unit
+  tests for the undo stack, layer model, timeline state, canvas document
+  and recent-files list. They are registered with CTest via `add_test()`
+  in `tests/unit/CMakeLists.txt` and are discovered by `ctest`. **They
+  have not yet been executed in this CI environment** because the
+  Qt 6 native development SDK (with CMake configs and QtTest libraries)
+  is not present in the Linux container used to author this commit; they
+  are expected to build and pass once the Windows/MSVC prerequisites from
+  section 3 are installed locally.
+* **QML:** QML files have been processed with `qmlformat`; imports are
+  structured so they resolve both from the source tree (for the PySide6
+  launcher) and from the Qt resource bundle (for the production binary).
+* **Production executable:** the C++ binary embeds all QML via a Qt
+  resource collection (`resources/qml.qrc`), so `windeployqt` picks up
+  the QML modules it needs without `--qmldir` and the resulting
+  `komapaint.exe` is self-contained. The final compiled executable has
+  not yet been produced in this environment.
+* **PySide6 launcher:** `tools/run_qml.py` is a UI prototyping
+  convenience only; it is not the supported runtime.
 
 See `docs/development/building.md` for more detail.
 

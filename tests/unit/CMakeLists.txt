@@ -1,5 +1,4 @@
 find_package(Qt6 REQUIRED COMPONENTS Core Test Gui)
-include(CTest)
 
 function(komapaint_add_test NAME SOURCE)
     add_executable(${NAME} ${SOURCE})

@@ -20,10 +20,13 @@ The easiest way to install a reproducible Qt toolchain is
 
 ```powershell
 pip install aqtinstall
-aqt install-qt windows desktop 6.7.3 win64_msvc2019_64 -m qtdeclarative qttools
+aqt install-qt windows desktop 6.7.3 win64_msvc2022_64 -m qtdeclarative qttools
 ```
 
-This installs Qt under e.g. `C:\Qt\6.7.3\msvc2019_64`.
+This installs Qt under e.g. `C:\Qt\6.7.3\msvc2022_64`. **Use the
+`msvc2022_64` kit to match Visual Studio 2022's v143 toolset.** The older
+`msvc2019_64` kit targets the v142 toolset and is not binary-compatible
+with MSVC 2022 builds.
 
 ### 2. Configure
 
@@ -32,7 +35,7 @@ From a developer command prompt that has MSVC, CMake and Ninja on PATH:
 ```powershell
 cmake -S . -B build -G Ninja ^
   -DCMAKE_BUILD_TYPE=RelWithDebInfo ^
-  -DCMAKE_PREFIX_PATH=C:/Qt/6.7.3/msvc2019_64
+  -DCMAKE_PREFIX_PATH=C:/Qt/6.7.3/msvc2022_64
 ```
 
 If you are building from Visual Studio's built-in CMake support, point the
@@ -48,12 +51,16 @@ The output binary is `build/bin/komapaint.exe`.
 
 ### 4. Deploy Qt dependencies
 
-For running outside of a Qt command prompt, copy Qt dependencies
-alongside the executable:
+KomaPaint bundles its QML into the executable via a Qt resource
+(`resources/qml.qrc`), so `windeployqt` discovers the required QML
+plugins automatically without needing `--qmldir`:
 
 ```powershell
-C:/Qt/6.7.3/msvc2019_64/bin/windeployqt.exe --qmldir ui build/bin/komapaint.exe
+C:/Qt/6.7.3/msvc2022_64/bin/windeployqt.exe build/bin/komapaint.exe
 ```
+
+After this step, `build/bin/komapaint.exe` runs standalone; no
+additional copies of the `ui/` directory are needed.
 
 ### 5. Run the tests
 

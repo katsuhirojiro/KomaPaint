@@ -2,13 +2,13 @@
 #include "core/Version.h"
 
 #include <QApplication>
+#include <QCoreApplication>
+#include <QFile>
 #include <QFont>
 #include <QFontDatabase>
-#include <QIcon>
+#include <QQuickStyle>
 #include <QQuickWindow>
 #include <QQmlContext>
-#include <QQuickStyle>
-#include <QDir>
 #include <QDebug>
 
 namespace komapaint {
@@ -47,20 +47,27 @@ void KomaPaintApp::loadUi()
     ctx->setContextProperty(QStringLiteral("Panels"),      &m_panels);
     ctx->setContextProperty(QStringLiteral("Workspace"),   &m_workspace);
 
-    const QString qmlDir = QString::fromUtf8(KOMAPAINT_QML_DIR);
-    m_engine.addImportPath(qmlDir);
+    // When built against the resource-bundled QML (the default for release
+    // and Windows deployment), load from "qrc:/". The source-tree path is
+    // kept as a fallback for developer builds that skip the qrc bundle.
+    const QString mainQml = QStringLiteral("qrc:/workspaces/MainWindow.qml");
+    if (!QFile::exists(QStringLiteral(":") + mainQml)) {
+        const QString qmlDir = QString::fromUtf8(KOMAPAINT_QML_DIR);
+        m_engine.addImportPath(qmlDir);
+        m_engine.load(QUrl::fromLocalFile(qmlDir + QStringLiteral("/workspaces/MainWindow.qml")));
+    } else {
+        m_engine.addImportPath(QStringLiteral("qrc:/"));
+        m_engine.load(QUrl(mainQml));
+    }
 
-    const QString mainQml = qmlDir + QStringLiteral("/workspaces/MainWindow.qml");
     QObject::connect(&m_engine, &QQmlApplicationEngine::objectCreated,
                      this, [this](QObject* obj, const QUrl& url) {
-        if (!obj && url.toString().endsWith(QStringLiteral("MainWindow.qml"))) {
+        if (!obj && url.toString().contains(QStringLiteral("MainWindow.qml"))) {
             qCritical() << "Failed to load main QML:" << url;
             QCoreApplication::exit(-1);
         }
         m_window = qobject_cast<QQuickWindow*>(obj);
     }, Qt::QueuedConnection);
-
-    m_engine.load(QUrl::fromLocalFile(mainQml));
 }
 
 int KomaPaintApp::run()
