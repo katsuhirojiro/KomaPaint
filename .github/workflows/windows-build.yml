@@ -272,65 +272,55 @@ jobs:
           Get-ChildItem "$bin\styles" -Recurse -ErrorAction SilentlyContinue | Select Name | Format-Table -AutoSize | Out-String | Write-Host
           Write-Host "--- qt.conf ---"
           if (Test-Path "$bin\qt.conf") { Get-Content "$bin\qt.conf" | Write-Host } else { Write-Host "(no qt.conf)" }
-          # Synchronously run the console exe with stdout/stderr captured into
-          # variables using .NET Process; the console subsystem build inherits
-          # the parent's stdio when UseShellExecute=false, but we redirect to
-          # capture reliably.
-          $psi = New-Object System.Diagnostics.ProcessStartInfo
-          $psi.FileName = $exe
-          $psi.WorkingDirectory = $bin
-          $psi.UseShellExecute = $false
-          $psi.RedirectStandardOutput = $true
-          $psi.RedirectStandardError = $true
-          $psi.CreateNoWindow = $true
-          $p = [System.Diagnostics.Process]::Start($psi)
-          # Poll for 5 seconds; collect output incrementally.
-          $deadline = (Get-Date).AddSeconds(5)
-          $allOut = New-Object System.Text.StringBuilder
-          $allErr = New-Object System.Text.StringBuilder
-          while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
-            # Read what's available without blocking.
-            while (-not $p.StandardOutput.EndOfStream) {
-              $line = $p.StandardOutput.ReadLine()
-              if ($null -ne $line) { [void]$allOut.AppendLine($line); Write-Host "OUT: $line" }
+          # Use async OutputDataReceived events so stdout/stderr never deadlock.
+          $p = New-Object System.Diagnostics.Process
+          $p.StartInfo.FileName = $exe
+          $p.StartInfo.WorkingDirectory = $bin
+          $p.StartInfo.UseShellExecute = $false
+          $p.StartInfo.RedirectStandardOutput = $true
+          $p.StartInfo.RedirectStandardError  = $true
+          $p.StartInfo.CreateNoWindow = $true
+          $sbOut = New-Object System.Text.StringBuilder
+          $sbErr = New-Object System.Text.StringBuilder
+          $evOut = Register-ObjectEvent -InputObject $p -EventName OutputDataReceived -Action {
+            param($s,$e)
+            if ($e.Data -ne $null) {
+              [void] $Event.MessageData.AppendLine($e.Data)
+              Write-Host "OUT: $($e.Data)"
             }
-            while (-not $p.StandardError.EndOfStream) {
-              $line = $p.StandardError.ReadLine()
-              if ($null -ne $line) { [void]$allErr.AppendLine($line); Write-Host "ERR: $line" }
+          } -MessageData $sbOut
+          $evErr = Register-ObjectEvent -InputObject $p -EventName ErrorDataReceived -Action {
+            param($s,$e)
+            if ($e.Data -ne $null) {
+              [void] $Event.MessageData.AppendLine($e.Data)
+              Write-Host "ERR: $($e.Data)"
             }
-            Start-Sleep -Milliseconds 200
-          }
-          if (-not $p.HasExited) {
-            Write-Host "Process still alive after 5s - event loop running."
+          } -MessageData $sbErr
+          $null = $p.Start()
+          $p.BeginOutputReadLine()
+          $p.BeginErrorReadLine()
+          $alive = $p.WaitForExit(5000)
+          Start-Sleep -Milliseconds 500  # drain events
+          $p.CancelOutputRead()
+          $p.CancelErrorRead()
+          Unregister-Event -SourceIdentifier $evOut.Name -ErrorAction SilentlyContinue
+          Unregister-Event -SourceIdentifier $evErr.Name -ErrorAction SilentlyContinue
+          if (-not $alive) {
+            Write-Host "Process still alive after 5 seconds - event loop running."
             $p.CloseMainWindow() | Out-Null
             if (-not $p.WaitForExit(5000)) { $p.Kill(); $p.WaitForExit() }
-            # Drain remaining output
-            $restOut = $p.StandardOutput.ReadToEnd()
-            $restErr = $p.StandardError.ReadToEnd()
-            if ($restOut) { Write-Host "OUT (remaining): $restOut" }
-            if ($restErr) { Write-Host "ERR (remaining): $restErr" }
-            Write-Host "Exit code: $($p.ExitCode)"
-            if ($p.ExitCode -ne 0) { Write-Error "Smoke test FAILED: exit code $($p.ExitCode)"; exit 1 }
+            Write-Host "Exit code after close: $($p.ExitCode)"
+            if ($p.ExitCode -ne 0) { Write-Error "Smoke test FAILED: non-zero exit $($p.ExitCode) on close"; exit 1 }
             Write-Host "=== Smoke test PASSED ==="
           } else {
-            # Exited early - drain remaining output
-            $restOut = $p.StandardOutput.ReadToEnd()
-            $restErr = $p.StandardError.ReadToEnd()
-            Write-Host "OUT (final): $restOut"
-            Write-Host "ERR (final): $restErr"
-            Write-Host "Exit code: $($p.ExitCode)"
-            Write-Error "Smoke test FAILED: exited prematurely with code $($p.ExitCode)"
+            Write-Host "Process exited early with code $($p.ExitCode)."
+            Write-Host "Captured stdout:"
+            Write-Host $sbOut.ToString()
+            Write-Host "Captured stderr:"
+            Write-Host $sbErr.ToString()
+            Write-Error "Smoke test FAILED: exited prematurely"
             exit 1
           }
-
-      - name: Upload smoke-test logs (always)
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: smoke-test-logs
-          path: ${{ github.workspace }}/smoke-logs/
-          if-no-files-found: warn
-          retention-days: 14
 
       - name: Package into ZIP
         shell: pwsh
