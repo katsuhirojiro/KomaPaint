@@ -275,6 +275,10 @@ void TestDocumentFile::structurallyInvalidFilesAreRejected()
         b.u16(2);
         b.u32(0); // zero documents declared
         b.u32(0); // asset count
+        // Pad so the file clears the minimum-file-size gate and actually
+        // reaches the document-count validation it is meant to exercise.
+        const char padding[32] = {};
+        b.raw(padding, sizeof(padding));
         return b.finish();
     }());
     expectRejected(QStringLiteral("v2-multi-document.koma"), [] {

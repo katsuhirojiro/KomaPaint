@@ -61,6 +61,7 @@ ApplicationWindow {
     Connections {
         target: Workspace
         function onFileErrorOccurred(message) { fileErrorText.text = message; fileErrorDialog.open() }
+        function onFileAssociationCompleted(message, ok) { associationResultText.text = message; associationResultDialog.open() }
     }
     Dialog {
         id: historyErrorDialog
@@ -77,6 +78,14 @@ ApplicationWindow {
         title: qsTr("Illustration file")
         standardButtons: Dialog.Ok
         contentItem: Label { id: fileErrorText; color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+    }
+    Dialog {
+        id: associationResultDialog
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("File association")
+        standardButtons: Dialog.Ok
+        contentItem: Label { id: associationResultText; color: KP.text; wrapMode: Text.WordWrap; width: 360 }
     }
     FileDialog {
         id: openImageDialog
@@ -176,6 +185,12 @@ ApplicationWindow {
                 MenuItem {
                     text: qsTr("Import...")
                     enabled: false
+                }
+                MenuSeparator {
+                }
+                MenuItem {
+                    text: qsTr("Associate &.koma Files...")
+                    onTriggered: Workspace.associateWithKomaFiles()
                 }
                 MenuSeparator {
                 }

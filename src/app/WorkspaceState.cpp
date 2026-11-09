@@ -1,5 +1,6 @@
 #include "WorkspaceState.h"
 
+#include "FileAssociation.h"
 #include "../core/Settings.h"
 #include "../files/DocumentFile.h"
 
@@ -38,6 +39,25 @@ static QString localPathFromQml(const QString& input)
     if (url.isLocalFile()) return url.toLocalFile();
     if (url.scheme().isEmpty()) return input; // relative path or bare filename
     return {}; // remote or unsupported scheme
+}
+
+void WorkspaceState::associateWithKomaFiles()
+{
+#if defined(Q_OS_WIN)
+    const QString exePath = FileAssociation::currentExecutablePath();
+    if (exePath.isEmpty()) {
+        emit fileAssociationCompleted(QStringLiteral("Could not determine where KomaPaint is installed."), false);
+        return;
+    }
+    QString error;
+    if (FileAssociation::registerAssociation(exePath, &error)) {
+        emit fileAssociationCompleted(QStringLiteral("Double-clicking a .koma file will now open it in this KomaPaint."), true);
+        return;
+    }
+    emit fileAssociationCompleted(error, false);
+#else
+    emit fileAssociationCompleted(QStringLiteral("The .koma file association is only supported on Windows."), false);
+#endif
 }
 
 bool WorkspaceState::newDocument(int width, int height, bool transparent, const QColor& background)

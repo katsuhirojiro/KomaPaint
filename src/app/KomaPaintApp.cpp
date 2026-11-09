@@ -18,10 +18,11 @@
 
 namespace komapaint {
 
-KomaPaintApp::KomaPaintApp(QObject* parent)
+KomaPaintApp::KomaPaintApp(const QString& fileToOpen, QObject* parent)
     : QObject(parent),
       m_settings(QStringLiteral(KOMAPAINT_ORGANIZATION),
-                 QStringLiteral(KOMAPAINT_PRETTY_NAME))
+                 QStringLiteral(KOMAPAINT_PRETTY_NAME)),
+      m_fileToOpen(fileToOpen)
 {
 }
 
@@ -121,6 +122,17 @@ int KomaPaintApp::run()
     registerTypes();
     loadStyles();
     loadUi();
+
+    if (!m_fileToOpen.isEmpty()) {
+        qInfo("[KomaPaint] run(): opening command-line file %s", qUtf8Printable(m_fileToOpen));
+        // On failure the workspace emits fileErrorOccurred, which the QML
+        // layer shows in the usual error dialog; the default untitled
+        // document remains untouched.
+        if (!m_workspace.openFromPath(m_fileToOpen)) {
+            qWarning("[KomaPaint] run(): could not open command-line file %s", qUtf8Printable(m_fileToOpen));
+        }
+    }
+
     qInfo("[KomaPaint] run(): entering app.exec() event loop");
     return app->exec();
 }

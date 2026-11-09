@@ -23,7 +23,11 @@ class KomaPaintApp : public QObject
     Q_OBJECT
 
 public:
-    explicit KomaPaintApp(QObject* parent = nullptr);
+    // fileToOpen: optional path (or file: URL) to open once the main window
+    // exists — used when the user double-clicks a .koma file. A failed open
+    // surfaces through the ordinary error dialog; the untitled document is
+    // left in place and untouched.
+    explicit KomaPaintApp(const QString& fileToOpen = QString(), QObject* parent = nullptr);
     ~KomaPaintApp() override;
 
     int run();
@@ -39,6 +43,7 @@ private:
     PanelManager          m_panels;
     WorkspaceState        m_workspace;
     QQuickWindow*         m_window = nullptr;
+    QString               m_fileToOpen;
 };
 
 }  // namespace komapaint

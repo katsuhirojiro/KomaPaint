@@ -564,7 +564,7 @@ CanvasDocument* DocumentFile::open(const QString& path, QString* error)
         return fail(QStringLiteral("Could not read \"%1\".").arg(path));
     const qint64 fileSize = file.size();
     if (fileSize < static_cast<qint64>(MinFileBytes))
-        return fail(QStringLiteral("\"%1\" is not a KomaPaint illustration.").arg(path));
+        return fail(QStringLiteral("\"%1\" is not a KomaPaint file.").arg(path));
     if (static_cast<quint64>(fileSize) > MaxFileBytes)
         return fail(QStringLiteral("\"%1\" is larger than the %2 GiB limit.").arg(path).arg(MaxFileBytes / (1024 * 1024 * 1024)));
     QByteArray data = file.readAll();
@@ -620,12 +620,12 @@ CanvasDocument* DocumentFile::open(const QString& path, QString* error)
         const qsizetype payloadEnd = payloadBegin + static_cast<qsizetype>(payloadLength);
         if (!parseIllustrationPayload(data, payloadBegin, payloadEnd, path, &payload, error))
             return nullptr;
-        head = Reader(data, payloadEnd, contentEnd);
+        Reader tail(data, payloadEnd, contentEnd);
         quint32 assetCount = 0;
-        if (!head.readU32(assetCount)) return fail(QStringLiteral("\"%1\" is truncated.").arg(path));
+        if (!tail.readU32(assetCount)) return fail(QStringLiteral("\"%1\" is truncated.").arg(path));
         if (assetCount != 0)
             return fail(QStringLiteral("\"%1\" uses shared assets, which this version of KomaPaint does not support yet.").arg(path));
-        if (head.remaining() != 0)
+        if (tail.remaining() != 0)
             return fail(QStringLiteral("\"%1\" has trailing data.").arg(path));
     } else {
         return fail(QStringLiteral("\"%1\" uses format version %2, which this version of KomaPaint cannot read.").arg(path).arg(version));

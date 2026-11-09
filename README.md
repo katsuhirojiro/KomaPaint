@@ -107,6 +107,22 @@ C:/Qt/6.7.3/msvc2022_64/bin/windeployqt.exe build/bin/komapaint.exe
 No `--qmldir` flag is necessary because QML is bundled via qt_add_executable
 + AUTORCC; `windeployqt` discovers the required QML plugins automatically.
 
+### Windows: `.koma` file association
+
+The packaged Windows build (and any locally built `komapaint.exe`) can
+register itself to open `.koma` files on double-click. Registration is
+per-user (`HKCU\Software\Classes`) and needs no administrator rights:
+
+```powershell
+komapaint.exe --associate      # register .koma to open with KomaPaint
+komapaint.exe --unassociate    # remove the registration
+```
+
+The release ZIP ships `Register_koma_file_association.cmd`, which calls
+`komapaint.exe --associate` next to it. The same action is available
+inside the app via **File → Associate .koma Files…**. Passing a file path
+to `komapaint.exe` opens it directly (`komapaint.exe my-drawing.koma`).
+
 ### Running tests
 
 Unit tests are registered with CTest and are executed with:
@@ -219,7 +235,9 @@ The application is an early alpha. The following are **not** implemented:
   ordering and locking exist).
 * Timeline frames, keyframes, onion skinning or playback (only shell state).
 * File I/O beyond open/save of `.koma` illustrations — no export (PNG/PSD/
-  PDF), no autosave, no recent-files menu.
+  PDF), no autosave, no recent-files menu. The unified `.koma` v2 envelope
+  is ready to carry comic pages and multi-page projects later; this build
+  reads and writes illustrations only.
 * Color picker HSB widget (the color panel is a placeholder).
 * Preferences dialog.
 * Welcome screen / new-document dialog (the New Document dialog is minimal:

@@ -77,6 +77,36 @@ the conventional stderr sink.
 ctest --test-dir build --output-on-failure -C RelWithDebInfo
 ```
 
+### 6. `.koma` file association (Windows)
+
+KomaPaint's native format has exactly one extension: `.koma`. On Windows,
+the packaged build can register this per-user (no administrator rights,
+`HKCU\Software\Classes` only) so double-clicking a `.koma` file opens it
+in KomaPaint:
+
+```powershell
+komapaint.exe --associate      # register
+komapaint.exe --unassociate    # remove the registration again
+```
+
+The release ZIP ships `packaging/Register_koma_file_association.cmd`
+(copied next to `komapaint.exe`), a thin wrapper around `--associate`.
+Inside the app, **File → Associate .koma Files…** performs the same
+registration. Registration writes only these keys:
+
+* `HKCU\Software\Classes\.koma` → `KomaPaint.Illustration`
+* `HKCU\Software\Classes\KomaPaint.Illustration` (icon + `shell\open\command`)
+* `HKCU\Software\Classes\Applications\komapaint.exe\SupportedTypes` (`.koma` value)
+
+and asks Explorer (`SHChangeNotify`) to refresh its associations.
+Unregistering removes the `.koma` ProgID binding only when it still points
+at KomaPaint's ProgID; a different application's binding is left untouched.
+
+Passing a file path on the command line opens that file directly at
+startup: `komapaint.exe artwork.koma`. A file that fails to load opens the
+usual error dialog over the default untitled document — it never replaces
+or modifies the untitled document's history.
+
 ## Linux (unsupported in Phase 1, portable build)
 
 The codebase is expected to build on Linux with `apt-get install qt6-base-dev

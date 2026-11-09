@@ -1,11 +1,17 @@
 #include "KomaPaintApp.h"
+#include "CommandLine.h"
+#include "FileAssociation.h"
 
 #include <QApplication>
+#include <QCoreApplication>
+#include <QMessageBox>
 #include <QQuickStyle>
 #include <QString>
+#include <QStringList>
 #include <QtLogging>
 
 #include <cstdio>
+#include <cstring>
 
 #if defined(Q_OS_WIN)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -61,6 +67,53 @@ void komaPaintMessageHandler(QtMsgType type, const QMessageLogContext& context,
 #endif
 }
 
+// Headless commands are handled before any GUI object is created so they
+// work in installers, CI and non-interactive sessions (no QApplication, no
+// window, no event loop). Detection uses exact ASCII comparisons against
+// the raw argv; everything else falls through to the normal GUI path where
+// Qt properly decodes a Unicode command line into QString.
+int runHeadlessIfRequested(int argc, char* argv[])
+{
+    for (int i = 1; i < argc; ++i) {
+        const char* arg = argv[i];
+        if (arg == nullptr) continue;
+        const bool associate = std::strcmp(arg, "--associate") == 0;
+        const bool unassociate = std::strcmp(arg, "--unassociate") == 0;
+        const bool help = std::strcmp(arg, "--help") == 0;
+        if (!associate && !unassociate && !help) continue;
+
+        // Reject combinations/extra positionals up front: this pre-scan owns
+        // the flag entirely, so be strict rather than guess.
+        for (int j = i + 1; j < argc; ++j) {
+            if (argv[j] == nullptr) continue;
+            const QString message = QStringLiteral("Option \"%1\" cannot be combined with other arguments. Try --help.")
+                                        .arg(QString::fromLocal8Bit(arg));
+            std::fprintf(stderr, "%s\n", message.toLocal8Bit().constData());
+            return 2;
+        }
+
+        if (help) {
+            const QString usage = komapaint::CommandLine::usageText();
+            std::fprintf(stderr, "%s", usage.toLocal8Bit().constData());
+            return 0;
+        }
+        const QString exePath = komapaint::FileAssociation::currentExecutablePath();
+        QString error;
+        const bool ok = associate ? komapaint::FileAssociation::registerAssociation(exePath, &error)
+                                  : komapaint::FileAssociation::unregisterAssociation(&error);
+        if (ok) {
+            std::fprintf(stderr, "KomaPaint: .koma file association %s successfully.\n",
+                         associate ? "registered" : "removed");
+            return 0;
+        }
+        std::fprintf(stderr, "KomaPaint: could not %s the .koma file association: %s\n",
+                     associate ? "register" : "remove",
+                     error.toLocal8Bit().constData());
+        return 3;
+    }
+    return -1; // not a headless request
+}
+
 }  // namespace
 
 int main(int argc, char* argv[])
@@ -71,15 +124,34 @@ int main(int argc, char* argv[])
 
     qInfo("[KomaPaint] main(): entry");
 
+    const int headless = runHeadlessIfRequested(argc, argv);
+    if (headless != -1) return headless;
+
     // Select the Qt Quick Controls style BEFORE QApplication construction.
     QQuickStyle::setStyle("Basic");
 
     qInfo("[KomaPaint] Constructing QApplication...");
     QApplication app(argc, argv);
 
+    // Qt has decoded the (possibly non-ASCII) command line properly now.
+    const QStringList arguments = QCoreApplication::arguments().mid(1);
+    const komapaint::CommandLineRequest request = komapaint::CommandLine::parse(arguments);
+    if (!request.error.isEmpty()) {
+        qWarning("[KomaPaint] command line error: %s", qUtf8Printable(request.error));
+        QMessageBox::warning(nullptr, QStringLiteral("KomaPaint"),
+                             request.error + QStringLiteral("\n\n") + komapaint::CommandLine::usageText());
+        return 2;
+    }
+    // Help is handled by the headless pre-scan; this branch only guards the
+    // case where the flags were combined with arguments Qt had to decode.
+    if (request.mode == komapaint::CommandLineRequest::Mode::Help) {
+        std::fprintf(stderr, "%s", komapaint::CommandLine::usageText().toLocal8Bit().constData());
+        return 0;
+    }
+
     qInfo("[KomaPaint] QApplication constructed successfully. Starting KomaPaintApp...");
 
-    komapaint::KomaPaintApp paintApp;
+    komapaint::KomaPaintApp paintApp(request.fileToOpen);
     const int rc = paintApp.run();
 
     qInfo("[KomaPaint] main(): exiting with code %d", rc);

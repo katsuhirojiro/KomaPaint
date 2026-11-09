@@ -255,6 +255,10 @@ class Workspace(QObject):
     def resetZoom(self): self.zoom=100.0
     @Slot()
     def zoomFit(self): self.zoom=100.0
+    fileAssociationCompleted = Signal(str, bool)
+    @Slot()
+    def associateWithKomaFiles(self): self.fileAssociationCompleted.emit(
+        "File association is only available in the real Windows build.", False)
 
 
 def main():

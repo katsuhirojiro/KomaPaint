@@ -3,6 +3,10 @@ add_library(komapaint_app STATIC
     BrushSettings.h
     CanvasViewport.cpp
     CanvasViewport.h
+    CommandLine.cpp
+    CommandLine.h
+    FileAssociation.cpp
+    FileAssociation.h
     KomaPaintApp.cpp
     KomaPaintApp.h
     PanelManager.cpp
@@ -15,6 +19,14 @@ target_include_directories(komapaint_app PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
+
+if(WIN32)
+    # advapi32: registry (file association). shell32: SHChangeNotify.
+    # Also in MSVC's default libraries, listed explicitly for clarity.
+    set(KOMAPAINT_WIN_LIBS advapi32 shell32)
+else()
+    set(KOMAPAINT_WIN_LIBS)
+endif()
 
 target_link_libraries(komapaint_app PUBLIC
     komapaint::core
@@ -31,6 +43,7 @@ target_link_libraries(komapaint_app PUBLIC
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::Widgets
+    ${KOMAPAINT_WIN_LIBS}
 )
 
 # Make QML / resource files reachable relative to this source dir.

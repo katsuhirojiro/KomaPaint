@@ -434,6 +434,10 @@ jobs:
       - name: Package into ZIP
         shell: pwsh
         run: |
+          # Ship the per-user .koma file-association helper next to the exe.
+          # It simply calls "komapaint.exe --associate" / "--unassociate";
+          # registration is per-user (HKCU) and needs no admin rights.
+          Copy-Item "${{ github.workspace }}\packaging\Register_koma_file_association.cmd" "${{ env.STAGE_DIR }}\Register_koma_file_association.cmd" -Force
           $zip = "${{ github.workspace }}\KomaPaint-Windows-x64.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
           # Zip the staged folder so the archive contains a single top-level

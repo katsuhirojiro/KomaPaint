@@ -55,6 +55,10 @@ public:
     // swaps it in as the current document. On any failure the current
     // document is left completely unchanged and fileErrorOccurred fires.
     Q_INVOKABLE bool openFromPath(const QString& pathOrUrl);
+    // Per-user Windows registration so double-clicking a .koma file opens it
+    // in this build. Emits fileAssociationCompleted with a user-readable
+    // message; never modifies system-wide settings. Not supported off Windows.
+    Q_INVOKABLE void associateWithKomaFiles();
     Q_INVOKABLE void zoomIn();
     Q_INVOKABLE void zoomOut();
     Q_INVOKABLE void zoomFit();
@@ -70,6 +74,7 @@ signals:
     void zoomChanged(qreal zoom);
     void currentFileChanged();
     void fileErrorOccurred(const QString& message);
+    void fileAssociationCompleted(const QString& message, bool ok);
 
 private:
     // Clears artwork history when a layer is deleted, because layer deletion
