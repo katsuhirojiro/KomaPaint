@@ -265,64 +265,68 @@ jobs:
           Get-ChildItem $bin -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
 
       - name: Smoke-test packaged executable launches
-        shell: cmd
+        shell: pwsh
         run: |
-          @echo off
-          setlocal
-          set "PATH=%STAGE_DIR%;%PATH%"
-          set "QT_QPA_PLATFORM=offscreen"
-          set "QT_LOGGING_RULES=*.debug=true;qt.qml.binding.removal.info=true"
-          echo === Launching komapaint.exe (offscreen, 4s timeout) ===
-          echo --- staged tree (recursive listing) ---
-          dir /s /b "%STAGE_DIR%"
-          echo -----------------------------------------------------
-          rem Launch via ping-wait technique instead of Start-Process / Jobs
-          rem so we definitely capture stdout+stderr and the exit code.
-          start "" /b "%STAGE_DIR%\komapaint.exe" > "%STAGE_DIR%\smoke.out.log" 2> "%STAGE_DIR%\smoke.err.log"
-          set "PID="
-          for /f "tokens=2" %%p in ('wmic process where "name='komapaint.exe' and commandline like '%%komapaint.exe%%'" get processid /value 2^>nul ^| findstr ProcessId') do set "PID=%%p"
-          echo Started PID %PID%
-          rem Wait up to 4 seconds, polling output every 500ms.
-          for /L %%i in (1,1,8) do (
-            timeout /t 1 /nobreak >nul
-            echo --- live stdout (after %%i s) ---
-            type "%STAGE_DIR%\smoke.out.log" 2>nul
-            echo --- live stderr (after %%i s) ---
-            type "%STAGE_DIR%\smoke.err.log" 2>nul
-            rem Check if process still exists
-            tasklist /fi "imagename eq komapaint.exe" 2>nul | findstr /i komapaint.exe >nul
-            if errorlevel 1 (
-              echo !!! Process died within %%i seconds !!!
-              goto :died
-            )
-          )
-          echo Process still alive after 4s -- event loop is running.
-          rem Post WM_CLOSE via taskkill (sends WM_CLOSE to GUI apps).
-          taskkill /im komapaint.exe >nul 2>&1
-          set "waitExit=0"
-          :waitclose
-          timeout /t 1 /nobreak >nul
-          set /a waitExit+=1
-          tasklist /fi "imagename eq komapaint.exe" 2>nul | findstr /i komapaint.exe >nul
-          if errorlevel 1 goto :closed
-          if %waitExit% lss 5 goto waitclose
-          echo Did not exit cleanly, force killing.
-          taskkill /f /im komapaint.exe >nul 2>&1
-          :closed
-          echo --- final stdout ---
-          type "%STAGE_DIR%\smoke.out.log" 2>nul
-          echo --- final stderr ---
-          type "%STAGE_DIR%\smoke.err.log" 2>nul
-          echo === Smoke test PASSED ===
-          exit /b 0
-          :died
-          echo --- final stdout ---
-          type "%STAGE_DIR%\smoke.out.log" 2>nul
-          echo --- final stderr ---
-          type "%STAGE_DIR%\smoke.err.log" 2>nul
-          echo !!! Smoke test FAILED: komapaint.exe exited prematurely.
-          exit /b 1
-          endlocal
+          $bin = "${{ env.STAGE_DIR }}"
+          $env:PATH = "$bin;" + $env:PATH
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:QT_LOGGING_RULES = "*.debug=true;qt.qml.binding.removal.info=true"
+          $exe = "$bin\komapaint.exe"
+          Write-Host "=== Launching $exe (offscreen) ==="
+          Write-Host "--- staged tree (recursive) ---"
+          Get-ChildItem $bin -Recurse -File | ForEach-Object {
+            $rel = $_.FullName.Substring($bin.Length + 1)
+            Write-Host ("  {0,10}  {1}" -f $_.Length, $rel)
+          }
+          $outFile = "$bin\smoke.out.log"
+          $errFile = "$bin\smoke.err.log"
+          Remove-Item $outFile,$errFile -Force -ErrorAction SilentlyContinue
+          # Run the executable SYNCHRONOUSLY with a timeout using
+          # System.Diagnostics.Process, so WaitForExit gives us the real exit
+          # code and stdout/stderr are flushed before we inspect them. The
+          # GUI subsystem (WIN32_EXECUTABLE) app works fine here; Start-Process
+          # + -Wait uses the same .NET API under the hood but sometimes
+          # buffers output when -RedirectStandardOutput is combined with -Wait.
+          $p = New-Object System.Diagnostics.Process
+          $p.StartInfo.FileName = $exe
+          $p.StartInfo.WorkingDirectory = $bin
+          $p.StartInfo.UseShellExecute = $false
+          $p.StartInfo.RedirectStandardOutput = $true
+          $p.StartInfo.RedirectStandardError  = $true
+          $p.StartInfo.CreateNoWindow = $true
+          $null = $p.Start()
+          $stdoutTask = $p.StandardOutput.ReadToEndAsync()
+          $stderrTask = $p.StandardError.ReadToEndAsync()
+          $exited = $p.WaitForExit(5000)  # wait up to 5s
+          # Wait for async reads to drain
+          $stdoutTask.Wait(2000) | Out-Null
+          $stderrTask.Wait(2000) | Out-Null
+          $stdout = $stdoutTask.Result
+          $stderr = $stderrTask.Result
+          Write-Host "--- stdout ---"
+          Write-Host $stdout
+          Write-Host "--- stderr ---"
+          Write-Host $stderr
+          if (-not $exited) {
+            Write-Host "Process still alive after 5 seconds (PID $($p.Id)) -- event loop running."
+            # Close cleanly by posting WM_CLOSE.
+            $p.CloseMainWindow() | Out-Null
+            if (-not $p.WaitForExit(5000)) {
+              Write-Warning "Process did not exit within 5s of CloseMainWindow; killing."
+              $p.Kill()
+              $p.WaitForExit()
+            }
+            Write-Host "Exit code: $($p.ExitCode)"
+            if ($p.ExitCode -ne 0) {
+              Write-Error "komapaint.exe exited with non-zero code $($p.ExitCode) after close."
+              exit 1
+            }
+            Write-Host "=== Smoke test PASSED ==="
+          } else {
+            Write-Host "Exit code: $($p.ExitCode)"
+            Write-Error "komapaint.exe exited prematurely with code $($p.ExitCode); failed to start event loop."
+            exit 1
+          }
 
       - name: Upload smoke-test logs (always)
         uses: actions/upload-artifact@v4
@@ -330,8 +334,8 @@ jobs:
         with:
           name: smoke-test-logs
           path: |
-            ${{ runner.temp }}\komapaint.out.log
-            ${{ runner.temp }}\komapaint.err.log
+            ${{ env.STAGE_DIR }}\smoke.out.log
+            ${{ env.STAGE_DIR }}\smoke.err.log
           if-no-files-found: ignore
           retention-days: 14
 
