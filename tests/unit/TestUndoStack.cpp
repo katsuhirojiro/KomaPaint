@@ -64,6 +64,14 @@ void TestUndoStack::cancellationAndLimits() {
     QCOMPARE(layer.tiles().allocatedTiles(), size_t(0));
     QVERIFY(history.commitStroke()); QVERIFY(!history.canUndo());
     QCOMPARE(history.memoryBytes(), qulonglong(0));
+    QVERIFY(history.setByteLimit(2 * layer.tiles().tileBytes() + 512));
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80800000U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(layer.tiles().setPixel({257, 1}, 0xffffffffU), SparseTileStore::WriteResult::HistoryLimit);
+    QVERIFY(history.commitStroke()); QVERIFY(history.canUndo());
+    history.undo(); QCOMPARE(layer.tiles().pixel({1, 1}).value(), 0U);
+    QCOMPARE(layer.tiles().allocatedTiles(), size_t(0));
+    history.redo(); QCOMPARE(layer.tiles().pixel({1, 1}).value(), 0x80800000U);
 }
 QTEST_APPLESS_MAIN(TestUndoStack)
 #include "TestUndoStack.moc"

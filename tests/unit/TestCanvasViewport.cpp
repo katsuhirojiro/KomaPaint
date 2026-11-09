@@ -1,6 +1,9 @@
 #include <QtTest/QtTest>
 #include "app/CanvasViewport.h"
 #include "app/WorkspaceState.h"
+#include "app/PanelManager.h"
+#include "core/ApplicationConfig.h"
+#include "core/Settings.h"
 #include <QQmlEngine>
 #include <QQmlContext>
 #include <QQmlComponent>
@@ -18,6 +21,7 @@ private slots:
     void dirtyAndLayers();
     void brushInputAndLayerRules();
     void qmlMouseStroke();
+    void actualWindowShortcuts();
 };
 void TestCanvasViewport::navigationAndVisibleTiles()
 {
@@ -167,6 +171,44 @@ void TestCanvasViewport::qmlMouseStroke()
     workspace.history()->redo(); canvas->refreshNow();
     QCOMPARE(tiles.pixel({static_cast<int>(point.x()) + 25, static_cast<int>(point.y())}).value(), after);
     delete root;
+}
+
+void TestCanvasViewport::actualWindowShortcuts()
+{
+    WorkspaceState workspace;
+    ApplicationConfig config;
+    Settings settings(QStringLiteral("KomaPaintTests"), QStringLiteral("UndoWindow"));
+    PanelManager panels;
+    QQmlEngine engine; engine.addImportPath(QStringLiteral("qrc:/"));
+    engine.rootContext()->setContextProperty(QStringLiteral("Workspace"), &workspace);
+    engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
+    engine.rootContext()->setContextProperty(QStringLiteral("App"), &config);
+    engine.rootContext()->setContextProperty(QStringLiteral("Panels"), &panels);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/workspaces/MainWindow.qml")));
+    QObject* object = component.create();
+    QVERIFY2(object, qPrintable(component.errorString()));
+    auto* window = qobject_cast<QQuickWindow*>(object); QVERIFY(window);
+    window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+    auto* canvas = object->findChild<CanvasViewport*>(QStringLiteral("canvasViewport")); QVERIFY(canvas);
+    QTest::qWait(30); canvas->refreshNow();
+    const auto location = canvas->mapToScene(QPointF(100, 100)).toPoint();
+    const auto docPoint = canvas->viewportToDocument(100, 100);
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, location);
+    QTest::mouseMove(window, location + QPoint(25, 0), 10);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, location + QPoint(25, 0));
+    auto& tiles = workspace.layers()->layerAt(0)->tiles();
+    const TilePoint pixel{static_cast<int>(docPoint.x()) + 10, static_cast<int>(docPoint.y())};
+    const auto painted = tiles.pixel(pixel).value(); QVERIFY(painted != 0);
+    QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(tiles.pixel(pixel).value(), 0U);
+    QTest::keyClick(window, Qt::Key_Y, Qt::ControlModifier);
+    QCOMPARE(tiles.pixel(pixel).value(), painted);
+    auto* title = object->findChild<QQuickItem*>(QStringLiteral("documentTitleField")); QVERIFY(title);
+    title->forceActiveFocus(); QTest::qWait(20);
+    QTest::keyClicks(window, QStringLiteral("X"));
+    QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(tiles.pixel(pixel).value(), painted); // text undo must not undo artwork
+    delete object;
 }
 
 QTEST_MAIN(TestCanvasViewport)

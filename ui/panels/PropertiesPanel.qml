@@ -41,6 +41,7 @@ Rectangle {
                             Layout.preferredWidth: 60
                         }
                         TextField {
+                            objectName: "documentTitleField"
                             Layout.fillWidth: true
                             text: Workspace.document.title
                             onTextEdited: Workspace.document.title = text

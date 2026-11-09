@@ -100,7 +100,12 @@ SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<Til
             if (!snapshot.pixels.empty()) {
                 if (snapshot.pixels.size() != m_tileBytes / sizeof(std::uint32_t)) return WriteResult::InvalidPixel;
                 tile.pixels = snapshot.pixels;
+                const auto edgeWidth = static_cast<std::size_t>(bounds->right - bounds->left);
+                const auto edgeHeight = static_cast<std::size_t>(bounds->bottom - bounds->top);
+                std::size_t index = 0;
                 for (auto value : tile.pixels) {
+                    if (value && (index % static_cast<std::size_t>(m_geometry.tileSize()) >= edgeWidth || index / static_cast<std::size_t>(m_geometry.tileSize()) >= edgeHeight)) return WriteResult::InvalidPixel;
+                    ++index;
                     auto alpha = value >> 24;
                     if (((value >> 16) & 255U) > alpha || ((value >> 8) & 255U) > alpha || (value & 255U) > alpha) return WriteResult::InvalidPixel;
                     if (value) ++tile.nonzero;

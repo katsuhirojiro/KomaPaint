@@ -147,6 +147,12 @@ ApplicationWindow {
                     enabled: Workspace.history.canRedo
                     onTriggered: Workspace.history.redo()
                 }
+                MenuSeparator { }
+                MenuItem {
+                    text: qsTr("Clear Artwork History...")
+                    enabled: Workspace.history.canUndo || Workspace.history.canRedo
+                    onTriggered: clearHistoryDialog.open()
+                }
                 MenuSeparator {
                 }
                 MenuItem {
@@ -425,6 +431,15 @@ ApplicationWindow {
         }
     }
 
+    Dialog {
+        id: clearHistoryDialog
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Clear artwork history?")
+        standardButtons: Dialog.Yes | Dialog.Cancel
+        contentItem: Label { text: qsTr("This frees history memory but removes all artwork undo and redo steps. The artwork itself will not change."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+        onAccepted: Workspace.history.clear()
+    }
     Dialog {
         id: discardForNew
         anchors.centerIn: parent

@@ -20,12 +20,12 @@ this is not a stroke-wide opacity cap. Changing spacing can change buildup.
 
 ## Important safety and performance limitations
 
-Artwork cannot yet be saved or undone. The interface warns before replacing or
-closing a modified document and shows the limitation in the status bar. A tile
-allocation/tracking failure stops the stroke and reports an error; previously
-written pixels, including any partial dab, remain. There is no atomic stroke
-rollback or command history. Do not describe this as lossless or production
-ready. Tile memory limits are per layer rather than document-wide.
+Artwork cannot yet be saved. The interface warns before replacing or closing a
+modified document. Brush strokes participate in bounded tile-based undo/redo;
+see artwork-history.md for failure handling and memory limits. A tile allocation
+or tracking failure can leave a partial stroke, which remains undoable. Do not
+describe this as lossless or production ready. Tile memory limits are per layer
+rather than document-wide.
 
 The current CPU algorithm uses per-pixel storage updates and is not optimized
 for very large tips or low-end machines. Benchmark and batch raster operations
