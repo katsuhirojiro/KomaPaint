@@ -254,7 +254,7 @@ bool DocumentFile::save(const CanvasDocument& document, const QString& path, QSt
         putU8(buffer, layer->isLocked() ? 1 : 0);
         putDouble(buffer, layer->opacity());
         putU32(buffer, static_cast<quint32>(points.size()));
-        if (!flush(buffer)) return failAndCancel(QStringLiteral("Could not write \"%1\" (disk full?).").arg(path));
+        if (!flush()) return failAndCancel(QStringLiteral("Could not write \"%1\" (disk full?).").arg(path));
         const std::size_t tilePixels = static_cast<std::size_t>(geometry.tileSize()) * static_cast<std::size_t>(geometry.tileSize());
         for (const TilePoint point : points) {
             const auto bounds = geometry.tileBounds(point);
@@ -287,7 +287,7 @@ bool DocumentFile::save(const CanvasDocument& document, const QString& path, QSt
             if (!writeChunk(rect)) return failAndCancel(QStringLiteral("Could not write \"%1\" (disk full?).").arg(path));
         }
     }
-    if (!flush(buffer)) return failAndCancel(QStringLiteral("Could not write \"%1\" (disk full?).").arg(path));
+    if (!flush()) return failAndCancel(QStringLiteral("Could not write \"%1\" (disk full?).").arg(path));
     QByteArray trailer;
     putU32(trailer, crc.value());
     // The trailer bytes are written directly, not through writeChunk, so the
