@@ -114,8 +114,6 @@ jobs:
           $env:PATH = "${{ steps.qt.outputs.qtBin }};" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
           $failed = 0
-          $logDir = "${{ github.workspace }}\test-logs"
-          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
           $exes = Get-ChildItem build -Recurse -Filter "test_*.exe" | Sort-Object Name
           Write-Host "=== Discovered $($exes.Count) test executable(s) ==="
           $exes | ForEach-Object { Write-Host ("  " + $_.FullName) }
@@ -123,33 +121,24 @@ jobs:
           Write-Host "=== Qt bin on PATH: ${{ steps.qt.outputs.qtBin }} ==="
           foreach ($exe in $exes) {
             Write-Host ">>> Running $($exe.Name) <<<"
-            $outFile = Join-Path $logDir ($exe.BaseName + ".log")
-            & $exe.FullName *>&1 | Tee-Object -FilePath $outFile
+            # Capture stdout+stderr to a string, then dump it immediately so the
+            # Actions console shows every line. We don't rely on artifacts.
+            $output = & $exe.FullName 2>&1 | Out-String
             $code = $LASTEXITCODE
+            Write-Host $output
             if ($code -ne 0) {
-              Write-Host ">>> $($exe.Name) FAILED with exit code $code (log at $outFile) <<<"
+              Write-Host ">>> $($exe.Name) FAILED with exit code $code <<<"
               $failed++
             } else {
-              Write-Host ">>> $($exe.Name) PASSED <<<"
+              Write-Host ">>> $($exe.Name) PASSED (exit $code) <<<"
             }
             Write-Host ""
           }
-          Write-Host "=== Listing $logDir ==="
-          Get-ChildItem $logDir | ForEach-Object { Write-Host ("  " + $_.Name + "  " + $_.Length + " bytes") }
           if ($failed -gt 0) {
             Write-Host "=== $failed test(s) FAILED ==="
             exit 1
           }
           Write-Host "=== All tests passed ==="
-
-      - name: Upload test logs (always)
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-logs
-          path: test-logs
-          if-no-files-found: ignore
-          retention-days: 14
 
       - name: Deploy Qt runtime dependencies (windeployqt)
         shell: pwsh
