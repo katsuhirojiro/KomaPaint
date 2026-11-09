@@ -40,9 +40,6 @@ if(KOMAPAINT_ENABLE_WARNINGS)
     endif()
 endif()
 
-# ---- CMake helpers ----------------------------------------------------------
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-
 # ---- Qt ---------------------------------------------------------------------
 find_package(Qt6 6.5 REQUIRED COMPONENTS
     Core
