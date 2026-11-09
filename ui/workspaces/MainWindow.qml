@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQuick.Window
 import "../components"
 import "../panels"
 import "../themes"

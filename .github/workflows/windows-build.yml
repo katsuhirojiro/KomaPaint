@@ -233,6 +233,49 @@ jobs:
           Write-Host "--- Deployed files (top-level):"
           Get-ChildItem $bin -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
 
+      - name: Smoke-test packaged executable launches
+        shell: pwsh
+        run: |
+          # Launch the staged (pre-zip) komapaint.exe headless and verify it
+          # actually starts its event loop and shows a window rather than
+          # bailing out during QML load.
+          $bin = "${{ env.STAGE_DIR }}"
+          $env:PATH = "$bin;" + $env:PATH
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $env:QT_LOGGING_RULES = "*.debug=false;qt.qml.binding.removal.info=false"
+          $exe = "$bin\komapaint.exe"
+          Write-Host "=== Launching $exe (offscreen, 4s watch window) ==="
+          $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\komapaint.out.log" -RedirectStandardError "$env:RUNNER_TEMP\komapaint.err.log"
+          Write-Host "Started PID $($p.Id)"
+          Start-Sleep -Seconds 4
+          if ($p.HasExited) {
+            Write-Host "--- stdout ---"
+            if (Test-Path "$env:RUNNER_TEMP\komapaint.out.log") { Get-Content "$env:RUNNER_TEMP\komapaint.out.log" }
+            Write-Host "--- stderr ---"
+            if (Test-Path "$env:RUNNER_TEMP\komapaint.err.log") { Get-Content "$env:RUNNER_TEMP\komapaint.err.log" }
+            Write-Error "komapaint.exe exited prematurely with code $($p.ExitCode); it failed to create/show the main window."
+            exit 1
+          }
+          # Process is still running after 4s → event loop + main window alive.
+          Write-Host "Process still alive after 4s — event loop running."
+          # Close cleanly by posting WM_CLOSE.
+          $p.CloseMainWindow() | Out-Null
+          if (!$p.WaitForExit(5000)) {
+            Write-Warning "Process did not exit within 5s of CloseMainWindow; killing."
+            $p.Kill()
+            $p.WaitForExit()
+          }
+          Write-Host "Process exited with code $($p.ExitCode)"
+          Write-Host "--- stdout tail ---"
+          if (Test-Path "$env:RUNNER_TEMP\komapaint.out.log") { Get-Content "$env:RUNNER_TEMP\komapaint.out.log" -Tail 50 }
+          Write-Host "--- stderr tail ---"
+          if (Test-Path "$env:RUNNER_TEMP\komapaint.err.log") { Get-Content "$env:RUNNER_TEMP\komapaint.err.log" -Tail 50 }
+          if ($p.ExitCode -ne 0) {
+            Write-Error "komapaint.exe exited with non-zero code $($p.ExitCode) after smoke test."
+            exit 1
+          }
+          Write-Host "=== Smoke test passed ==="
+
       - name: Package into ZIP
         shell: pwsh
         run: |

@@ -3,12 +3,17 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QFont>
 #include <QFontDatabase>
+#include <QList>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QQmlError>
 #include <QQmlContext>
+#include <QTimer>
 #include <QDebug>
 
 namespace komapaint {
@@ -47,26 +52,67 @@ void KomaPaintApp::loadUi()
     ctx->setContextProperty(QStringLiteral("Panels"),      &m_panels);
     ctx->setContextProperty(QStringLiteral("Workspace"),   &m_workspace);
 
+    qInfo() << "[KomaPaint] Starting up; Qt version =" << qVersion();
+    qInfo() << "[KomaPaint] Application dir =" << QCoreApplication::applicationDirPath();
+
+    // Log any QML warnings/errors so startup failures are visible even when
+    // the user launches from Explorer with no console attached.
+    QObject::connect(&m_engine, &QQmlApplicationEngine::warnings,
+                     this, [](const QList<QQmlError>& warnings) {
+        for (const QQmlError& e : warnings) {
+            qWarning() << "[QML]" << e.toString();
+        }
+    });
+
     // When built against the resource-bundled QML (the default for release
     // and Windows deployment), load from "qrc:/". The source-tree path is
     // kept as a fallback for developer builds that skip the qrc bundle.
-    const QString mainQml = QStringLiteral("qrc:/workspaces/MainWindow.qml");
-    if (!QFile::exists(QStringLiteral(":") + mainQml)) {
-        const QString qmlDir = QString::fromUtf8(KOMAPAINT_QML_DIR);
-        m_engine.addImportPath(qmlDir);
-        m_engine.load(QUrl::fromLocalFile(qmlDir + QStringLiteral("/workspaces/MainWindow.qml")));
-    } else {
+    //
+    // NOTE: a QUrl("qrc:/...") URL is a qrc scheme URL. QFile uses the
+    // ":/" prefix to open resources, so QFile::exists must use ":/" while
+    // QQmlApplicationEngine::load must use "qrc:/" — do NOT concatenate
+    // ":" onto a "qrc:/" string, that produces the invalid ":/qrc:/..."
+    // path and the existence check will silently return false.
+    const QString qrcMain  = QStringLiteral(":/workspaces/MainWindow.qml");
+    const QString qrcUrl   = QStringLiteral("qrc:/workspaces/MainWindow.qml");
+    const QString qmlDir   = QFileInfo(QString::fromUtf8(KOMAPAINT_QML_DIR)).absoluteFilePath();
+    const QString srcMain  = qmlDir + QStringLiteral("/workspaces/MainWindow.qml");
+
+    QUrl loadUrl;
+    if (QFile::exists(qrcMain)) {
+        qInfo() << "[KomaPaint] Loading QML from Qt resource:" << qrcUrl;
         m_engine.addImportPath(QStringLiteral("qrc:/"));
-        m_engine.load(QUrl(mainQml));
+        loadUrl = QUrl(qrcUrl);
+    } else if (QFile::exists(srcMain)) {
+        qInfo() << "[KomaPaint] Loading QML from source tree:" << srcMain;
+        m_engine.addImportPath(qmlDir);
+        loadUrl = QUrl::fromLocalFile(srcMain);
+    } else {
+        qCritical() << "[KomaPaint] Cannot find MainWindow.qml in resources ("
+                    << qrcMain << ") or in source dir (" << srcMain << ").";
+        QTimer::singleShot(0, QCoreApplication::instance(), []{ QCoreApplication::exit(-2); });
+        return;
     }
 
+    m_engine.load(loadUrl);
+
     QObject::connect(&m_engine, &QQmlApplicationEngine::objectCreated,
-                     this, [this](QObject* obj, const QUrl& url) {
-        if (!obj && url.toString().contains(QStringLiteral("MainWindow.qml"))) {
-            qCritical() << "Failed to load main QML:" << url;
+                     this, [this, loadUrl](QObject* obj, const QUrl& url) {
+        if (url != loadUrl) return;  // only react to the main window creation
+        if (!obj) {
+            qCritical() << "[KomaPaint] Failed to instantiate main QML:" << url;
             QCoreApplication::exit(-1);
+            return;
         }
         m_window = qobject_cast<QQuickWindow*>(obj);
+        if (!m_window) {
+            qCritical() << "[KomaPaint] Root QML object is not a QQuickWindow; check that"
+                        << "MainWindow.qml is an ApplicationWindow.";
+            QCoreApplication::exit(-3);
+            return;
+        }
+        qInfo() << "[KomaPaint] Main window created; showing.";
+        m_window->show();
     }, Qt::QueuedConnection);
 }
 
