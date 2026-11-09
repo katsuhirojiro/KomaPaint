@@ -1,0 +1,54 @@
+# Build artifacts
+build*/
+out/
+dist/
+cmake-build-*/
+bin/
+lib/
+*.obj
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# IDE
+.vscode/
+.vs/
+.idea/
+*.user
+*.pro.user
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# Qt / CMake generated
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.autosave
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+Makefile
+*.cbp
+compile_commands.json
+.qmake.stash
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+
+# Local config
+*.kra
+*.psd
+*.kmp  # KomaPaint project files (examples only in repo)
+*.log
