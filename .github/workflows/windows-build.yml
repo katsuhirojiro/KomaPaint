@@ -15,8 +15,7 @@ jobs:
 
     env:
       QT_VERSION: 6.8.3
-      QT_KIT: win64_msvc2022_64
-      QT_INSTALL_DIR: ${{ github.workspace }}\Qt
+      QT_ARCH: win64_msvc2022_64
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}\build
       OUTPUT_DIR: ${{ github.workspace }}\build\bin
@@ -32,48 +31,45 @@ jobs:
         with:
           arch: amd64
 
-      - name: Set up Python (for aqtinstall)
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install aqtinstall
-        run: python -m pip install --upgrade pip aqtinstall
-
-      - name: Install Qt ${{ env.QT_VERSION }} (${{ env.QT_KIT }})
-        shell: pwsh
-        run: |
-          # qtbase           : Core, Gui, Widgets, CMake configs, moc/rcc/uic
-          # qtdeclarative    : Qml, Quick, Quick Controls 2, Quick Layouts
-          # qtshadertools    : runtime shader compiler required by QtQuick
-          # qttools          : windeployqt
-          aqt install-qt `
-            --outputdir "${{ env.QT_INSTALL_DIR }}" `
-            windows desktop ${{ env.QT_VERSION }} ${{ env.QT_KIT }} `
-            -m qtbase qtdeclarative qtshadertools qttools
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Locate Qt installation and expose to PATH
+      - name: Install Qt ${{ env.QT_VERSION }} (${{ env.QT_ARCH }})
+        uses: jurplel/install-qt-action@v4
         id: qt
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: ${{ env.QT_ARCH }}
+          dir: ${{ github.workspace }}\qt
+          set-env: true
+          # Additional modules required beyond qtbase (which the action always installs):
+          # qtdeclarative : Qml, Quick, Quick Controls 2, Quick Layouts
+          # qtshadertools : runtime shader compiler required by QtQuick/QtQuickControls2
+          # qttools       : windeployqt
+          modules: 'qtdeclarative qtshadertools qttools'
+          aqtversion: '==3.3.*'
+          cache: true
+
+      - name: Locate Qt installation
         shell: pwsh
         run: |
-          $qtDir = "${{ env.QT_INSTALL_DIR }}\${{ env.QT_VERSION }}\${{ env.QT_KIT }}"
-          $qtBin = "$qtDir\bin"
-          if (!(Test-Path "$qtBin\qmake.exe")) {
-            Write-Error "qmake.exe not found at $qtBin -- Qt installation may have failed."
+          $qtDir = "${{ steps.qt.outputs.qt-root-dir }}"
+          $qtBin = Join-Path $qtDir "bin"
+          if (!(Test-Path (Join-Path $qtBin "qmake.exe"))) {
+            Write-Error "qmake.exe not found at $qtBin -- Qt installation failed."
             exit 1
           }
-          echo "qtDir=$qtDir"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          echo "qtBin=$qtBin"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          # Prepend qtBin to PATH for subsequent steps (tests, windeployqt call site)
-          echo "$qtBin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          Write-Host "Qt root : $qtDir"
+          Write-Host "Qt bin  : $qtBin"
+          echo "qtDir=$qtDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          echo "qtBin=$qtBin" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        id: qtpaths
 
       - name: Configure CMake (Ninja, C++20, Release)
         shell: pwsh
         run: |
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
-            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qtDir }}" `
+            -DCMAKE_PREFIX_PATH="${{ steps.qtpaths.outputs.qtDir }}" `
             -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="${{ env.OUTPUT_DIR }}" `
             -DKOMAPAINT_BUILD_TESTS=ON `
             -DKOMAPAINT_ENABLE_WARNINGS=ON
@@ -85,7 +81,7 @@ jobs:
           cmake --build build --config ${{ env.BUILD_TYPE }} --verbose
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Verify the executable exists
+      - name: Verify executable exists
         shell: pwsh
         run: |
           $exe = "${{ env.OUTPUT_DIR }}\komapaint.exe"
@@ -99,16 +95,20 @@ jobs:
       - name: Run unit tests (CTest)
         shell: pwsh
         run: |
-          # The Qt DLLs directory is already on PATH from the qt Locate step.
+          # The install-qt-action adds Qt to PATH, so test executables can find Qt6*.dll.
           ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Deploy Qt runtime dependencies (windeployqt)
         shell: pwsh
         run: |
-          $windeploy = "${{ steps.qt.outputs.qtBin }}\windeployqt.exe"
-          $exe       = "${{ env.OUTPUT_DIR }}\komapaint.exe"
-          $qmlDir    = "${{ github.workspace }}\ui"
+          $windeploy = Join-Path "${{ steps.qtpaths.outputs.qtBin }}" "windeployqt.exe"
+          if (!(Test-Path $windeploy)) {
+            Write-Error "windeployqt.exe not found at $windeploy"
+            exit 1
+          }
+          $exe    = "${{ env.OUTPUT_DIR }}\komapaint.exe"
+          $qmlDir = "${{ github.workspace }}\ui"
           & $windeploy --release --no-compiler-runtime --no-system-d3d-compiler `
             --no-opengl-sw --qmldir $qmlDir $exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
