@@ -1,5 +1,6 @@
 #pragma once
 #include "TileGeometry.h"
+#include "DirtyTileTracker.h"
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -12,13 +13,15 @@ namespace komapaint {
 // This low-level store is not an editing transaction or undo mechanism.
 class SparseTileStore {
 public:
-    enum class WriteResult { Changed, Unchanged, OutOfBounds, InvalidPixel, MemoryLimit, AllocationFailed };
+    enum class WriteResult { Changed, Unchanged, OutOfBounds, InvalidPixel, MemoryLimit, TrackingLimit, AllocationFailed };
     static constexpr std::size_t DefaultPixelBudget = 256U * 1024U * 1024U;
     SparseTileStore(std::int64_t width, std::int64_t height,
                     int tileSize = TileGeometry::DefaultTileSize,
                     std::size_t pixelBudget = DefaultPixelBudget);
     bool isValid() const { return m_geometry.isValid() && m_tileSizeValid; }
     const TileGeometry& geometry() const { return m_geometry; }
+    const DirtyTileTracker::Regions& dirtyRegions() const { return m_dirty.regions(); }
+    void clearDirtyRegions() noexcept { m_dirty.clear(); }
     std::size_t allocatedTiles() const { return m_tiles.size(); }
     std::size_t allocatedPixelBytes() const { return m_tiles.size() * m_tileBytes; }
     std::optional<std::uint32_t> pixel(TilePoint point) const;
@@ -29,6 +32,7 @@ private:
     struct Hash { std::size_t operator()(const TilePoint& p) const noexcept; };
     struct Tile { std::vector<std::uint32_t> pixels; std::size_t nonzero = 0; };
     TileGeometry m_geometry;
+    DirtyTileTracker m_dirty;
     bool m_tileSizeValid;
     std::size_t m_tileBytes;
     std::size_t m_pixelBudget;

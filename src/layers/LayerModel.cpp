@@ -17,7 +17,7 @@ bool LayerModel::resizeEmptyLayers(const QSize& size)
 {
     if (size.width() <= 0 || size.height() <= 0) return false;
     for (const auto* layer : m_layers)
-        if (layer->tiles().allocatedTiles() != 0) return false;
+        if (layer->tiles().allocatedTiles() != 0 || !layer->tiles().dirtyRegions().empty()) return false;
     for (auto* layer : m_layers)
         if (!layer->tiles().resizeEmpty(size.width(), size.height())) return false;
     m_canvasSize = size;

@@ -1,7 +1,7 @@
 # Milestone 2.2: sparse tile storage and rendering design
 
-Status: geometry and initial sparse per-layer storage are implemented; dirty
-tracking, compositing and the renderer remain planned. Validate each component
+Status: geometry, sparse per-layer storage and initial dirty-region tracking
+are implemented; compositing and the renderer remain planned. Validate each component
 before moving on; painting is not part of this milestone. The current QML blank-canvas preview is temporary and is not
 an artwork store or production renderer.
 
@@ -125,7 +125,37 @@ last nontransparent pixel is cleared. Its default 256 MiB budget is **per
 layer** and counts pixel buffers only, not map/vector overhead, snapshots,
 composite caches or other layers; a document-wide budget remains future work.
 Individual pixel writes report failure without modifying the store. Multi-tile
-atomic edits, operation history and change notifications are not yet provided,
+atomic edits, operation history and renderer notifications are not yet provided,
 so the low-level write API must not be exposed as a finished painting tool.
-Document resizing is rejected when any layer contains pixels until a safe
-resize/crop operation is designed.
+Document resizing is rejected when any layer contains pixels or pending dirty
+regions until a safe resize/crop operation is designed.
+
+### Storage review and dirty tracking
+
+The per-layer 256 MiB pixel-buffer cap is not a global cap: many layers can
+exceed a safe document or system budget. It excludes allocator/map overhead,
+tracker memory, undo snapshots and future caches. Introduce shared accounting
+and an eviction/failure policy before real editing. A single pixel write catches
+allocation errors from both tile and dirty-region allocation, and rolls back a
+new tile if dirty tracking fails; deterministic allocation-failure tests cover
+these paths. There is no atomicity across multiple writes and no user-facing
+out-of-memory handling yet. Default-constructed layer/document allocation and
+other Qt/UI allocations are not handled by this low-level guarantee.
+
+The store validates premultiplied pixels (zero alpha must have zero RGB), keeps
+a count of nonzero pixels, and reclaims only when the count reaches zero.
+Tests cover recolouring, clearing one of several pixels, and clearing the last.
+The storage/geometry/tracker library uses only the C++ standard library and
+has no renderer or QML dependency.
+
+Successful pixel changes mark a tile-local half-open rectangle; no-op, rejected
+or failed writes do not. The tracker can also mark clipped multi-tile rectangles
+and unions repeated regions conservatively. Tracking survives tile reclamation.
+It is bounded to 65,536 pending tiles per layer; when that limit or allocation
+fails, a pixel write is rejected before changing artwork. Multi-tile marking
+uses a temporary copy for all-or-nothing failure behavior, so large batches
+can temporarily use more memory. Pending regions are single-consumer,
+single-threaded state: a future renderer must consume/clear them only after
+successful processing, and must establish its own cache invalidation policy.
+There are no tile revisions, layer-property invalidation, stroke bounds or
+multi-consumer notifications yet. These remain prerequisites for rendering.
