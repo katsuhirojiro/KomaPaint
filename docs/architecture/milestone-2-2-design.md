@@ -1,7 +1,7 @@
 # Milestone 2.2: sparse tile storage and rendering design
 
-Status: geometry, sparse storage, dirty tracking and a standalone CPU tile
-compositor are implemented; viewport integration remains planned. Validate each component
+Status: geometry, sparse storage, dirty tracking, CPU compositing and an initial
+interactive viewport are implemented. Validate each component
 before moving on; painting is not part of this milestone. The current QML blank-canvas preview is temporary and is not
 an artwork store or production renderer.
 
@@ -199,3 +199,25 @@ fallback on genuinely low-end Windows hardware, including a machine without a
 dedicated GPU. Future display caches must be bounded; optional costly features
 and any future 3D viewport need adjustable quality and explicit resource limits.
 No performance or low-end hardware claims are made until measured.
+
+
+### Initial viewport limitations
+
+The Qt Quick viewport uses the CPU compositor and a viewport-sized image, with
+a disposable 32 MiB tile cache. It listens to layer/document changes and
+acknowledges visible dirty tiles only after painting their current composites.
+Wheel zoom is centered on the pointer; dragging pans; the fit action calculates
+a real scale. This is single-threaded document access, while the Qt paint
+callback reads the frame under a mutex. Qt Quick may use its normal graphics
+backend to present the image; no GPU painting engine was introduced.
+
+The cache cap does not include temporary composites, Qt Quick's presentation
+buffer, the viewport-sized image, artwork, or undo. At low zoom a large visible
+area can exceed the cache and cause repeated recompositing; mipmaps and
+performance trade-offs need measurements before designing improvements. The
+frame allocation is limited to 32 million pixels, and failure currently logs
+a warning rather than presenting a recoverable error in the UI. No stroke,
+undo, export or project persistence is implemented. Native application tests
+cover viewport logic; interactive hardware testing and low-end benchmarks
+remain outstanding. The Python-only QML preview launcher cannot instantiate
+the new native C++ viewport; use the built desktop application for canvas work.

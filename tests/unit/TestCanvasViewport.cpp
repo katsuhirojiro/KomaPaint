@@ -23,6 +23,8 @@ void TestCanvasViewport::navigationAndVisibleTiles()
     QVERIFY(first > 0 && first < 20); // visible tiles only, not the whole document
     QCOMPARE(view.frameSnapshot().size(), QSize(512, 400));
     auto point = view.viewportToDocument(100, 70);
+    auto outside = view.viewportToDocument(-1000, -1000);
+    QVERIFY(outside.x() < point.x() && outside.y() < point.y());
     auto roundtrip = view.documentToViewport(point.x(), point.y());
     QVERIFY(std::abs(roundtrip.x() - 100) < 0.001);
     QVERIFY(std::abs(roundtrip.y() - 70) < 0.001);
@@ -77,6 +79,12 @@ void TestCanvasViewport::dirtyAndLayers()
     doc.setBackgroundColor(Qt::green); view.refreshNow();
     auto blank = view.documentToViewport(280, 180);
     QCOMPARE(view.frameSnapshot().pixelColor(qRound(blank.x()), qRound(blank.y())), QColor(Qt::green));
+    doc.setTransparentBackground(true); view.refreshNow();
+    auto check1 = view.documentToViewport(280, 180);
+    auto check2 = view.documentToViewport(288, 180);
+    const auto frame = view.frameSnapshot();
+    QVERIFY(frame.pixelColor(qRound(check1.x()), qRound(check1.y())) !=
+            frame.pixelColor(qRound(check2.x()), qRound(check2.y())));
     // Move the entire first tile offscreen before editing it.
     view.panBy(-140, 0); view.refreshNow();
     // Offscreen edits stay dirty until brought into view.
