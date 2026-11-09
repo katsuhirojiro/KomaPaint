@@ -45,20 +45,21 @@ jobs:
           # breaking changes in newer releases.
           python -m pip install "aqtinstall==3.3.0" "py7zr==1.1.0"
 
-      - name: Install Qt base (Qt ${{ env.QT_VERSION }} ${{ env.QT_ARCH }})
+      - name: Install Qt (base + required modules)
         shell: pwsh
         run: |
-          aqt install-qt --outputdir "${{ env.QT_INSTALL_DIR }}" `
-            windows desktop ${{ env.QT_VERSION }} ${{ env.QT_ARCH }}
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Install additional Qt modules
-        shell: pwsh
-        run: |
+          # Install qtbase plus the add-on modules KomaPaint links against.
+          # Using a single invocation lets aqt resolve cross-module dependencies.
           aqt install-qt --outputdir "${{ env.QT_INSTALL_DIR }}" `
             windows desktop ${{ env.QT_VERSION }} ${{ env.QT_ARCH }} `
             -m qtdeclarative qtshadertools qttools
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Full module set failed; retrying without qtshadertools (may already be part of qtdeclarative)..."
+            aqt install-qt --outputdir "${{ env.QT_INSTALL_DIR }}" `
+              windows desktop ${{ env.QT_VERSION }} ${{ env.QT_ARCH }} `
+              -m qtdeclarative qttools
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
       - name: Locate Qt installation
         id: qt
