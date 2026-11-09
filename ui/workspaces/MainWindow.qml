@@ -23,6 +23,16 @@ ApplicationWindow {
         if (Workspace.document.modified) discardForNew.open()
         else newDocumentDialog.open()
     }
+    // Converts a plain local path (Unix, Windows drive, UNC) into a file:// URL
+    // suitable for FileDialog. Qt.resolvedUrl would treat "C:/..." as scheme "c".
+    function fileUrlForPath(path) {
+        if (!path || path.length === 0) return "";
+        if (path.startsWith("file:")) return path;
+        if (path.startsWith("/")) return "file://" + path;
+        if (/^[A-Za-z]:[\\/]/.test(path)) return "file:///" + path.replace(/\\/g, "/");
+        if (path.indexOf("\\\\") === 0) return "file:" + path.replace(/\\/g, "/");
+        return path;
+    }
     function requestOpenImage() {
         if (Workspace.document.modified) discardForOpen.open()
         else openImageDialog.open()
@@ -82,7 +92,7 @@ ApplicationWindow {
         defaultSuffix: "koma"
         nameFilters: [qsTr("KomaPaint illustrations (*.koma)"), qsTr("All files (*)")]
         selectedFile: Workspace.currentFile.length > 0
-                      ? Qt.resolvedUrl(Workspace.currentFile)
+                      ? root.fileUrlForPath(Workspace.currentFile)
                       : Qt.resolvedUrl(Workspace.document.title + ".koma")
         onAccepted: Workspace.saveToPath(selectedFile)
     }

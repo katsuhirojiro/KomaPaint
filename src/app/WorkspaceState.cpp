@@ -29,9 +29,14 @@ void WorkspaceState::connectLayerDeletion(const CanvasDocument* document)
 static QString localPathFromQml(const QString& input)
 {
     if (input.isEmpty()) return {};
+    // Windows drive-letter ("C:/...") and UNC ("\\\\server\\share") paths are
+    // plain filesystem paths, not URLs — QUrl would parse "c:" as a scheme.
+    if (input.size() >= 3 && input[1] == u':' && input[0].isLetter() && (input[2] == u'/' || input[2] == u'\\'))
+        return input;
+    if (input.startsWith(QStringLiteral("\\\\"))) return input;
     const QUrl url(input);
     if (url.isLocalFile()) return url.toLocalFile();
-    if (url.scheme().isEmpty()) return input; // plain local path (tests, scripts)
+    if (url.scheme().isEmpty()) return input; // relative path or bare filename
     return {}; // remote or unsupported scheme
 }
 
@@ -57,9 +62,15 @@ bool WorkspaceState::newDocument(int width, int height, bool transparent, const 
 
 bool WorkspaceState::saveToPath(const QString& pathOrUrl)
 {
-    QString path = localPathFromQml(pathOrUrl);
-    if (path.isEmpty()) path = m_currentFile; // bare save() call with no argument
-    if (path.isEmpty()) { emit fileErrorOccurred(QStringLiteral("No filename was given.")); return false; }
+    QString path;
+    if (pathOrUrl.isEmpty()) {
+        // Bare save: reuse the current file if there is one.
+        path = m_currentFile;
+        if (path.isEmpty()) { emit fileErrorOccurred(QStringLiteral("No filename was given.")); return false; }
+    } else {
+        path = localPathFromQml(pathOrUrl);
+        if (path.isEmpty()) { emit fileErrorOccurred(QStringLiteral("\"%1\" is not a local file path.").arg(pathOrUrl)); return false; }
+    }
     QString error;
     if (!DocumentFile::save(*m_document, path, &error)) { emit fileErrorOccurred(error); return false; }
     m_document->setModified(false);

@@ -11,7 +11,6 @@
 #include <QFile>
 #include <QSaveFile>
 #include <QSize>
-#include <QStringDecoder>
 
 #include <algorithm>
 #include <array>
@@ -146,9 +145,32 @@ public:
         if (!readU32(length)) return false;
         if (length > static_cast<quint32>(maxBytes) || length > static_cast<quint32>(remaining())) return false;
         const char* data = m_bytes.constData() + m_pos;
-        QStringDecoder decoder(QStringConverter::Utf8);
-        out = decoder(QByteArrayView(data, static_cast<qsizetype>(length)));
-        if (decoder.hasError()) return false;
+        // Strict RFC 3629 validation of OUR OWN: the file format spec rejects
+        // invalid UTF-8 outright, and we do not want codec-dependent results.
+        qsizetype i = 0;
+        const qsizetype size = static_cast<qsizetype>(length);
+        while (i < size) {
+            const auto b0 = static_cast<quint8>(data[i]);
+            if (b0 < 0x80) { ++i; continue; }
+            int continuation = 0;
+            quint32 codepoint = 0;
+            if (b0 >= 0xC2 && b0 <= 0xDF) { codepoint = b0 & 0x1FU; continuation = 1; }
+            else if (b0 >= 0xE0 && b0 <= 0xEF) { codepoint = b0 & 0x0FU; continuation = 2; }
+            else if (b0 >= 0xF0 && b0 <= 0xF4) { codepoint = b0 & 0x07U; continuation = 3; }
+            else return false;
+            for (int j = 0; j < continuation; ++j) {
+                if (i + 1 + j >= size) return false;
+                const auto b = static_cast<quint8>(data[i + 1 + j]);
+                if ((b & 0xC0U) != 0x80U) return false;
+                codepoint = (codepoint << 6) | (b & 0x3FU);
+            }
+            if (continuation == 2 && codepoint < 0x800U) return false;   // overlong
+            if (continuation == 3 && codepoint < 0x10000U) return false; // overlong
+            if (codepoint >= 0xD800U && codepoint <= 0xDFFFU) return false; // surrogate
+            if (codepoint > 0x10FFFFU) return false;
+            i += 1 + continuation;
+        }
+        out = QString::fromUtf8(data, size);
         m_pos += length;
         return true;
     }

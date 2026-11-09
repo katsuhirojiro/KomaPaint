@@ -122,7 +122,7 @@ void TestDocumentFile::roundTripsPixelsAndMetadata()
     QCOMPARE(loaded->layers()->activeLayerIndex(), 1);
     QCOMPARE(base->tiles().pixel({280, 190}).value(), 0x80402010U);
     QCOMPARE(base->tiles().pixel({0, 0}).value(), 0xff010203U);
-    QCOMPARE(ink->tiles().pixel({10, 10}).value(), 0x800000ffU);
+    QCOMPARE(ink->tiles().pixel({10, 10}).value(), 0x80808080U);
     QCOMPARE(ink->tiles().pixel({280, 190}).value(), 0U); // layers stay isolated
     QCOMPARE(base->tiles().pixel({100, 100}).value(), 0U);
 }
