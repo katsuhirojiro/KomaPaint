@@ -109,23 +109,24 @@ jobs:
           Get-Item $exe | Format-List Name,Length,LastWriteTime
 
       - name: Run unit tests (CTest)
-        shell: cmd
+        shell: pwsh
         run: |
-          echo === Test executables produced ===
-          dir /b /s build\test_*.exe 2>nul
-          echo.
-          echo === Qt bin on PATH (for DLL resolution) ===
-          set "PATH=${{ steps.qt.outputs.qtBin }};%PATH%"
-          set QT_QPA_PLATFORM=offscreen
-          echo Qt bin: ${{ steps.qt.outputs.qtBin }}
-          dir "${{ steps.qt.outputs.qtBin }}\Qt6Core.dll" "${{ steps.qt.outputs.qtBin }}\Qt6Test.dll" 2>nul
-          echo.
-          echo === Running ctest (verbose) ===
-          ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure --verbose --no-tests=error
-          set EXITCODE=%ERRORLEVEL%
-          echo.
-          echo === ctest exit code: %EXITCODE% ===
-          exit /b %EXITCODE%
+          $env:PATH = "${{ steps.qt.outputs.qtBin }};" + $env:PATH
+          $env:QT_QPA_PLATFORM = "offscreen"
+          Write-Host "=== Test executables produced ==="
+          Get-ChildItem build -Recurse -Filter "test_*.exe" | ForEach-Object { Write-Host $_.FullName }
+          Write-Host ""
+          Write-Host "=== Qt bin (for DLL resolution): ${{ steps.qt.outputs.qtBin }} ==="
+          Get-ChildItem "${{ steps.qt.outputs.qtBin }}\Qt6Core.dll", "${{ steps.qt.outputs.qtBin }}\Qt6Test.dll" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
+          Write-Host ""
+          Write-Host "=== Running ctest (verbose) ==="
+          # Run ctest via cmd /c so stdout/stderr are flushed line-by-line to
+          # the Actions console instead of being buffered by PowerShell.
+          & cmd /c "ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure --verbose --no-tests=error 2>&1"
+          $ctestExit = $LASTEXITCODE
+          Write-Host ""
+          Write-Host "=== ctest exit code: $ctestExit ==="
+          exit $ctestExit
 
       - name: Deploy Qt runtime dependencies (windeployqt)
         shell: pwsh
