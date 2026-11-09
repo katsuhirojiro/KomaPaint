@@ -61,14 +61,18 @@ jobs:
         id: qt
         shell: pwsh
         run: |
-          $qtDir = "${{ env.QT_INSTALL_DIR }}\${{ env.QT_VERSION }}\${{ env.QT_ARCH }}"
-          $qtBin = Join-Path $qtDir "bin"
-          if (!(Test-Path (Join-Path $qtBin "qmake.exe"))) {
-            Write-Error "qmake.exe not found at $qtBin -- Qt installation failed."
-            Write-Host "Installed tree:"
-            Get-ChildItem $qtDir -Recurse -Filter qmake.exe -ErrorAction SilentlyContinue | Select FullName
+          # aqt places the install at <outputdir>/<version>/<arch>.
+          # In case the directory layout differs from what we expect, search for qmake.
+          $qtInstallRoot = "${{ env.QT_INSTALL_DIR }}"
+          Write-Host "--- Contents of $qtInstallRoot (recursive, top 2 levels):"
+          Get-ChildItem $qtInstallRoot -Depth 2 -ErrorAction SilentlyContinue | Select FullName | Out-String | Write-Host
+          $qmake = Get-ChildItem $qtInstallRoot -Recurse -Filter qmake.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $qmake) {
+            Write-Error "qmake.exe not found anywhere under $qtInstallRoot -- Qt installation failed."
             exit 1
           }
+          $qtBin = Split-Path $qmake.FullName -Parent
+          $qtDir = Split-Path $qtBin -Parent
           Write-Host "Qt root : $qtDir"
           Write-Host "Qt bin  : $qtBin"
           echo "qtDir=$qtDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
