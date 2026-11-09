@@ -16,6 +16,13 @@ SparseTileStore::SparseTileStore(std::int64_t w, std::int64_t h, int size, std::
       m_tileBytes(m_tileSizeValid ? static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * sizeof(std::uint32_t) : 0),
       m_pixelBudget(budget) {}
 
+std::span<const std::uint32_t> SparseTileStore::tilePixels(TilePoint tile) const noexcept
+{
+    const auto it = m_tiles.find(tile);
+    if (it == m_tiles.end()) return {};
+    return it->second.pixels;
+}
+
 std::optional<std::uint32_t> SparseTileStore::pixel(TilePoint point) const
 {
     if (!isValid()) return std::nullopt;
@@ -55,7 +62,7 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
     const auto dirty = m_dirty.mark({point.x, point.y, point.x + 1, point.y + 1});
     if (dirty != DirtyTileTracker::Result::Marked) {
         if (created) m_tiles.erase(it);
-        return dirty == DirtyTileTracker::Result::LimitExceeded
+        return (dirty == DirtyTileTracker::Result::LimitExceeded || dirty == DirtyTileTracker::Result::VersionExhausted)
             ? WriteResult::TrackingLimit : WriteResult::AllocationFailed;
     }
     if (old == 0) ++it->second.nonzero;
@@ -68,8 +75,8 @@ bool SparseTileStore::resizeEmpty(std::int64_t width, std::int64_t height)
 {
     TileGeometry replacement(width, height, m_geometry.tileSize());
     if (!m_tiles.empty() || !m_dirty.regions().empty() || !replacement.isValid() || !m_tileSizeValid) return false;
+    if (!m_dirty.resetGeometry(replacement)) return false;
     m_geometry = replacement;
-    m_dirty = DirtyTileTracker(replacement);
     return true;
 }
 } // namespace komapaint

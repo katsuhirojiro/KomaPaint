@@ -1,7 +1,7 @@
 # Milestone 2.2: sparse tile storage and rendering design
 
-Status: geometry, sparse per-layer storage and initial dirty-region tracking
-are implemented; compositing and the renderer remain planned. Validate each component
+Status: geometry, sparse storage, dirty tracking and a standalone CPU tile
+compositor are implemented; viewport integration remains planned. Validate each component
 before moving on; painting is not part of this milestone. The current QML blank-canvas preview is temporary and is not
 an artwork store or production renderer.
 
@@ -154,8 +154,48 @@ and unions repeated regions conservatively. Tracking survives tile reclamation.
 It is bounded to 65,536 pending tiles per layer; when that limit or allocation
 fails, a pixel write is rejected before changing artwork. Multi-tile marking
 uses a temporary copy for all-or-nothing failure behavior, so large batches
-can temporarily use more memory. Pending regions are single-consumer,
-single-threaded state: a future renderer must consume/clear them only after
-successful processing, and must establish its own cache invalidation policy.
-There are no tile revisions, layer-property invalidation, stroke bounds or
-multi-consumer notifications yet. These remain prerequisites for rendering.
+can temporarily use more memory. Pending regions are single-consumer, single-threaded state. Each store has a
+monotonic dirty version; acknowledgments with an old version do not clear
+pending changes. Version exhaustion rejects writes rather than wrapping. There
+are no per-tile revisions, stroke bounds or multi-consumer notifications yet.
+
+### CPU compositing and invalidation protocol
+
+The UI-independent compositor accepts a top-first layer list (matching the
+layer panel), transparent or premultiplied background and a tile coordinate.
+It composites back-to-front, source-over, using premultiplied ARGB and opacity
+quantized to 8 bits. The result is a separate edge-clipped CPU buffer; absent
+tiles are read as transparent and do not allocate artwork. Sources and output
+are not shared for mutation. Tile views are valid only during a synchronous
+call with no source mutation.
+
+`CompositeInvalidation::prepare` captures ordered layer identity, visibility,
+opacity, background, each store's dirty version and the union of dirty tile
+coordinates. A changed configuration requires the consumer to discard its whole
+display cache before calling `accept`; this is lazy cache invalidation, not
+full-canvas recomposition. The consumer composites requested dirty tiles and
+publishes the result, then calls `acknowledge` per successfully processed tile.
+It must discard output if acknowledgment rejects stale versions/configuration.
+Unprocessed and off-screen tiles remain pending. A newer pixel change prevents
+acknowledgment of the older snapshot; no failed rendering may be acknowledged.
+Allocation errors preparing a plan propagate without clearing dirty state. The
+consumer must supply current layer properties every time, reset the tracker on
+document replacement, and keep the stores alive for the plan; this is a
+single-threaded single-consumer protocol, not an observer or a viewport.
+Layer property changes are detected on the next prepare, not pushed as signals.
+Multiple independent caches or render threads require a new revision/subscriber
+scheme before integration. No display cache or viewport is implemented here.
+
+### Resource budget and benchmarks: scheduled before editing ships
+
+Add document-wide accounting shared by every layer, history and composite/display
+caches before brush editing is exposed, with configurable limits, allocation
+failure handling and safe eviction. Per-layer caps alone are insufficient.
+Benchmark sparse and populated documents across canvas sizes and layer counts,
+measuring memory, dirty-tile compositing time, stroke latency and CPU usage;
+add navigation/zoom and pan measurements with the viewport. Establish repeatable
+workloads and record hardware/configuration before optimizing. Test the CPU
+fallback on genuinely low-end Windows hardware, including a machine without a
+dedicated GPU. Future display caches must be bounded; optional costly features
+and any future 3D viewport need adjustable quality and explicit resource limits.
+No performance or low-end hardware claims are made until measured.

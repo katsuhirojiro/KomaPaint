@@ -1,6 +1,7 @@
 #include "DirtyTileTracker.h"
 #include <algorithm>
 #include <new>
+#include <limits>
 #include <stdexcept>
 
 namespace komapaint {
@@ -21,6 +22,7 @@ DirtyTileTracker::Result DirtyTileTracker::mark(TileRect rect)
 {
     const auto range = m_geometry.tilesForRect(rect);
     if (!range) return Result::NoIntersection;
+    if (m_version == std::numeric_limits<std::uint64_t>::max()) return Result::VersionExhausted;
     const auto first = range->first;
     const auto last = range->last;
     // Check counts before iterating, including huge user-supplied rectangles.
@@ -34,6 +36,7 @@ DirtyTileTracker::Result DirtyTileTracker::mark(TileRect rect)
             if (m_regions.find(first) == m_regions.end() && m_regions.size() >= m_maxTiles)
                 return Result::LimitExceeded;
             merge(m_regions, first, *m_geometry.localIntersection(first, rect));
+            ++m_version;
             return Result::Marked;
         }
         // Work on a copy so a failure halfway across tiles cannot lose changes.
@@ -49,8 +52,21 @@ DirtyTileTracker::Result DirtyTileTracker::mark(TileRect rect)
             if (y == last.y) break;
         }
         m_regions.swap(pending);
+        ++m_version;
         return Result::Marked;
     } catch (const std::bad_alloc&) { return Result::AllocationFailed; }
       catch (const std::length_error&) { return Result::AllocationFailed; }
+}
+bool DirtyTileTracker::acknowledge(TilePoint tile, std::uint64_t capturedVersion) noexcept
+{
+    if (capturedVersion != m_version) return false;
+    return m_regions.erase(tile) != 0;
+}
+bool DirtyTileTracker::resetGeometry(TileGeometry geometry) noexcept
+{
+    if (!m_regions.empty() || !geometry.isValid() || m_version == std::numeric_limits<std::uint64_t>::max()) return false;
+    m_geometry = geometry;
+    ++m_version;
+    return true;
 }
 } // namespace komapaint

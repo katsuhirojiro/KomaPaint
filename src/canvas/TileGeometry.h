@@ -39,6 +39,8 @@ public:
     TileGeometry(std::int64_t width, std::int64_t height, int tileSize = DefaultTileSize);
     bool isValid() const { return m_valid; }
     int tileSize() const { return m_tileSize; }
+    std::int64_t width() const { return m_width; }
+    std::int64_t height() const { return m_height; }
     std::optional<TileAddress> address(TilePoint pixel) const;
     std::optional<TileRect> clip(TileRect rect) const;
     std::optional<TileRange> tilesForRect(TileRect rect) const;

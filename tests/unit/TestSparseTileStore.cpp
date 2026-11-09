@@ -31,7 +31,8 @@ int main()
     CHECK(store.setPixel({4, 3}, 0) == R::Changed);
     CHECK(store.setPixel({8, 4}, 0) == R::Changed);
     CHECK(store.allocatedTiles() == 0); CHECK(!store.resizeEmpty(2, 3));
-    store.clearDirtyRegions(); CHECK(store.resizeEmpty(2, 3));
+    while (!store.dirtyRegions().empty()) { CHECK(store.acknowledgeDirty(store.dirtyRegions().begin()->first, store.dirtyVersion())); }
+    CHECK(store.resizeEmpty(2, 3));
     CHECK(!store.pixel({2, 0})); CHECK(store.pixel({1, 2}) == 0U);
     CHECK(!SparseTileStore(1, 1, 0).isValid());
     CHECK(!SparseTileStore(1, 1, 4097).isValid());

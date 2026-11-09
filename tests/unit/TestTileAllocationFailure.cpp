@@ -33,7 +33,7 @@ int main() {
     CHECK(failures >= 3);
     SparseTileStore store(8, 8, 4);
     CHECK(store.setPixel({0, 0}, 0xffffffffU) == SparseTileStore::WriteResult::Changed);
-    store.clearDirtyRegions();
+    while (!store.dirtyRegions().empty()) CHECK(store.acknowledgeDirty(store.dirtyRegions().begin()->first, store.dirtyVersion()));
     failAfter = 0;
     auto result = store.setPixel({1, 0}, 0xff112233U);
     failAfter = -1;

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -21,7 +22,10 @@ public:
     bool isValid() const { return m_geometry.isValid() && m_tileSizeValid; }
     const TileGeometry& geometry() const { return m_geometry; }
     const DirtyTileTracker::Regions& dirtyRegions() const { return m_dirty.regions(); }
-    void clearDirtyRegions() noexcept { m_dirty.clear(); }
+    std::uint64_t dirtyVersion() const { return m_dirty.version(); }
+    bool acknowledgeDirty(TilePoint tile, std::uint64_t version) noexcept { return m_dirty.acknowledge(tile, version); }
+    // View remains valid only until the next store mutation. Empty means absent.
+    std::span<const std::uint32_t> tilePixels(TilePoint tile) const noexcept;
     std::size_t allocatedTiles() const { return m_tiles.size(); }
     std::size_t allocatedPixelBytes() const { return m_tiles.size() * m_tileBytes; }
     std::optional<std::uint32_t> pixel(TilePoint point) const;

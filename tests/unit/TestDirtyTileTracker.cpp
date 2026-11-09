@@ -24,7 +24,7 @@ int main()
     CHECK(tracker.mark({10, 0, 20, 4}) == R::NoIntersection);
     CHECK(tracker.mark({0, 0, 0, 4}) == R::NoIntersection);
     CHECK(tracker.regions() == previous);
-    tracker.clear();
+    while (!tracker.regions().empty()) CHECK(tracker.acknowledge(tracker.regions().begin()->first, tracker.version()));
     CHECK(tracker.mark({-5, -5, 4, 4}) == R::Marked);
     CHECK(tracker.regions().size() == 1);
     CHECK((tracker.regions().at({0, 0}) == TileRect{0, 0, 4, 4}));
@@ -45,7 +45,7 @@ int main()
     CHECK(store.setPixel({3, 3}, 0xffffffffU) == W::Changed);
     CHECK(store.setPixel({4, 3}, 0xff000000U) == W::Changed);
     CHECK(store.dirtyRegions().size() == 2);
-    store.clearDirtyRegions();
+    while (!store.dirtyRegions().empty()) CHECK(store.acknowledgeDirty(store.dirtyRegions().begin()->first, store.dirtyVersion()));
     CHECK(store.setPixel({3, 3}, 0xffffffffU) == W::Unchanged);
     CHECK(store.setPixel({-1, 0}, 0xffffffffU) == W::OutOfBounds);
     CHECK(store.setPixel({0, 0}, 0x00ffffffU) == W::InvalidPixel);
