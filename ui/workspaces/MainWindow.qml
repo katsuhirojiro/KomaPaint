@@ -21,10 +21,10 @@ ApplicationWindow {
 
     // Persist window size when the user resizes / (un)maximizes.
     onWidthChanged: if (visibility === Window.Windowed)
-        Settings.setWindowSize(Qt.size(width, height))
+        Settings.windowSize = Qt.size(width, height)
     onHeightChanged: if (visibility === Window.Windowed)
-        Settings.setWindowSize(Qt.size(width, height))
-    onVisibilityChanged: Settings.setWindowMaximized(visibility === Window.Maximized)
+        Settings.windowSize = Qt.size(width, height)
+    onVisibilityChanged: Settings.windowMaximized = (visibility === Window.Maximized)
 
     Component.onCompleted:
     // Nothing to perform yet — document creation, welcome dialog, etc.
@@ -143,24 +143,32 @@ ApplicationWindow {
             Menu {
                 title: qsTr("&View")
                 MenuItem {
-                    text: qsTr("Zoom &In")
-                    onTriggered: Workspace.zoomIn()
-                    shortcut: "Ctrl++"
+                    action: Action {
+                        text: qsTr("Zoom &In")
+                        shortcut: "Ctrl++"
+                        onTriggered: Workspace.zoomIn()
+                    }
                 }
                 MenuItem {
-                    text: qsTr("Zoom &Out")
-                    onTriggered: Workspace.zoomOut()
-                    shortcut: "Ctrl+-"
+                    action: Action {
+                        text: qsTr("Zoom &Out")
+                        shortcut: "Ctrl+-"
+                        onTriggered: Workspace.zoomOut()
+                    }
                 }
                 MenuItem {
-                    text: qsTr("&Actual Pixels")
-                    onTriggered: Workspace.resetZoom()
-                    shortcut: "Ctrl+1"
+                    action: Action {
+                        text: qsTr("&Actual Pixels")
+                        shortcut: "Ctrl+1"
+                        onTriggered: Workspace.resetZoom()
+                    }
                 }
                 MenuItem {
-                    text: qsTr("Fit to Window")
-                    onTriggered: Workspace.zoomFit()
-                    shortcut: "Ctrl+0"
+                    action: Action {
+                        text: qsTr("Fit to Window")
+                        shortcut: "Ctrl+0"
+                        onTriggered: Workspace.zoomFit()
+                    }
                 }
                 MenuSeparator {
                 }
@@ -241,7 +249,7 @@ ApplicationWindow {
                 }
                 MenuItem {
                     text: qsTr("Delete Layer")
-                    onTriggered: Workspace.layers.removeLayer(Workspace.layers.activeLayerIndex())
+                    onTriggered: Workspace.layers.removeLayer(Workspace.layers.activeLayerIndex)
                 }
                 MenuSeparator {
                 }
@@ -334,6 +342,10 @@ ApplicationWindow {
                 ColumnLayout {
                     id: rightColumn
                     Layout.preferredWidth: 260
+                    // A nested layout reports no useful implicit width, and
+                    // without an explicit cap the row layout stretches this
+                    // dock across the whole window, collapsing the canvas.
+                    Layout.maximumWidth: 260
                     Layout.fillHeight: true
                     spacing: 1
 
@@ -342,7 +354,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         visible: Panels.isVisible("layers")
-                        onVisibilityChanged: if (visible && !Panels.isVisible("layers"))
+                        onVisibleChanged: if (visible && !Panels.isVisible("layers"))
                             Panels.setVisible("layers", true)
                         Connections {
                             target: Panels

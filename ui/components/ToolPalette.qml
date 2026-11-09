@@ -74,10 +74,10 @@ Item {
                 padding: 0
                 flat: true
                 checkable: true
-                checked: Workspace.activeTool === model.tool
-                onClicked: Workspace.activeTool = model.tool
+                checked: Workspace.activeTool === tool
+                onClicked: Workspace.activeTool = tool
 
-                ToolTip.text: model.tip
+                ToolTip.text: tip
                 ToolTip.visible: hovered
                 ToolTip.delay: 400
 
@@ -88,7 +88,7 @@ Item {
                     border.width: 1
                 }
                 contentItem: Label {
-                    text: model.glyph
+                    text: glyph
                     color: parent.checked ? "#ffffff" : KP.text
                     font.family: KP.fontUi
                     font.pixelSize: KP.fontL
@@ -114,7 +114,7 @@ Item {
                 y: 8
                 width: 20
                 height: 20
-                color: Workspace.colors.background.toRgbaString()
+                color: Workspace.colors.background
                 border.color: KP.border
                 radius: KP.radiusS
             }
@@ -123,7 +123,7 @@ Item {
                 y: 0
                 width: 20
                 height: 20
-                color: Workspace.colors.foreground.toRgbaString()
+                color: Workspace.colors.foreground
                 border.color: KP.border
                 radius: KP.radiusS
                 MouseArea {

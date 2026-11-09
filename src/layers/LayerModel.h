@@ -13,6 +13,9 @@ namespace komapaint {
 class LayerModel : public QAbstractListModel
 {
     Q_OBJECT
+    // Bound from QML (LayersPanel currentIndex); must be a property so the
+    // binding tracks activeLayerIndexChanged instead of reading a method.
+    Q_PROPERTY(int activeLayerIndex READ activeLayerIndex WRITE setActiveLayerIndex NOTIFY activeLayerIndexChanged)
 
 public:
     enum Roles { NameRole = Qt::UserRole + 1, VisibleRole, LockedRole, OpacityRole, IndexRole };

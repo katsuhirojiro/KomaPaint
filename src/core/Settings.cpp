@@ -42,7 +42,9 @@ QSize Settings::windowSize() const
 
 void Settings::setWindowSize(const QSize& size)
 {
+    if (windowSize() == size) return;
     setValue(keys::kWindowSize, size);
+    emit windowSizeChanged();
 }
 
 bool Settings::windowMaximized() const
@@ -52,7 +54,9 @@ bool Settings::windowMaximized() const
 
 void Settings::setWindowMaximized(bool maximized)
 {
+    if (windowMaximized() == maximized) return;
     setValue(keys::kWindowMaximized, maximized);
+    emit windowMaximizedChanged();
 }
 
 QString Settings::language() const

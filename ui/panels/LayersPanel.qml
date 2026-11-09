@@ -136,7 +136,7 @@ Rectangle {
                 ToolbarButton {
                     iconText: "−"
                     tooltip: "Delete layer"
-                    onClicked: Workspace.layers.removeLayer(Workspace.layers.activeLayerIndex())
+                    onClicked: Workspace.layers.removeLayer(Workspace.layers.activeLayerIndex)
                 }
                 Item {
                     Layout.fillWidth: true
@@ -144,12 +144,12 @@ Rectangle {
                 ToolbarButton {
                     iconText: "▲"
                     tooltip: "Move up"
-                    onClicked: Workspace.layers.moveLayer(Workspace.layers.activeLayerIndex(), Workspace.layers.activeLayerIndex() - 1)
+                    onClicked: Workspace.layers.moveLayer(Workspace.layers.activeLayerIndex, Workspace.layers.activeLayerIndex - 1)
                 }
                 ToolbarButton {
                     iconText: "▼"
                     tooltip: "Move down"
-                    onClicked: Workspace.layers.moveLayer(Workspace.layers.activeLayerIndex(), Workspace.layers.activeLayerIndex() + 1)
+                    onClicked: Workspace.layers.moveLayer(Workspace.layers.activeLayerIndex, Workspace.layers.activeLayerIndex + 1)
                 }
             }
         }

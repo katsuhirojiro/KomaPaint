@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Layouts
 import "../themes"
 
 // Thin vertical separator used between tool groups.

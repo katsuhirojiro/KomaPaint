@@ -62,7 +62,7 @@ Rectangle {
                     width: 38
                     height: 38
                     radius: KP.radiusS
-                    color: Workspace.colors.background.toRgbaString()
+                    color: Workspace.colors.background
                     border.color: KP.border
                     border.width: 1
                     Rectangle {
@@ -71,7 +71,7 @@ Rectangle {
                         width: 24
                         height: 24
                         radius: KP.radiusS
-                        color: Workspace.colors.foreground.toRgbaString()
+                        color: Workspace.colors.foreground
                         border.color: KP.border
                         border.width: 1
                         MouseArea {
@@ -105,7 +105,7 @@ Rectangle {
                             Layout.fillWidth: true
                             font.pixelSize: KP.fontS
                             font.family: KP.fontMono
-                            color: KP.text
+                            palette.text: KP.text
                             background: Rectangle {
                                 color: KP.inputBg
                                 border.color: KP.borderLight
@@ -132,7 +132,7 @@ Rectangle {
                             Layout.fillWidth: true
                             font.pixelSize: KP.fontS
                             font.family: KP.fontMono
-                            color: KP.text
+                            palette.text: KP.text
                             background: Rectangle {
                                 color: KP.inputBg
                                 border.color: KP.borderLight
@@ -159,7 +159,7 @@ Rectangle {
                             Layout.fillWidth: true
                             font.pixelSize: KP.fontS
                             font.family: KP.fontMono
-                            color: KP.text
+                            palette.text: KP.text
                             background: Rectangle {
                                 color: KP.inputBg
                                 border.color: KP.borderLight

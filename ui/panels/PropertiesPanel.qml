@@ -71,7 +71,7 @@ Rectangle {
                             onValueModified: Workspace.document.width = value
                             font.pixelSize: KP.fontS
                             font.family: KP.fontMono
-                            color: KP.text
+                            palette.text: KP.text
                             background: Rectangle {
                                 color: KP.inputBg
                                 border.color: KP.borderLight
@@ -93,7 +93,7 @@ Rectangle {
                             Layout.fillWidth: true
                             font.pixelSize: KP.fontS
                             font.family: KP.fontMono
-                            color: KP.text
+                            palette.text: KP.text
                             background: Rectangle {
                                 color: KP.inputBg
                                 border.color: KP.borderLight
@@ -119,7 +119,7 @@ Rectangle {
                             Layout.fillWidth: true
                             font.pixelSize: KP.fontS
                             font.family: KP.fontMono
-                            color: KP.text
+                            palette.text: KP.text
                             background: Rectangle {
                                 color: KP.inputBg
                                 border.color: KP.borderLight

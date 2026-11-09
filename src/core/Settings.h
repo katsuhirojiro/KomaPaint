@@ -16,6 +16,11 @@ namespace komapaint {
 class Settings : public QObject
 {
     Q_OBJECT
+    // Window geometry is bound directly from QML (MainWindow.qml), so it
+    // must be exposed as real properties — plain C++ methods are invisible
+    // to the QML engine.
+    Q_PROPERTY(QSize windowSize      READ windowSize      WRITE setWindowSize      NOTIFY windowSizeChanged)
+    Q_PROPERTY(bool  windowMaximized READ windowMaximized WRITE setWindowMaximized NOTIFY windowMaximizedChanged)
 
 public:
     explicit Settings(const QString& organization, const QString& application,
@@ -41,6 +46,8 @@ public:
 
 signals:
     void valueChanged(const QString& key);
+    void windowSizeChanged();
+    void windowMaximizedChanged();
 
 private:
     QSettings* const d;

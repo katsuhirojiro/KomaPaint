@@ -33,20 +33,29 @@ class AppInfo(QObject):
 
 
 class Settings_(QObject):
+    # Mirrors src/core/Settings: windowSize / windowMaximized are QML
+    # properties (with notify signals), backed by the same defaults.
     valueChanged = Signal(str)
+    windowSizeChanged = Signal()
+    windowMaximizedChanged = Signal()
     def __init__(self): super().__init__(); self._size = QSize(1440,900); self._max=False
     @Slot(str, result="QVariant")
     def value(self, key, default=None): return default
     @Slot(str, "QVariant")
     def setValue(self, key, v): pass
-    @Slot(result="QSize")
+    @Property(QSize, notify=windowSizeChanged)
     def windowSize(self): return self._size
-    @Slot(QSize)
-    def setWindowSize(self, s): self._size = s
-    @Slot(result=bool)
+    @windowSize.setter
+    def windowSize(self, s):
+        s = QSize(s)
+        if s == self._size: return
+        self._size = s; self.windowSizeChanged.emit()
+    @Property(bool, notify=windowMaximizedChanged)
     def windowMaximized(self): return self._max
-    @Slot(bool)
-    def setWindowMaximized(self, m): self._max = m
+    @windowMaximized.setter
+    def windowMaximized(self, m):
+        if m == self._max: return
+        self._max = m; self.windowMaximizedChanged.emit()
 
 
 class Panels(QObject):
