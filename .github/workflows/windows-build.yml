@@ -259,9 +259,9 @@ jobs:
         shell: pwsh
         run: |
           $bin = "${{ env.STAGE_DIR }}"
-          $env:PATH = "$bin;" + $env:PATH
+          $env:PATH = "$bin;${{ steps.qt.outputs.qtBin }};" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
-          $env:QT_LOGGING_RULES = "qt.qml.warning=true;qt.quick.warning=true"
+          $env:QT_FORCE_STDERR_LOGGING = "1"
           $exe = "$bin\komapaint.exe"
           Write-Host "=== Launching $exe (offscreen) ==="
           Write-Host "--- staged tree (recursive) ---"
@@ -271,11 +271,6 @@ jobs:
           }
           Write-Host "--- qt.conf ---"
           if (Test-Path "$bin\qt.conf") { Get-Content "$bin\qt.conf" | Write-Host } else { Write-Host "(no qt.conf)" }
-          # Launch komapaint.exe and watch for 4 seconds. If it's still alive we
-          # consider the startup successful; close via CloseMainWindow and
-          # verify clean exit. Output from the app will be empty (GUI subsystem
-          # app doesn't attach stdout), but the "ALIVE" line is enough to prove
-          # we made it to the event loop.
           $p = Start-Process -FilePath $exe -WorkingDirectory $bin -PassThru
           Write-Host "Started PID $($p.Id)"
           Start-Sleep -Seconds 4
