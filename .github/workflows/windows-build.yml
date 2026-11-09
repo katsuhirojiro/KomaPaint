@@ -139,8 +139,15 @@ jobs:
           foreach ($exe in $exes) {
             Write-Host ">>> Running $($exe.Name) <<<"
             Write-Host "::notice title=Test started::$($exe.Name)"
-            $output = & $exe.FullName 2>&1 | Out-String
-            $code = $LASTEXITCODE
+            if ($exe.Name -eq 'test_canvas_viewport.exe') {
+              $resultFile = Join-Path $env:RUNNER_TEMP 'viewport-test.txt'
+              $output = & $exe.FullName -o "$resultFile,txt" 2>&1 | Out-String
+              $code = $LASTEXITCODE
+              if (Test-Path $resultFile) { $output += Get-Content $resultFile -Raw }
+            } else {
+              $output = & $exe.FullName 2>&1 | Out-String
+              $code = $LASTEXITCODE
+            }
             Write-Host $output
             $details = $output.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
             Write-Host "::notice title=Test result::$($exe.Name) exit $code $details"
