@@ -309,6 +309,7 @@ jobs:
           path: |
             ${{ env.STAGE_DIR }}\smoke.out.log
             ${{ env.STAGE_DIR }}\smoke.err.log
+            ${{ env.STAGE_DIR }}\komapaint.log
           if-no-files-found: ignore
           retention-days: 14
 
