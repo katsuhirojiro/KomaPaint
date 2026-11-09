@@ -270,42 +270,62 @@ jobs:
           $bin = "${{ env.STAGE_DIR }}"
           $env:PATH = "$bin;" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
-          $env:QT_LOGGING_RULES = "*.debug=false;qt.qml.binding.removal.info=false"
+          $env:QT_LOGGING_RULES = "*.debug=true;qt.qml.binding.removal.info=true"
           $exe = "$bin\komapaint.exe"
-          $outFile = "$env:RUNNER_TEMP\komapaint.out.log"
-          $errFile = "$env:RUNNER_TEMP\komapaint.err.log"
-          if (Test-Path $outFile) { Remove-Item $outFile -Force }
-          if (Test-Path $errFile) { Remove-Item $errFile -Force }
           Write-Host "=== Launching $exe (offscreen) ==="
-          $env:QT_DEBUG_PLUGINS = "0"
-          $env:QML_IMPORT_TRACE = "0"
-          # Print staged-tree contents first for diagnostics
-          Write-Host "--- staged top-level ---"
-          Get-ChildItem $bin | Select Name,Length | Format-Table -AutoSize | Out-String | Write-Host
-          foreach ($sub in @("platforms","styles","imageformats","qml")) {
-            Write-Host "--- staged $sub/ ---"
-            if (Test-Path "$bin\$sub") { Get-ChildItem "$bin\$sub" -Recurse -Depth 2 | Select-Object FullName | Format-Table -AutoSize | Out-String | Write-Host } else { Write-Host "(missing)" }
+          # Print full deployed tree so any missing plugin/QML module is obvious.
+          Write-Host "--- staged tree (all files) ---"
+          Get-ChildItem $bin -Recurse -File | ForEach-Object {
+            $rel = $_.FullName.Substring($bin.Length + 1)
+            Write-Host ("  {0,10}  {1}" -f $_.Length, $rel)
           }
+          # Launch via Start-Process with stdout/stderr redirected to files that
+          # are inside the STAGE directory (so they also get uploaded if the
+          # artifact step runs later). We add a small .NET FileSystemWatcher
+          # tail so output is mirrored to the Actions console in near-real-time
+          # even if the process dies.
+          $outFile = "$bin\smoke.stdout.log"
+          $errFile = "$bin\smoke.stderr.log"
+          Remove-Item $outFile,$errFile -Force -ErrorAction SilentlyContinue
           $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
-          Write-Host "Started PID $($p.Id)"
-          # Poll for 5 seconds, streaming output as we go so the Actions console
-          # shows every qInfo/qCritical line even if the process dies early.
+          Write-Host "Started PID $($p.Id) at $(Get-Date -Format o)"
+          # Tail loop: poll for 5 seconds, dumping appended output as we go.
+          $outTailLen = 0; $errTailLen = 0
           $deadline = (Get-Date).AddSeconds(5)
-          while ((Get-Date) -lt $deadline) {
-            Start-Sleep -Milliseconds 500
-            if ($p.HasExited) { break }
+          while ((Get-Date) -lt $deadline -and !$p.HasExited) {
+            Start-Sleep -Milliseconds 250
+            if (Test-Path $outFile) {
+              $len = (Get-Item $outFile).Length
+              if ($len -gt $outTailLen) {
+                $new = [System.IO.File]::ReadAllText($outFile).Substring($outTailLen)
+                if ($new) { Write-Host -NoNewline $new }
+                $outTailLen = $len
+              }
+            }
+            if (Test-Path $errFile) {
+              $len = (Get-Item $errFile).Length
+              if ($len -gt $errTailLen) {
+                $new = [System.IO.File]::ReadAllText($errFile).Substring($errTailLen)
+                if ($new) { Write-Host -NoNewline $new }
+                $errTailLen = $len
+              }
+            }
           }
-          # Give redirected streams a moment to flush
-          Start-Sleep -Milliseconds 500
-          Write-Host ""
-          Write-Host "--- stdout ---"
-          if (Test-Path $outFile) { Get-Content $outFile -Raw | Write-Host }
-          Write-Host "--- stderr ---"
-          if (Test-Path $errFile) { Get-Content $errFile -Raw | Write-Host }
           if ($p.HasExited) {
-            Write-Error "komapaint.exe exited prematurely with code $($p.ExitCode); it failed to create/show the main window."
+            # Drain any remaining output before reporting failure.
+            Start-Sleep -Milliseconds 200
+            if (Test-Path $outFile) {
+              Write-Host "--- stdout (final) ---"
+              Get-Content $outFile -Raw | Write-Host
+            }
+            if (Test-Path $errFile) {
+              Write-Host "--- stderr (final) ---"
+              Get-Content $errFile -Raw | Write-Host
+            }
+            Write-Error "komapaint.exe exited prematurely with code $($p.ExitCode)."
             exit 1
           }
+          Write-Host ""
           Write-Host "Process still alive after 5s — event loop running."
           $p.CloseMainWindow() | Out-Null
           if (!$p.WaitForExit(5000)) {
