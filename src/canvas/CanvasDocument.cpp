@@ -34,6 +34,7 @@ void CanvasDocument::setTitle(const QString& title)
 void CanvasDocument::setWidth(int w)
 {
     if (!validSize(QSize(w, height())) || w == m_size.width()) return;
+    if (!m_layers->resizeEmptyLayers(QSize(w, height()))) return;
     m_size.setWidth(w);
     emit sizeChanged();
 }
@@ -41,6 +42,7 @@ void CanvasDocument::setWidth(int w)
 void CanvasDocument::setHeight(int h)
 {
     if (!validSize(QSize(width(), h)) || h == m_size.height()) return;
+    if (!m_layers->resizeEmptyLayers(QSize(width(), h))) return;
     m_size.setHeight(h);
     emit sizeChanged();
 }
@@ -48,6 +50,7 @@ void CanvasDocument::setHeight(int h)
 void CanvasDocument::setSize(const QSize& size)
 {
     if (!validSize(size) || size == m_size) return;
+    if (!m_layers->resizeEmptyLayers(size)) return;
     m_size = size;
     emit sizeChanged();
 }

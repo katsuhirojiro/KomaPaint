@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../canvas/SparseTileStore.h"
 #include <QObject>
 #include <QString>
 #include <QColor>
@@ -23,6 +24,9 @@ public:
     explicit Layer(QObject* parent = nullptr);
     explicit Layer(const QString& name, QObject* parent = nullptr);
 
+    SparseTileStore& tiles() { return m_tiles; }
+    const SparseTileStore& tiles() const { return m_tiles; }
+
     QString name() const { return m_name; }
     bool    isVisible() const { return m_visible; }
     bool    isLocked()  const { return m_locked; }
@@ -44,6 +48,7 @@ signals:
     void indexChanged();
 
 private:
+    SparseTileStore m_tiles{1600, 1200};
     QString m_name    = QStringLiteral("Layer");
     bool    m_visible = true;
     bool    m_locked  = false;

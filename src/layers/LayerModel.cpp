@@ -13,6 +13,17 @@ LayerModel::LayerModel(QObject* parent) : QAbstractListModel(parent)
     connect(l, &Layer::opacityChanged,    this, [this,l]{ onLayerChanged(l, {OpacityRole}); });
 }
 
+bool LayerModel::resizeEmptyLayers(const QSize& size)
+{
+    if (size.width() <= 0 || size.height() <= 0) return false;
+    for (const auto* layer : m_layers)
+        if (layer->tiles().allocatedTiles() != 0) return false;
+    for (auto* layer : m_layers)
+        if (!layer->tiles().resizeEmpty(size.width(), size.height())) return false;
+    m_canvasSize = size;
+    return true;
+}
+
 void LayerModel::onLayerChanged(Layer* layer, const QList<int>& roles)
 {
     const int row = m_layers.indexOf(layer);
@@ -66,6 +77,7 @@ void LayerModel::addLayer()
     const int row = m_layers.size();
     beginInsertRows({}, row, row);
     auto* l = new Layer(QString("Layer %1").arg(row + 1), this);
+    l->tiles().resizeEmpty(m_canvasSize.width(), m_canvasSize.height());
     l->setIndex(row);
     connect(l, &Layer::nameChanged,       this, [this,l]{ onLayerChanged(l, {NameRole}); });
     connect(l, &Layer::visibilityChanged, this, [this,l]{ onLayerChanged(l, {VisibleRole}); });

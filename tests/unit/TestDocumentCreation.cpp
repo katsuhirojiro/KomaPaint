@@ -9,6 +9,7 @@ class TestDocumentCreation : public QObject
 private slots:
     void createsIndependentDocument();
     void rejectsInvalidInputWithoutChangingState();
+    void layerStorageOwnership();
 };
 
 void TestDocumentCreation::createsIndependentDocument()
@@ -43,6 +44,24 @@ void TestDocumentCreation::rejectsInvalidInputWithoutChangingState()
     QVERIFY(!workspace.newDocument(1, 1, false, QColor(0, 0, 0, 0)));
     QCOMPARE(workspace.document(), original);
     QCOMPARE(changed.count(), 0);
+}
+
+void TestDocumentCreation::layerStorageOwnership()
+{
+    WorkspaceState workspace;
+    QVERIFY(workspace.newDocument(300, 200, true, Qt::white));
+    auto* layer = workspace.layers()->layerAt(0);
+    QCOMPARE(layer->tiles().setPixel({299, 199}, 0xffffffffU), SparseTileStore::WriteResult::Changed);
+    QVERIFY(!layer->tiles().pixel({300, 0}));
+    workspace.layers()->addLayer();
+    QCOMPARE(workspace.layers()->layerAt(1)->tiles().pixel({299, 199}).value(), 0U);
+    QVERIFY(!workspace.layers()->layerAt(1)->tiles().pixel({300, 0}));
+    workspace.document()->setWidth(100); // resize must not discard existing artwork
+    QCOMPARE(workspace.document()->width(), 300);
+    QVERIFY(workspace.newDocument(20, 10, false, Qt::white));
+    QCOMPARE(workspace.layers()->rowCount(), 1);
+    QCOMPARE(workspace.layers()->layerAt(0)->tiles().allocatedTiles(), size_t(0));
+    QVERIFY(!workspace.layers()->layerAt(0)->tiles().pixel({20, 0}));
 }
 
 QTEST_APPLESS_MAIN(TestDocumentCreation)

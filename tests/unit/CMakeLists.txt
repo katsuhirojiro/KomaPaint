@@ -47,3 +47,7 @@ add_executable(test_tile_geometry TestTileGeometry.cpp ${CMAKE_SOURCE_DIR}/src/c
 target_include_directories(test_tile_geometry PRIVATE ${CMAKE_SOURCE_DIR}/src)
 set_target_properties(test_tile_geometry PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_tile_geometry COMMAND test_tile_geometry)
+add_executable(test_sparse_tile_store TestSparseTileStore.cpp)
+target_link_libraries(test_sparse_tile_store PRIVATE komapaint::tile_data)
+set_target_properties(test_sparse_tile_store PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_sparse_tile_store COMMAND test_sparse_tile_store)

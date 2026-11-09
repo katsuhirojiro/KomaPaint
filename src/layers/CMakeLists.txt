@@ -7,5 +7,5 @@ add_library(komapaint_layers STATIC
 )
 target_include_directories(komapaint_layers PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(komapaint_layers PUBLIC komapaint::core Qt6::Core Qt6::Gui)
+target_link_libraries(komapaint_layers PUBLIC komapaint::core komapaint::tile_data Qt6::Core Qt6::Gui)
 add_library(komapaint::layers ALIAS komapaint_layers)

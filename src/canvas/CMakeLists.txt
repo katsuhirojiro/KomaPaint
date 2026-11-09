@@ -1,9 +1,12 @@
+# Low-level tile data is independent of layers, document and UI.
+add_library(komapaint_tile_data STATIC TileGeometry.h TileGeometry.cpp SparseTileStore.h SparseTileStore.cpp)
+target_include_directories(komapaint_tile_data PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+add_library(komapaint::tile_data ALIAS komapaint_tile_data)
+
 # Canvas module: coordinate spaces, viewport, document canvas base types.
 add_library(komapaint_canvas STATIC
     CanvasDocument.h
     CanvasDocument.cpp
-    TileGeometry.h
-    TileGeometry.cpp
 )
 target_include_directories(komapaint_canvas PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/..)

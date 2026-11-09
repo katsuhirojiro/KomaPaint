@@ -4,6 +4,7 @@
 
 #include <QAbstractListModel>
 #include <QList>
+#include <QSize>
 
 namespace komapaint {
 
@@ -26,6 +27,7 @@ public:
     QVariant data(const QModelIndex& index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
+    bool resizeEmptyLayers(const QSize& size);
     Q_INVOKABLE Layer* layerAt(int row) const;
     Q_INVOKABLE int    activeLayerIndex() const { return m_active; }
     Q_INVOKABLE void   setActiveLayerIndex(int row);
@@ -40,6 +42,7 @@ signals:
 private:
     void onLayerChanged(Layer* layer, const QList<int>& roles);
 
+    QSize m_canvasSize{1600, 1200};
     QList<Layer*> m_layers;
     int           m_active = 0;
 };
