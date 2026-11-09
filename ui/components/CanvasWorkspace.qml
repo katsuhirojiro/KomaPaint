@@ -31,8 +31,9 @@ Rectangle {
             Rectangle {
                 id: canvasDoc
                 anchors.centerIn: parent
-                width: Math.min(Workspace.document.width * Workspace.zoom / 100, 900)
-                height: Math.min(Workspace.document.height * Workspace.zoom / 100, 700)
+                property real displayScale: Math.min(Workspace.zoom / 100, 900 / Workspace.document.width, 700 / Workspace.document.height)
+                width: Math.max(1, Workspace.document.width * displayScale)
+                height: Math.max(1, Workspace.document.height * displayScale)
                 color: "transparent"
                 border.color: "#0c0d0f"
                 border.width: 1
@@ -72,12 +73,15 @@ Rectangle {
                                     if (((x / cell) + (y / cell)) % 2 === 0)
                                         ctx.fillRect(x, y, cell, cell);
                         } else {
-                            ctx.fillStyle = KP.canvasPaper;
+                            ctx.fillStyle = Workspace.document.backgroundColor;
                             ctx.fillRect(0, 0, width, height);
                         }
                     }
                     Connections {
                         target: Workspace
+                        function onDocumentChanged() {
+                            canvasSurface.requestPaint();
+                        }
                         function onZoomChanged() {
                             canvasSurface.requestPaint();
                         }
@@ -90,16 +94,7 @@ Rectangle {
                     }
                 }
 
-                // Centered "No content yet" hint
-                Label {
-                    anchors.centerIn: parent
-                    text: Workspace.document.title
-                    color: "#00000066"
-                    font.family: KP.fontUi
-                    font.pixelSize: KP.fontXL
-                    font.italic: true
-                    visible: Workspace.zoom >= 40
-                }
+
             }
         }
     }

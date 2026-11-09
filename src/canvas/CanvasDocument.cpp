@@ -2,7 +2,20 @@
 
 namespace komapaint {
 
-CanvasDocument::CanvasDocument(QObject* parent) : QObject(parent) {}
+CanvasDocument::CanvasDocument(QObject* parent) : QObject(parent), m_layers(new LayerModel(this)) {}
+
+bool CanvasDocument::validSize(const QSize& size)
+{
+    return size.width() >= 1 && size.height() >= 1
+        && size.width() <= MaxDimension && size.height() <= MaxDimension;
+}
+
+void CanvasDocument::setBackgroundColor(const QColor& color)
+{
+    if (!color.isValid() || color.alpha() != 255 || color == m_backgroundColor) return;
+    m_backgroundColor = color;
+    emit backgroundChanged();
+}
 
 CanvasDocument* CanvasDocument::createDefault(QObject* parent)
 {
@@ -20,21 +33,21 @@ void CanvasDocument::setTitle(const QString& title)
 
 void CanvasDocument::setWidth(int w)
 {
-    if (w <= 0 || w == m_size.width()) return;
+    if (!validSize(QSize(w, height())) || w == m_size.width()) return;
     m_size.setWidth(w);
     emit sizeChanged();
 }
 
 void CanvasDocument::setHeight(int h)
 {
-    if (h <= 0 || h == m_size.height()) return;
+    if (!validSize(QSize(width(), h)) || h == m_size.height()) return;
     m_size.setHeight(h);
     emit sizeChanged();
 }
 
 void CanvasDocument::setSize(const QSize& size)
 {
-    if (!size.isValid() || size == m_size) return;
+    if (!validSize(size) || size == m_size) return;
     m_size = size;
     emit sizeChanged();
 }

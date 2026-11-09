@@ -78,7 +78,7 @@ Reserved for brush presets, textures, patterns, fonts and user assets.
 
 ### `src/files`
 Currently `RecentFiles` — a small persistent list of recent documents.
-Open/save/new/export and native project serialization come in Phase 5.
+New document creation is underway in Phase 2; open/save/export and native project serialization are planned for milestone 2.8.
 
 ### `src/history`
 A minimal `UndoStack` with a text label per command and `canUndo`/

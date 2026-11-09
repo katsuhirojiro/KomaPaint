@@ -38,3 +38,6 @@ komapaint_add_test(test_layers    TestLayers.cpp)
 komapaint_add_test(test_timeline   TestTimeline.cpp)
 komapaint_add_test(test_canvas     TestCanvas.cpp)
 komapaint_add_test(test_recent     TestRecentFiles.cpp)
+
+komapaint_add_test(test_document_creation TestDocumentCreation.cpp)
+target_link_libraries(test_document_creation PRIVATE komapaint::app)

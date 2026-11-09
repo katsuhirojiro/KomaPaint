@@ -6,6 +6,7 @@ import "../themes"
 Item {
     id: root
     implicitHeight: KP.toolbarHeight
+    signal newDocumentRequested()
 
     Rectangle {
         anchors.fill: parent
@@ -23,8 +24,7 @@ Item {
         ToolbarButton {
             iconText: "N"
             tooltip: "New document"
-            onClicked: /* placeholder */  {
-            }
+            onClicked: root.newDocumentRequested()
         }
         ToolbarButton {
             iconText: "O"

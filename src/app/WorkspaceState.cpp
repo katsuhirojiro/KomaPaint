@@ -7,10 +7,25 @@ namespace komapaint {
 WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
 {
     m_document = new CanvasDocument(this);
-    m_layers   = new LayerModel(this);
     m_timeline = new TimelineState(this);
     m_colors   = new ColorPalette(this);
     m_history  = new UndoStack(this);
+}
+
+bool WorkspaceState::newDocument(int width, int height, bool transparent, const QColor& background)
+{
+    if (!CanvasDocument::validSize(QSize(width, height)) || !background.isValid()
+        || background.alpha() != 255) return false;
+    auto* next = new CanvasDocument(this);
+    next->setSize(QSize(width, height));
+    next->setBackgroundColor(background);
+    next->setTransparentBackground(transparent);
+    auto* previous = m_document;
+    m_document = next;
+    m_history->clear();
+    emit documentChanged();
+    previous->deleteLater();
+    return true;
 }
 
 void WorkspaceState::setActiveTool(const QString& tool)

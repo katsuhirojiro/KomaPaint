@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import QtQuick.Dialogs
 import "../components"
 import "../panels"
 import "../themes"
@@ -72,8 +73,7 @@ ApplicationWindow {
                 title: qsTr("&File")
                 MenuItem {
                     text: qsTr("&New...")
-                    onTriggered: /* placeholder */  {
-                    }
+                    onTriggered: newDocumentDialog.open()
                 }
                 MenuItem {
                     text: qsTr("&Open...")
@@ -293,6 +293,7 @@ ApplicationWindow {
         MainToolbar {
             id: toolbar
             Layout.fillWidth: true
+            onNewDocumentRequested: newDocumentDialog.open()
         }
 
         // ----------------------------------------------------- Center + panels
@@ -393,6 +394,42 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    Dialog {
+        id: newDocumentDialog
+        title: qsTr("New Document")
+        modal: true
+        anchors.centerIn: parent
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        property color selectedBackground: "white"
+        onOpened: {
+            widthInput.value = 1600
+            heightInput.value = 1200
+            transparentInput.checked = false
+            selectedBackground = "white"
+        }
+        onAccepted: Workspace.newDocument(widthInput.value, heightInput.value,
+                                          transparentInput.checked, selectedBackground)
+        contentItem: ColumnLayout {
+            spacing: 10
+            Label { text: qsTr("Width (pixels)") }
+            SpinBox { id: widthInput; from: 1; to: 32768; value: 1600; editable: true }
+            Label { text: qsTr("Height (pixels)") }
+            SpinBox { id: heightInput; from: 1; to: 32768; value: 1200; editable: true }
+            CheckBox { id: transparentInput; text: qsTr("Transparent background") }
+            RowLayout {
+                enabled: !transparentInput.checked
+                Button { text: qsTr("Background colour..."); onClicked: backgroundPicker.open() }
+                Rectangle { width: 30; height: 30; color: newDocumentDialog.selectedBackground; border.color: KP.border }
+            }
+        }
+    }
+    ColorDialog {
+        id: backgroundPicker
+        title: qsTr("Background colour")
+        selectedColor: newDocumentDialog.selectedBackground
+        onAccepted: newDocumentDialog.selectedBackground = selectedColor
     }
 
     // ------------------------------------------------------------- About dialog

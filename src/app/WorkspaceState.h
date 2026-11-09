@@ -20,8 +20,8 @@ class Settings;
 class WorkspaceState : public QObject
 {
     Q_OBJECT
-    Q_PROPERTY(CanvasDocument* document  READ document  CONSTANT)
-    Q_PROPERTY(LayerModel*     layers    READ layers    CONSTANT)
+    Q_PROPERTY(CanvasDocument* document  READ document  NOTIFY documentChanged)
+    Q_PROPERTY(LayerModel*     layers    READ layers    NOTIFY documentChanged)
     Q_PROPERTY(TimelineState*  timeline  READ timeline  CONSTANT)
     Q_PROPERTY(ColorPalette*   colors    READ colors    CONSTANT)
     Q_PROPERTY(UndoStack*      history   READ history   CONSTANT)
@@ -32,7 +32,7 @@ public:
     explicit WorkspaceState(QObject* parent = nullptr);
 
     CanvasDocument* document() const { return m_document; }
-    LayerModel*     layers()   const { return m_layers; }
+    LayerModel*     layers()   const { return m_document->layers(); }
     TimelineState*  timeline() const { return m_timeline; }
     ColorPalette*   colors()   const { return m_colors; }
     UndoStack*      history()  const { return m_history; }
@@ -40,6 +40,7 @@ public:
     QString activeTool() const { return m_activeTool; }
     qreal   zoom()       const { return m_zoom; }
 
+    Q_INVOKABLE bool newDocument(int width, int height, bool transparent, const QColor& background);
     Q_INVOKABLE void zoomIn();
     Q_INVOKABLE void zoomOut();
     Q_INVOKABLE void zoomFit();
@@ -50,12 +51,12 @@ public slots:
     void setZoom(qreal z);
 
 signals:
+    void documentChanged();
     void activeToolChanged(const QString& tool);
     void zoomChanged(qreal zoom);
 
 private:
     CanvasDocument* m_document;
-    LayerModel*     m_layers;
     TimelineState*  m_timeline;
     ColorPalette*   m_colors;
     UndoStack*      m_history;

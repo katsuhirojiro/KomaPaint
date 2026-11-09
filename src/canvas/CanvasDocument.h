@@ -1,20 +1,19 @@
 #pragma once
 
-#include <QImage>
+#include <QColor>
+#include "../layers/LayerModel.h"
 #include <QObject>
 #include <QSize>
 #include <QString>
 
 namespace komapaint {
 
-// CanvasDocument describes the editable surface that the user works on.
-// Phase 1 does not implement painting; this class currently only carries
-// the document's dimensions, background and (optional) title, so the UI
-// has concrete metadata to bind against.
-
+// Owns document metadata and its layer model. Pixel storage arrives in milestone 2.2.
 class CanvasDocument : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(LayerModel* layers READ layers CONSTANT)
+    Q_PROPERTY(QColor backgroundColor READ backgroundColor WRITE setBackgroundColor NOTIFY backgroundChanged)
     Q_PROPERTY(QString title    READ title    WRITE setTitle    NOTIFY titleChanged)
     Q_PROPERTY(int     width    READ width    WRITE setWidth    NOTIFY sizeChanged)
     Q_PROPERTY(int     height   READ height   WRITE setHeight   NOTIFY sizeChanged)
@@ -25,8 +24,13 @@ class CanvasDocument : public QObject
 public:
     explicit CanvasDocument(QObject* parent = nullptr);
 
+    static constexpr int MaxDimension = 32768;
+    static bool validSize(const QSize& size);
+
     static CanvasDocument* createDefault(QObject* parent = nullptr);
 
+    LayerModel* layers() const { return m_layers; }
+    QColor backgroundColor() const { return m_backgroundColor; }
     QString title() const { return m_title; }
     int     width() const { return m_size.width(); }
     int     height() const { return m_size.height(); }
@@ -35,6 +39,7 @@ public:
     bool    hasTransparentBackground() const { return m_transparent; }
 
 public slots:
+    void setBackgroundColor(const QColor& color);
     void setTitle(const QString& title);
     void setWidth(int w);
     void setHeight(int h);
@@ -49,6 +54,8 @@ signals:
     void backgroundChanged();
 
 private:
+    LayerModel* m_layers;
+    QColor m_backgroundColor = Qt::white;
     QString m_title = QStringLiteral("Untitled");
     QSize   m_size  = QSize(1600, 1200);
     qreal   m_dpi   = 300.0;
