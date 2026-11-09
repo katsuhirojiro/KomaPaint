@@ -329,6 +329,15 @@ jobs:
               $stream.Dispose()
             }
           }
+          function Fail-Smoke {
+            param([string]$Message)
+            # Emit a compact single-line annotation so the failure is visible
+            # via the checks API (logs are not always retrievable).
+            $m = $Message.Replace('%','%25').Replace("`r",' ').Replace("`n",' || ')
+            if ($m.Length -gt 1500) { $m = "...(truncated) " + $m.Substring($m.Length - 1500) }
+            Write-Host "::error title=Smoke test failed::$m"
+            exit 1
+          }
           $peSubsystem = Get-PeSubsystem $exe
           $peSubsystemName = switch ($peSubsystem) {
             2 { "Windows GUI" }
@@ -337,8 +346,7 @@ jobs:
           }
           Write-Host "[DIAG] komapaint.exe PE subsystem: $peSubsystem ($peSubsystemName)"
           if ($peSubsystem -ne 2) {
-            Write-Error "Smoke test FAILED: komapaint.exe must use the Windows GUI subsystem (2), got $peSubsystem ($peSubsystemName)."
-            exit 1
+            Fail-Smoke "komapaint.exe must use the Windows GUI subsystem (2), got $peSubsystem ($peSubsystemName)."
           }
 
           Write-Host ""
@@ -394,14 +402,12 @@ jobs:
             if ($mainWindowHandle -eq [IntPtr]::Zero) {
               $p.Kill()
               $p.WaitForExit()
-              Write-Error "Smoke test FAILED: process has no native main-window handle."
-              exit 1
+              Fail-Smoke "process is alive after 5s but has no native main-window handle (title: '$mainWindowTitle')."
             }
             if ($mainWindowTitle -notlike "KomaPaint *") {
               $p.Kill()
               $p.WaitForExit()
-              Write-Error "Smoke test FAILED: unexpected main-window title '$mainWindowTitle'."
-              exit 1
+              Fail-Smoke "unexpected main-window title '$mainWindowTitle'."
             }
 
             $closeAccepted = $p.CloseMainWindow()
@@ -409,24 +415,20 @@ jobs:
             if (-not $closeAccepted) {
               $p.Kill()
               $p.WaitForExit()
-              Write-Error "Smoke test FAILED: CloseMainWindow could not deliver WM_CLOSE."
-              exit 1
+              Fail-Smoke "CloseMainWindow could not deliver WM_CLOSE (handle: $mainWindowHandle, title: '$mainWindowTitle')."
             }
             if (-not $p.WaitForExit(5000)) {
               $p.Kill()
               $p.WaitForExit()
-              Write-Error "Smoke test FAILED: process did not exit within 5s after WM_CLOSE."
-              exit 1
+              Fail-Smoke "process did not exit within 5s after WM_CLOSE (handle: $mainWindowHandle, title: '$mainWindowTitle', closeAccepted: $closeAccepted)."
             }
             Write-Host ">>> Process exited with code $($p.ExitCode) after close."
             if ($p.ExitCode -ne 0) {
-              Write-Error "Smoke test FAILED: non-zero exit code $($p.ExitCode)."
-              exit 1
+              Fail-Smoke "process exited with non-zero code $($p.ExitCode) after WM_CLOSE."
             }
             Write-Host "=== Smoke test PASSED ==="
           } else {
-            Write-Error "Smoke test FAILED: komapaint.exe exited prematurely with code $($p.ExitCode)."
-            exit 1
+            Fail-Smoke "komapaint.exe exited prematurely with code $($p.ExitCode) (expected the event loop to run; check for a startup crash or a QML load failure)."
           }
 
       - name: Package into ZIP
