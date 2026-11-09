@@ -20,6 +20,8 @@ jobs:
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}\build
       OUTPUT_DIR: ${{ github.workspace }}\build\bin
+      TEST_DIR: ${{ github.workspace }}\build\tests\bin
+      STAGE_DIR: ${{ github.workspace }}\dist\KomaPaint
 
     steps:
       - name: Checkout
@@ -103,26 +105,37 @@ jobs:
           $exe = "${{ env.OUTPUT_DIR }}\komapaint.exe"
           if (!(Test-Path $exe)) {
             Write-Error "Expected build output not found: $exe"
+            Write-Host "Files in build\bin:"
+            Get-ChildItem ${{ env.OUTPUT_DIR }} -File -ErrorAction SilentlyContinue | Select Name | Out-String | Write-Host
             exit 1
           }
           Write-Host "Built executable:"
           Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Write-Host ""
+          Write-Host "Test executables (must be OUTSIDE build\bin so they are not shipped):"
+          $testExes = Get-ChildItem "${{ env.TEST_DIR }}" -Filter "test_*.exe" -ErrorAction SilentlyContinue
+          $testExes | ForEach-Object { Write-Host ("  " + $_.FullName) }
+          $strayTests = Get-ChildItem "${{ env.OUTPUT_DIR }}" -Filter "test_*.exe" -ErrorAction SilentlyContinue
+          if ($strayTests) {
+            Write-Error "Test executables leaked into the app output directory:"
+            $strayTests | ForEach-Object { Write-Host ("  " + $_.FullName) }
+            exit 1
+          }
 
       - name: Run unit tests
         shell: pwsh
         run: |
-          $env:PATH = "${{ steps.qt.outputs.qtBin }};" + $env:PATH
+          $env:PATH = "${{ steps.qt.outputs.qtBin }};${{ env.TEST_DIR }};" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
           $failed = 0
-          $exes = Get-ChildItem build -Recurse -Filter "test_*.exe" | Sort-Object Name
-          Write-Host "=== Discovered $($exes.Count) test executable(s) ==="
-          $exes | ForEach-Object { Write-Host ("  " + $_.FullName) }
-          Write-Host ""
-          Write-Host "=== Qt bin on PATH: ${{ steps.qt.outputs.qtBin }} ==="
+          $exes = Get-ChildItem "${{ env.TEST_DIR }}" -Filter "test_*.exe" | Sort-Object Name
+          if ($exes.Count -eq 0) {
+            Write-Error "No test executables were produced in ${{ env.TEST_DIR }}"
+            exit 1
+          }
+          Write-Host "=== Discovered $($exes.Count) test executable(s) in ${{ env.TEST_DIR }} ==="
           foreach ($exe in $exes) {
             Write-Host ">>> Running $($exe.Name) <<<"
-            # Capture stdout+stderr to a string, then dump it immediately so the
-            # Actions console shows every line. We don't rely on artifacts.
             $output = & $exe.FullName 2>&1 | Out-String
             $code = $LASTEXITCODE
             Write-Host $output
@@ -140,6 +153,15 @@ jobs:
           }
           Write-Host "=== All tests passed ==="
 
+      - name: Stage application directory
+        shell: pwsh
+        run: |
+          # Start from a clean staging directory containing only komapaint.exe.
+          if (Test-Path "${{ env.STAGE_DIR }}") { Remove-Item "${{ env.STAGE_DIR }}" -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path "${{ env.STAGE_DIR }}" | Out-Null
+          Copy-Item "${{ env.OUTPUT_DIR }}\komapaint.exe" "${{ env.STAGE_DIR }}\komapaint.exe" -Force
+          Write-Host "Staged komapaint.exe into ${{ env.STAGE_DIR }}"
+
       - name: Deploy Qt runtime dependencies (windeployqt)
         shell: pwsh
         run: |
@@ -148,16 +170,48 @@ jobs:
             Write-Error "windeployqt.exe not found at $windeploy"
             exit 1
           }
-          $exe    = "${{ env.OUTPUT_DIR }}\komapaint.exe"
+          $exe    = "${{ env.STAGE_DIR }}\komapaint.exe"
           $qmlDir = "${{ github.workspace }}\ui"
+          # Run windeployqt against the STAGED (single-exe) folder so only the
+          # runtime dependencies actually needed by komapaint.exe are pulled in.
+          # QML is bundled inside the executable via the qml.qrc resource, but
+          # we still pass --qmldir so windeployqt picks up any QML plugin modules
+          # (QtQuick, QtQuickControls2, QtQuickLayouts) that the QML engine loads
+          # at runtime.
+          Push-Location "${{ env.STAGE_DIR }}"
           & $windeploy --release --no-compiler-runtime --no-system-d3d-compiler `
-            --no-opengl-sw --qmldir $qmlDir $exe
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            --no-opengl-sw --qmldir $qmlDir --dir . $exe
+          $deployExit = $LASTEXITCODE
+          Pop-Location
+          if ($deployExit -ne 0) { exit $deployExit }
+
+      - name: Verify no test-only DLLs leaked into the package
+        shell: pwsh
+        run: |
+          $stage = "${{ env.STAGE_DIR }}"
+          $forbidden = @(
+            "Qt6Test.dll",
+            "Qt6Test.pdb"
+          )
+          foreach ($f in $forbidden) {
+            $found = Get-ChildItem $stage -Recurse -Filter $f -ErrorAction SilentlyContinue
+            if ($found) {
+              Write-Error "Test-only file leaked into release package: $($found.FullName)"
+              exit 1
+            }
+          }
+          $testExes = Get-ChildItem $stage -Recurse -Filter "test_*.exe" -ErrorAction SilentlyContinue
+          if ($testExes) {
+            Write-Error "Test executables leaked into release package:"
+            $testExes | ForEach-Object { Write-Host ("  " + $_.FullName) }
+            exit 1
+          }
+          Write-Host "Package is clean: no Qt6Test.dll, no test_*.exe."
 
       - name: Sanity-check deployed tree
         shell: pwsh
         run: |
-          $bin = "${{ env.OUTPUT_DIR }}"
+          $bin = "${{ env.STAGE_DIR }}"
           $required = @(
             "$bin\komapaint.exe",
             "$bin\Qt6Core.dll",
@@ -171,7 +225,8 @@ jobs:
           foreach ($f in $required) {
             if (!(Test-Path $f)) {
               Write-Error "Missing required deployed file: $f"
-              Get-ChildItem $bin -Recurse -File | Where-Object { $_.Name -like "Qt6*.dll" } | Select-Object Name | Format-Table -AutoSize | Out-String | Write-Host
+              Write-Host "Deployed Qt6 DLLs:"
+              Get-ChildItem $bin -File -Filter "Qt6*.dll" | Select Name | Format-Table -AutoSize | Out-String | Write-Host
               exit 1
             }
           }
@@ -181,10 +236,11 @@ jobs:
       - name: Package into ZIP
         shell: pwsh
         run: |
-          $src = "${{ env.OUTPUT_DIR }}"
           $zip = "${{ github.workspace }}\KomaPaint-Windows-x64.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
-          Compress-Archive -Path "$src\*" -DestinationPath $zip -CompressionLevel Optimal
+          # Zip the staged folder so the archive contains a single top-level
+          # "KomaPaint" directory with the exe and its dependencies.
+          Compress-Archive -Path "${{ env.STAGE_DIR }}" -DestinationPath $zip -CompressionLevel Optimal
           if (!(Test-Path $zip)) {
             Write-Error "Packaging failed; zip not produced."
             exit 1
