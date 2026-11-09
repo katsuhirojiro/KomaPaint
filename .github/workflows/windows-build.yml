@@ -276,6 +276,45 @@ jobs:
           Write-Host "============================================"
 
           # Diagnostics: list files the app actually needs
+          # Verify the packaged binary really is a Windows GUI-subsystem
+          # executable (PE subsystem 2), not a Windows console executable
+          # (subsystem 3). The subsystem is what decides whether Windows
+          # allocates a separate console/terminal window at launch time.
+          function Get-PeSubsystem {
+            param([Parameter(Mandatory = $true)][string]$Path)
+            $stream = [System.IO.File]::OpenRead($Path)
+            try {
+              $reader = [System.IO.BinaryReader]::new($stream)
+              try {
+                $stream.Position = 0x3c
+                $peOffset = $reader.ReadInt32()
+                $stream.Position = $peOffset
+                if ($reader.ReadUInt32() -ne 0x00004550) {
+                  throw "Invalid PE signature in $Path"
+                }
+                # PE signature (4 bytes) + COFF header (20 bytes), then the
+                # Subsystem UInt16 at offset 68 in the optional header.
+                $stream.Position = $peOffset + 4 + 20 + 68
+                return $reader.ReadUInt16()
+              } finally {
+                $reader.Dispose()
+              }
+            } finally {
+              $stream.Dispose()
+            }
+          }
+          $peSubsystem = Get-PeSubsystem $exe
+          $peSubsystemName = switch ($peSubsystem) {
+            2 { "Windows GUI" }
+            3 { "Windows Console" }
+            default { "Unknown" }
+          }
+          Write-Host "[DIAG] komapaint.exe PE subsystem: $peSubsystem ($peSubsystemName)"
+          if ($peSubsystem -ne 2) {
+            Write-Error "Smoke test FAILED: komapaint.exe must use the Windows GUI subsystem (2), got $peSubsystem ($peSubsystemName)."
+            exit 1
+          }
+
           Write-Host ""
           Write-Host "[DIAG] komapaint.exe exists: $(Test-Path $exe)"
           Write-Host "[DIAG] Qt6Core.dll in stage:  $(Test-Path "$bin\Qt6Core.dll")"
@@ -291,12 +330,15 @@ jobs:
           }
           Write-Host ""
 
-          # Launch with Start-Process, NO redirection, -NoNewWindow so the
-          # console-subsystem exe inherits the current PowerShell stdout/stderr
-          # directly. Every printf/Qt warning goes straight to the Actions
-          # console — no buffering, no events, no deadlocks.
+          # Launch without output redirection and without -NoNewWindow. The
+          # executable uses the Windows GUI subsystem (verified above), so
+          # Windows does not allocate a separate terminal/console window for
+          # it. Its development diagnostics are routed through Qt logging to
+          # the Windows debugger output channel instead of stdout/stderr, so
+          # this smoke test verifies launch behaviour from the process and
+          # native window state rather than captured console text.
           Write-Host ">>> STARTING komapaint.exe"
-          $p = Start-Process -FilePath $exe -WorkingDirectory $bin -PassThru -NoNewWindow
+          $p = Start-Process -FilePath $exe -WorkingDirectory $bin -PassThru
           Write-Host ">>> Started PID $($p.Id) at $(Get-Date -Format o)"
 
           # Wait up to 5 seconds. If it's still alive after that the event loop

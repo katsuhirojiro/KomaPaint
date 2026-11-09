@@ -62,6 +62,15 @@ C:/Qt/6.7.3/msvc2022_64/bin/windeployqt.exe build/bin/komapaint.exe
 After this step, `build/bin/komapaint.exe` runs standalone; no
 additional copies of the `ui/` directory are needed.
 
+`komapaint.exe` is built as a Windows GUI-subsystem application, so a
+normal launch does not open a separate console window. Development
+diagnostics are emitted through Qt logging (`qInfo`, `qWarning`,
+`qCritical`, ...). On Windows the desktop entry point routes those
+messages to the debugger output channel: view them in the Visual Studio
+Output window, in Qt Creator's Application Output pane while debugging,
+or with a debug-output viewer such as DebugView. Non-Windows builds keep
+the conventional stderr sink.
+
 ### 5. Run the tests
 
 ```powershell
