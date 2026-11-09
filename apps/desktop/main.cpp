@@ -1,6 +1,7 @@
 #include "KomaPaintApp.h"
 
 #include <QApplication>
+#include <QQuickStyle>
 
 // KomaPaint desktop entry point.
 //
@@ -11,6 +12,14 @@
 
 int main(int argc, char* argv[])
 {
+    // Select the Qt Quick Controls style BEFORE constructing QApplication so
+    // the style plugin is resolved deterministically at startup. Setting this
+    // after the QApplication exists is racy: if the QML engine cannot find
+    // the Basic style plugin it fails to instantiate the root window and
+    // exits with exit code -1 — matching the "process vanishes, no window"
+    // symptom.
+    QQuickStyle::setStyle("Basic");
+
     // High-DPI pixel-maps are enabled by default in Qt 6; no extra attributes
     // are required.
     QApplication app(argc, argv);

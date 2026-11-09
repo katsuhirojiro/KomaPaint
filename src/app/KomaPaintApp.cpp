@@ -38,10 +38,10 @@ void KomaPaintApp::registerTypes()
 
 void KomaPaintApp::loadStyles()
 {
-    // Use the "Basic" Qt Quick Controls style and apply a custom KomaPaint
-    // theme from QML. This avoids native widget styling that would clash
-    // with the dark charcoal aesthetic.
-    QQuickStyle::setStyle("Basic");
+    // Style selection now happens in main() before QApplication is created
+    // so the QML engine can resolve the Basic style plugin deterministically.
+    // This function is kept as a hook for future runtime style tweaks (font
+    // overrides, palette injection, etc.).
 }
 
 void KomaPaintApp::loadUi()
