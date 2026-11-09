@@ -41,25 +41,21 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          # Pin known-compatible versions (aqt 3.3 + py7zr 1.1) to avoid
-          # breaking changes in newer releases.
           python -m pip install "aqtinstall==3.3.0" "py7zr==1.1.0"
 
-      - name: Install Qt (base + required modules)
+      - name: Install Qt ${{ env.QT_VERSION }} (${{ env.QT_ARCH }})
         shell: pwsh
         run: |
-          # Install qtbase plus the add-on modules KomaPaint links against.
-          # Using a single invocation lets aqt resolve cross-module dependencies.
+          # Qt for Windows desktop ships qtdeclarative, qttools, qtshadertools etc.
+          # as *archives* (top-level .7z packages), not as `-m` addon modules.
+          # Using --archives with no base "all" subset does the full install minus
+          # the archives we omit; we only pull what KomaPaint actually uses so the
+          # job stays fast.
           aqt install-qt --outputdir "${{ env.QT_INSTALL_DIR }}" `
             windows desktop ${{ env.QT_VERSION }} ${{ env.QT_ARCH }} `
-            -m qtdeclarative qtshadertools qttools
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Full module set failed; retrying without qtshadertools (may already be part of qtdeclarative)..."
-            aqt install-qt --outputdir "${{ env.QT_INSTALL_DIR }}" `
-              windows desktop ${{ env.QT_VERSION }} ${{ env.QT_ARCH }} `
-              -m qtdeclarative qttools
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+            --archives qtbase qtdeclarative qtquickcontrols2 qtshadertools qttools `
+                       icu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Locate Qt installation
         id: qt
@@ -69,14 +65,15 @@ jobs:
           $qtBin = Join-Path $qtDir "bin"
           if (!(Test-Path (Join-Path $qtBin "qmake.exe"))) {
             Write-Error "qmake.exe not found at $qtBin -- Qt installation failed."
-            dir $qtDir -Recurse -Filter qmake.exe -ErrorAction SilentlyContinue | Select FullName
+            Write-Host "Installed tree:"
+            Get-ChildItem $qtDir -Recurse -Filter qmake.exe -ErrorAction SilentlyContinue | Select FullName
             exit 1
           }
           Write-Host "Qt root : $qtDir"
           Write-Host "Qt bin  : $qtBin"
           echo "qtDir=$qtDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           echo "qtBin=$qtBin" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          # Make Qt DLLs available for test executables later.
+          # Expose Qt DLLs on PATH so test executables can find them.
           echo "$qtBin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Configure CMake (Ninja, C++20, Release)
@@ -144,6 +141,7 @@ jobs:
           foreach ($f in $required) {
             if (!(Test-Path $f)) {
               Write-Error "Missing required deployed file: $f"
+              Get-ChildItem $bin -Recurse -File | Where-Object { $_.Name -like "Qt6*.dll" } | Select-Object Name | Format-Table -AutoSize | Out-String | Write-Host
               exit 1
             }
           }
