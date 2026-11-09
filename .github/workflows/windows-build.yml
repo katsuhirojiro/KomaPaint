@@ -190,14 +190,17 @@ jobs:
           & $windeploy --release --no-compiler-runtime --no-system-d3d-compiler `
             --no-opengl-sw --qmldir $qmlDir --dir . $exe
           # Ensure offscreen platform plugin is present for headless smoke test.
-          # (A stock release does not need it but we want it in CI.)
-          $offSrc  = "${{ steps.qt.outputs.qtBin }}\..\plugins\platforms\qoffscreen.dll"
-          $offDst  = "${{ env.STAGE_DIR }}\platforms\qoffscreen.dll"
+          # (A stock release does not need it but CI does.)
+          $pluginsRoot = (Resolve-Path "${{ steps.qt.outputs.qtBin }}\..\plugins").Path
+          $offSrc = Join-Path $pluginsRoot "platforms\qoffscreen.dll"
+          $offDst = "${{ env.STAGE_DIR }}\platforms\qoffscreen.dll"
+          Write-Host "offscreen plugin source: $offSrc"
           if (Test-Path $offSrc) {
             Copy-Item $offSrc $offDst -Force
-            Write-Host "Copied qoffscreen.dll for headless smoke test."
+            Write-Host "Copied qoffscreen.dll -> $offDst"
           } else {
-            Write-Warning "qoffscreen.dll not found at $offSrc; smoke test may fail if offscreen platform is needed."
+            Write-Error "qoffscreen.dll not found at $offSrc"
+            exit 1
           }
           $deployExit = $LASTEXITCODE
           Pop-Location
@@ -258,10 +261,7 @@ jobs:
           $bin = "${{ env.STAGE_DIR }}"
           $env:PATH = "$bin;" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
-          # Keep logging minimal for the first pass: *.debug=true floods the pipe
-          # and can obscure the actual failure; enable qt.qml / qt.quick warnings
-          # explicitly so QML errors are always printed.
-          $env:QT_LOGGING_RULES = "qt.qml.warning=true;qt.quick.warning=true;qt.qml.binding.removal.warning=true;qt.qml.import.warning=true;*.debug=false;qt.qml.debug=false"
+          $env:QT_LOGGING_RULES = "qt.qml.warning=true;qt.quick.warning=true"
           $exe = "$bin\komapaint.exe"
           Write-Host "=== Launching $exe (offscreen) ==="
           Write-Host "--- staged tree (recursive) ---"
@@ -269,70 +269,44 @@ jobs:
             $rel = $_.FullName.Substring($bin.Length + 1)
             Write-Host ("  {0,10}  {1}" -f $_.Length, $rel)
           }
-          $outFile = "$bin\smoke.out.log"
-          $errFile = "$bin\smoke.err.log"
-          Remove-Item $outFile,$errFile -Force -ErrorAction SilentlyContinue
-          # Run the executable SYNCHRONOUSLY with a timeout using
-          # System.Diagnostics.Process, so WaitForExit gives us the real exit
-          # code and stdout/stderr are flushed before we inspect them. The
-          # GUI subsystem (WIN32_EXECUTABLE) app works fine here; Start-Process
-          # + -Wait uses the same .NET API under the hood but sometimes
-          # buffers output when -RedirectStandardOutput is combined with -Wait.
-          $p = New-Object System.Diagnostics.Process
-          $p.StartInfo.FileName = $exe
-          $p.StartInfo.WorkingDirectory = $bin
-          $p.StartInfo.UseShellExecute = $false
-          $p.StartInfo.RedirectStandardOutput = $true
-          $p.StartInfo.RedirectStandardError  = $true
-          $p.StartInfo.CreateNoWindow = $true
-          # Subscribe to DataReceived events so stdout/stderr are drained
-          # asynchronously — doing synchronous ReadToEnd after WaitForExit
-          # deadlocks when the child fills the pipe buffer (Qt verbose logs
-          # can easily overflow the default 4KB buffer).
-          $sbOut = New-Object System.Text.StringBuilder
-          $sbErr = New-Object System.Text.StringBuilder
-          $evtOut = Register-ObjectEvent -InputObject $p -EventName OutputDataReceived -Action {
-            param($s,$e)
-            if ($e.Data -ne $null) { [void] $Event.MessageData.AppendLine($e.Data) }
-          } -MessageData $sbOut
-          $evtErr = Register-ObjectEvent -InputObject $p -EventName ErrorDataReceived -Action {
-            param($s,$e)
-            if ($e.Data -ne $null) { [void] $Event.MessageData.AppendLine($e.Data) }
-          } -MessageData $sbErr
-          $null = $p.Start()
-          $p.BeginOutputReadLine()
-          $p.BeginErrorReadLine()
-          $exited = $p.WaitForExit(5000)  # wait up to 5s
-          # Give async event handlers a moment to deliver last bytes.
-          Start-Sleep -Milliseconds 300
-          $stdout = $sbOut.ToString()
-          $stderr = $sbErr.ToString()
-          Unregister-Event -SourceIdentifier $evtOut.Name -ErrorAction SilentlyContinue
-          Unregister-Event -SourceIdentifier $evtErr.Name -ErrorAction SilentlyContinue
-          Write-Host "--- stdout ---"
-          Write-Host $stdout
-          Write-Host "--- stderr ---"
-          Write-Host $stderr
-          if (-not $exited) {
-            Write-Host "Process still alive after 5 seconds (PID $($p.Id)) -- event loop running."
-            # Close cleanly by posting WM_CLOSE.
-            $p.CloseMainWindow() | Out-Null
-            if (-not $p.WaitForExit(5000)) {
-              Write-Warning "Process did not exit within 5s of CloseMainWindow; killing."
-              $p.Kill()
-              $p.WaitForExit()
-            }
-            Write-Host "Exit code: $($p.ExitCode)"
-            if ($p.ExitCode -ne 0) {
-              Write-Error "komapaint.exe exited with non-zero code $($p.ExitCode) after close."
-              exit 1
-            }
-            Write-Host "=== Smoke test PASSED ==="
-          } else {
-            Write-Host "Exit code: $($p.ExitCode)"
-            Write-Error "komapaint.exe exited prematurely with code $($p.ExitCode); failed to start event loop."
+          Write-Host "--- qt.conf ---"
+          if (Test-Path "$bin\qt.conf") { Get-Content "$bin\qt.conf" | Write-Host } else { Write-Host "(no qt.conf)" }
+          # Write a tiny PowerShell watchdog script that launches komapaint.exe,
+          # waits 4 seconds, reports whether it's alive, then closes it. We run
+          # this via PowerShell's -Command with all output going to the current
+          # console via Write-Host; no .NET Process / redirect tricks.
+          $watchdog = @"
+          `$exe = '$exe'
+          `$bin = '$bin'
+          `$env:PATH = "`$bin;" + `$env:PATH
+          `$env:QT_QPA_PLATFORM = 'offscreen'
+          `$env:QT_LOGGING_RULES = 'qt.qml.warning=true;qt.quick.warning=true'
+          `$p = Start-Process -FilePath `$exe -PassThru
+          Write-Host "Started PID `$(`$p.Id)"
+          Start-Sleep -Seconds 4
+          if (`$p.HasExited) {
+            Write-Host "EXIT_EARLY:`$(`$p.ExitCode)"
             exit 1
           }
+          Write-Host "ALIVE:after_4s"
+          `$p.CloseMainWindow() | Out-Null
+          if (!`$p.WaitForExit(5000)) { `$p.Kill(); `$p.WaitForExit() }
+          Write-Host "EXIT:`$(`$p.ExitCode)"
+          exit `$p.ExitCode
+"@
+          $wdPath = "$bin\smoke_watchdog.ps1"
+          Set-Content -Path $wdPath -Value $watchdog -Encoding ASCII
+          Write-Host "--- watchdog script ---"
+          Get-Content $wdPath | Write-Host
+          Write-Host "--- running watchdog ---"
+          & powershell -NoProfile -ExecutionPolicy Bypass -File $wdPath
+          $watchdogExit = $LASTEXITCODE
+          Write-Host "Watchdog exited with code $watchdogExit"
+          if ($watchdogExit -ne 0) {
+            Write-Error "Smoke test failed (code $watchdogExit)."
+            exit 1
+          }
+          Write-Host "=== Smoke test PASSED ==="
 
       - name: Upload smoke-test logs (always)
         uses: actions/upload-artifact@v4
