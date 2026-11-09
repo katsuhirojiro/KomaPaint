@@ -18,6 +18,24 @@
 
 namespace komapaint {
 
+static void qtMsgHandler(QtMsgType type, const QMessageLogContext& ctx,
+                         const QString& msg)
+{
+    const char* tag = "INFO ";
+    switch (type) {
+        case QtDebugMsg:    tag = "DEBUG"; break;
+        case QtInfoMsg:     tag = "INFO "; break;
+        case QtWarningMsg:  tag = "WARN "; break;
+        case QtCriticalMsg: tag = "CRIT "; break;
+        case QtFatalMsg:    tag = "FATAL"; break;
+    }
+    fprintf(stderr, "[Qt-%s] %s\n", tag, msg.toUtf8().constData());
+    if (ctx.file && ctx.line) {
+        fprintf(stderr, "    at %s:%u\n", ctx.file, ctx.line);
+    }
+    fflush(stderr);
+}
+
 KomaPaintApp::KomaPaintApp(QObject* parent)
     : QObject(parent),
       m_settings(QStringLiteral(KOMAPAINT_ORGANIZATION),
@@ -32,35 +50,19 @@ void KomaPaintApp::registerTypes()
     qRegisterMetaType<PanelManager*>();
 }
 
-void KomaPaintApp::loadStyles()
-{
-    // Style is set in main() before QApplication construction.
-}
-
-static void logLine(const char* prefix, const char* msg)
-{
-    fprintf(stdout, "[KomaPaint] %s %s\n", prefix, msg);
-    fflush(stdout);
-}
+void KomaPaintApp::loadStyles() {}
 
 void KomaPaintApp::loadUi()
 {
+    qInstallMessageHandler(qtMsgHandler);
+
     auto* ctx = m_engine.rootContext();
     ctx->setContextProperty(QStringLiteral("App"),       &m_config);
     ctx->setContextProperty(QStringLiteral("Settings"),  &m_settings);
     ctx->setContextProperty(QStringLiteral("Panels"),    &m_panels);
     ctx->setContextProperty(QStringLiteral("Workspace"), &m_workspace);
 
-    logLine("INFO", "Starting QML load");
-
-    QObject::connect(&m_engine, &QQmlApplicationEngine::warnings,
-                     this, [](const QList<QQmlError>& warnings) {
-        for (const QQmlError& e : warnings) {
-            fprintf(stderr, "[KomaPaint] QML WARNING: %s\n",
-                    e.toString().toUtf8().constData());
-            fflush(stderr);
-        }
-    });
+    printf("[KomaPaint] loadUi(): setting up QML context properties\n");
 
     const QString qrcMain = QStringLiteral(":/workspaces/MainWindow.qml");
     const QString qrcUrl  = QStringLiteral("qrc:/workspaces/MainWindow.qml");
@@ -69,30 +71,34 @@ void KomaPaintApp::loadUi()
 
     QUrl loadUrl;
     if (QFile::exists(qrcMain)) {
-        logLine("INFO", "Loading QML from Qt resource (qrc:/workspaces/MainWindow.qml)");
+        printf("[KomaPaint] loadUi(): loading QML from resource: %s\n",
+               qrcUrl.toUtf8().constData());
         m_engine.addImportPath(QStringLiteral("qrc:/"));
         loadUrl = QUrl(qrcUrl);
     } else if (QFile::exists(srcMain)) {
-        logLine("INFO", ("Loading QML from source tree: " + srcMain).toUtf8().constData());
+        printf("[KomaPaint] loadUi(): loading QML from source tree: %s\n",
+               srcMain.toUtf8().constData());
         m_engine.addImportPath(qmlDir);
         loadUrl = QUrl::fromLocalFile(srcMain);
     } else {
         fprintf(stderr,
-                "[KomaPaint] CRITICAL: Cannot find MainWindow.qml in resource (%s) "
-                "or source dir (%s)\n",
+                "[KomaPaint] CRITICAL: MainWindow.qml not found in resource (%s) "
+                "or source tree (%s).\n",
                 qrcMain.toUtf8().constData(), srcMain.toUtf8().constData());
-        fflush(stderr);
         QTimer::singleShot(0, QCoreApplication::instance(), []{ QCoreApplication::exit(-2); });
         return;
     }
 
+    printf("[KomaPaint] loadUi(): calling m_engine.load(%s)...\n",
+           loadUrl.toString().toUtf8().constData());
+    fflush(stdout);
     m_engine.load(loadUrl);
+    printf("[KomaPaint] loadUi(): m_engine.load() returned; rootObjects().size() = %d\n",
+           m_engine.rootObjects().size());
+    fflush(stdout);
 
-    // Synchronous check: if load didn't produce any root object, QML failed to
-    // instantiate. Schedule exit so the event loop processes it cleanly.
     if (m_engine.rootObjects().isEmpty()) {
-        fprintf(stderr, "[KomaPaint] CRITICAL: rootObjects() is empty after load().\n");
-        fflush(stderr);
+        fprintf(stderr, "[KomaPaint] CRITICAL: rootObjects() empty after load - QML failed to parse.\n");
         QTimer::singleShot(0, QCoreApplication::instance(), []{ QCoreApplication::exit(-1); });
         return;
     }
@@ -101,12 +107,12 @@ void KomaPaintApp::loadUi()
     if (!m_window) {
         fprintf(stderr, "[KomaPaint] CRITICAL: root object is '%s', not a QQuickWindow.\n",
                 m_engine.rootObjects().first()->metaObject()->className());
-        fflush(stderr);
         QTimer::singleShot(0, QCoreApplication::instance(), []{ QCoreApplication::exit(-3); });
         return;
     }
 
-    logLine("INFO", "Main window created; showing.");
+    printf("[KomaPaint] loadUi(): main window created; calling show()\n");
+    fflush(stdout);
     m_window->show();
 }
 
@@ -114,7 +120,7 @@ int KomaPaintApp::run()
 {
     auto* app = qobject_cast<QApplication*>(QCoreApplication::instance());
     if (!app) {
-        fprintf(stderr, "[KomaPaint] CRITICAL: No QApplication instance.\n");
+        fprintf(stderr, "[KomaPaint] CRITICAL: no QApplication instance.\n");
         return -1;
     }
 
@@ -132,16 +138,14 @@ int KomaPaintApp::run()
         QStringLiteral("Arial")
     };
     for (const QString& name : preferredFonts) {
-        if (QFontDatabase::hasFamily(name)) {
-            app->setFont(QFont(name, 10));
-            break;
-        }
+        if (QFontDatabase::hasFamily(name)) { app->setFont(QFont(name, 10)); break; }
     }
 
     registerTypes();
     loadStyles();
     loadUi();
-    logLine("INFO", "Entering event loop.");
+    printf("[KomaPaint] run(): entering app.exec() event loop\n");
+    fflush(stdout);
     return app->exec();
 }
 

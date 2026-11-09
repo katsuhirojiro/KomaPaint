@@ -263,62 +263,68 @@ jobs:
           $env:PATH = "$bin;$qtBin;" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
           $exe = "$bin\komapaint.exe"
-          Write-Host "=== Launching $exe (console build) ==="
-          Write-Host "--- staged top-level ---"
-          Get-ChildItem $bin | Select Name,Length | Format-Table -AutoSize | Out-String | Write-Host
-          Write-Host "--- platforms/ ---"
-          Get-ChildItem "$bin\platforms" -ErrorAction SilentlyContinue | Select Name | Format-Table -AutoSize | Out-String | Write-Host
-          Write-Host "--- styles/ ---"
-          Get-ChildItem "$bin\styles" -Recurse -ErrorAction SilentlyContinue | Select Name | Format-Table -AutoSize | Out-String | Write-Host
-          Write-Host "--- qt.conf ---"
-          if (Test-Path "$bin\qt.conf") { Get-Content "$bin\qt.conf" | Write-Host } else { Write-Host "(no qt.conf)" }
-          # Use async OutputDataReceived events so stdout/stderr never deadlock.
-          $p = New-Object System.Diagnostics.Process
-          $p.StartInfo.FileName = $exe
-          $p.StartInfo.WorkingDirectory = $bin
-          $p.StartInfo.UseShellExecute = $false
-          $p.StartInfo.RedirectStandardOutput = $true
-          $p.StartInfo.RedirectStandardError  = $true
-          $p.StartInfo.CreateNoWindow = $true
-          $sbOut = New-Object System.Text.StringBuilder
-          $sbErr = New-Object System.Text.StringBuilder
-          $evOut = Register-ObjectEvent -InputObject $p -EventName OutputDataReceived -Action {
-            param($s,$e)
-            if ($e.Data -ne $null) {
-              [void] $Event.MessageData.AppendLine($e.Data)
-              Write-Host "OUT: $($e.Data)"
+
+          Write-Host "============================================"
+          Write-Host "SMOKE TEST: launching komapaint.exe directly"
+          Write-Host "  exe:       $exe"
+          Write-Host "  cwd:       $bin"
+          Write-Host "  QT_QPA_PLATFORM=$env:QT_QPA_PLATFORM"
+          Write-Host "============================================"
+
+          # Diagnostics: list files the app actually needs
+          Write-Host ""
+          Write-Host "[DIAG] komapaint.exe exists: $(Test-Path $exe)"
+          Write-Host "[DIAG] Qt6Core.dll in stage:  $(Test-Path "$bin\Qt6Core.dll")"
+          Write-Host "[DIAG] Qt6Gui.dll in stage:   $(Test-Path "$bin\Qt6Gui.dll")"
+          Write-Host "[DIAG] Qt6Qml.dll in stage:   $(Test-Path "$bin\Qt6Qml.dll")"
+          Write-Host "[DIAG] Qt6Quick.dll in stage: $(Test-Path "$bin\Qt6Quick.dll")"
+          Write-Host "[DIAG] qwindows.dll:          $(Test-Path "$bin\platforms\qwindows.dll")"
+          Write-Host "[DIAG] qoffscreen.dll:        $(Test-Path "$bin\platforms\qoffscreen.dll")"
+          Write-Host "[DIAG] qt.conf:               $(Test-Path "$bin\qt.conf")"
+          if (Test-Path "$bin\qt.conf") {
+            Write-Host "--- qt.conf contents ---"
+            Get-Content "$bin\qt.conf" | ForEach-Object { Write-Host "  $_" }
+          }
+          Write-Host ""
+
+          # Launch with Start-Process, NO redirection, -NoNewWindow so the
+          # console-subsystem exe inherits the current PowerShell stdout/stderr
+          # directly. Every printf/Qt warning goes straight to the Actions
+          # console — no buffering, no events, no deadlocks.
+          Write-Host ">>> STARTING komapaint.exe"
+          $p = Start-Process -FilePath $exe -WorkingDirectory $bin -PassThru -NoNewWindow
+          Write-Host ">>> Started PID $($p.Id) at $(Get-Date -Format o)"
+
+          # Wait up to 5 seconds. If it's still alive after that the event loop
+          # started successfully; close the window.
+          $deadline = (Get-Date).AddSeconds(5)
+          $exitedEarly = $false
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if ($p.HasExited) {
+              Write-Host ">>> PROCESS EXITED EARLY with code $($p.ExitCode) at $(Get-Date -Format o)"
+              $exitedEarly = $true
+              break
             }
-          } -MessageData $sbOut
-          $evErr = Register-ObjectEvent -InputObject $p -EventName ErrorDataReceived -Action {
-            param($s,$e)
-            if ($e.Data -ne $null) {
-              [void] $Event.MessageData.AppendLine($e.Data)
-              Write-Host "ERR: $($e.Data)"
+          }
+
+          if (-not $exitedEarly) {
+            Write-Host ">>> Process alive after 5s - event loop is running."
+            $null = $p.CloseMainWindow()
+            if (-not $p.WaitForExit(5000)) {
+              Write-Warning "Process did not respond to CloseMainWindow within 5s; killing."
+              $p.Kill()
+              $p.WaitForExit()
             }
-          } -MessageData $sbErr
-          $null = $p.Start()
-          $p.BeginOutputReadLine()
-          $p.BeginErrorReadLine()
-          $alive = $p.WaitForExit(5000)
-          Start-Sleep -Milliseconds 500  # drain events
-          $p.CancelOutputRead()
-          $p.CancelErrorRead()
-          Unregister-Event -SourceIdentifier $evOut.Name -ErrorAction SilentlyContinue
-          Unregister-Event -SourceIdentifier $evErr.Name -ErrorAction SilentlyContinue
-          if (-not $alive) {
-            Write-Host "Process still alive after 5 seconds - event loop running."
-            $p.CloseMainWindow() | Out-Null
-            if (-not $p.WaitForExit(5000)) { $p.Kill(); $p.WaitForExit() }
-            Write-Host "Exit code after close: $($p.ExitCode)"
-            if ($p.ExitCode -ne 0) { Write-Error "Smoke test FAILED: non-zero exit $($p.ExitCode) on close"; exit 1 }
+            Write-Host ">>> Process exited with code $($p.ExitCode) after close."
+            if ($p.ExitCode -ne 0) {
+              Write-Error "Smoke test FAILED: non-zero exit code $($p.ExitCode)."
+              exit 1
+            }
             Write-Host "=== Smoke test PASSED ==="
           } else {
-            Write-Host "Process exited early with code $($p.ExitCode)."
-            Write-Host "Captured stdout:"
-            Write-Host $sbOut.ToString()
-            Write-Host "Captured stderr:"
-            Write-Host $sbErr.ToString()
-            Write-Error "Smoke test FAILED: exited prematurely"
+            Write-Error "Smoke test FAILED: komapaint.exe exited prematurely with code $($p.ExitCode)."
             exit 1
           }
 
