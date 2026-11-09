@@ -271,39 +271,29 @@ jobs:
           }
           Write-Host "--- qt.conf ---"
           if (Test-Path "$bin\qt.conf") { Get-Content "$bin\qt.conf" | Write-Host } else { Write-Host "(no qt.conf)" }
-          # Write a tiny PowerShell watchdog script that launches komapaint.exe,
-          # waits 4 seconds, reports whether it's alive, then closes it. We run
-          # this via PowerShell's -Command with all output going to the current
-          # console via Write-Host; no .NET Process / redirect tricks.
-          $watchdog = @"
-          `$exe = '$exe'
-          `$bin = '$bin'
-          `$env:PATH = "`$bin;" + `$env:PATH
-          `$env:QT_QPA_PLATFORM = 'offscreen'
-          `$env:QT_LOGGING_RULES = 'qt.qml.warning=true;qt.quick.warning=true'
-          `$p = Start-Process -FilePath `$exe -PassThru
-          Write-Host "Started PID `$(`$p.Id)"
+          # Launch komapaint.exe and watch for 4 seconds. If it's still alive we
+          # consider the startup successful; close via CloseMainWindow and
+          # verify clean exit. Output from the app will be empty (GUI subsystem
+          # app doesn't attach stdout), but the "ALIVE" line is enough to prove
+          # we made it to the event loop.
+          $p = Start-Process -FilePath $exe -WorkingDirectory $bin -PassThru
+          Write-Host "Started PID $($p.Id)"
           Start-Sleep -Seconds 4
-          if (`$p.HasExited) {
-            Write-Host "EXIT_EARLY:`$(`$p.ExitCode)"
+          if ($p.HasExited) {
+            Write-Host "Process exited prematurely with code $($p.ExitCode)."
+            Write-Error "Smoke test FAILED: process did not stay alive."
             exit 1
           }
-          Write-Host "ALIVE:after_4s"
-          `$p.CloseMainWindow() | Out-Null
-          if (!`$p.WaitForExit(5000)) { `$p.Kill(); `$p.WaitForExit() }
-          Write-Host "EXIT:`$(`$p.ExitCode)"
-          exit `$p.ExitCode
-"@
-          $wdPath = "$bin\smoke_watchdog.ps1"
-          Set-Content -Path $wdPath -Value $watchdog -Encoding ASCII
-          Write-Host "--- watchdog script ---"
-          Get-Content $wdPath | Write-Host
-          Write-Host "--- running watchdog ---"
-          & powershell -NoProfile -ExecutionPolicy Bypass -File $wdPath
-          $watchdogExit = $LASTEXITCODE
-          Write-Host "Watchdog exited with code $watchdogExit"
-          if ($watchdogExit -ne 0) {
-            Write-Error "Smoke test failed (code $watchdogExit)."
+          Write-Host "Process still alive after 4s - event loop is running."
+          $p.CloseMainWindow() | Out-Null
+          if (-not $p.WaitForExit(5000)) {
+            Write-Warning "Process did not exit within 5s of CloseMainWindow; killing."
+            $p.Kill()
+            $p.WaitForExit()
+          }
+          Write-Host "Process exited with code $($p.ExitCode)."
+          if ($p.ExitCode -ne 0) {
+            Write-Error "Smoke test FAILED: non-zero exit code $($p.ExitCode)."
             exit 1
           }
           Write-Host "=== Smoke test PASSED ==="
