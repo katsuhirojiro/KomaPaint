@@ -6,13 +6,13 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <QtGlobal>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
 #include <QFontDatabase>
 #include <QList>
-#include <QMessageLogContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QQmlError>
