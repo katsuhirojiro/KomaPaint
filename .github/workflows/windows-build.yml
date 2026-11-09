@@ -263,7 +263,11 @@ jobs:
           set "QT_BIN_DIR=${{ steps.qt.outputs.qtBin }}"
           set "PATH=%STAGE_DIR%;%QT_BIN_DIR%;%PATH%"
           set "QT_QPA_PLATFORM=offscreen"
-          echo === Launching komapaint.exe directly via cmd.exe ===
+          set "OUT=%STAGE_DIR%\smoke.stdout.log"
+          set "ERR=%STAGE_DIR%\smoke.stderr.log"
+          break > "%OUT%"
+          break > "%ERR%"
+          echo === Launching komapaint.exe via cmd /c, redirecting output ===
           echo --- staged tree (top-level) ---
           dir /b "%STAGE_DIR%"
           echo --- platforms ---
@@ -271,21 +275,26 @@ jobs:
           echo --- qt.conf ---
           type "%STAGE_DIR%\qt.conf" 2>nul
           echo -----------------------------------------------------
-          rem Launch komapaint.exe synchronously (console-subsystem build, so
-          rem cmd.exe waits for it). Use a ping-based timeout wrapper via
-          rem 'start' + 'timeout' so we can detect a crash vs successful event loop.
-          start "" /b "%STAGE_DIR%\komapaint.exe"
-          set "FOUND="
+          rem Launch komapaint.exe with cmd's own redirection to capture stdout/err.
+          start "" /b "%STAGE_DIR%\komapaint.exe" > "%OUT%" 2> "%ERR%"
           for /L %%i in (1,1,5) do (
             timeout /t 1 /nobreak >nul
-            echo --- after %%i seconds ---
+            echo --- after %%i seconds (stdout so far) ---
+            type "%OUT%" 2>nul
+            echo --- after %%i seconds (stderr so far) ---
+            type "%ERR%" 2>nul
             tasklist /fi "imagename eq komapaint.exe" 2>nul | findstr /i komapaint.exe >nul
             if errorlevel 1 (
-              echo !!! komapaint.exe is NOT running after %%i seconds - crashed/never started.
-              goto :fail
+              echo !!! komapaint.exe is NOT running after %%i seconds.
+              echo --- final stdout ---
+              type "%OUT%"
+              echo --- final stderr ---
+              type "%ERR%"
+              echo !!! Smoke test FAILED.
+              exit /b 1
             )
           )
-          echo --- Process alive after 5s, posting WM_CLOSE via taskkill ---
+          echo --- Process alive after 5s, closing via taskkill ---
           taskkill /im komapaint.exe >nul 2>&1
           set "waitExit=0"
           :waitclose
@@ -296,11 +305,12 @@ jobs:
           if %waitExit% lss 5 goto waitclose
           taskkill /f /im komapaint.exe >nul 2>&1
           :closed
+          echo --- final stdout ---
+          type "%OUT%"
+          echo --- final stderr ---
+          type "%ERR%"
           echo === Smoke test PASSED ===
           exit /b 0
-          :fail
-          echo !!! Smoke test FAILED.
-          exit /b 1
           endlocal
 
       - name: Upload smoke-test logs (always)
