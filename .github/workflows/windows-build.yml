@@ -31,6 +31,11 @@ jobs:
         with:
           arch: amd64
 
+      - name: Set up Python (for aqtinstall)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install Qt ${{ env.QT_VERSION }} (${{ env.QT_ARCH }})
         uses: jurplel/install-qt-action@v4
         id: qt
@@ -41,12 +46,14 @@ jobs:
           arch: ${{ env.QT_ARCH }}
           dir: ${{ github.workspace }}\qt
           set-env: true
+          setup-python: false
           # Additional modules required beyond qtbase (which the action always installs):
           # qtdeclarative : Qml, Quick, Quick Controls 2, Quick Layouts
           # qtshadertools : runtime shader compiler required by QtQuick/QtQuickControls2
           # qttools       : windeployqt
           modules: 'qtdeclarative qtshadertools qttools'
           aqtversion: '==3.3.*'
+          py7zrversion: '==1.1.*'
           cache: true
 
       - name: Locate Qt installation
