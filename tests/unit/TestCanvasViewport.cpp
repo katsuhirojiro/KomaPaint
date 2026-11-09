@@ -77,6 +77,8 @@ void TestCanvasViewport::dirtyAndLayers()
     doc.setBackgroundColor(Qt::green); view.refreshNow();
     auto blank = view.documentToViewport(280, 180);
     QCOMPARE(view.frameSnapshot().pixelColor(qRound(blank.x()), qRound(blank.y())), QColor(Qt::green));
+    // Move the entire first tile offscreen before editing it.
+    view.panBy(-140, 0); view.refreshNow();
     // Offscreen edits stay dirty until brought into view.
     QCOMPARE(bottom->tiles().setPixel({0, 0}, 0xff00ff00U), SparseTileStore::WriteResult::Changed);
     view.refreshNow(); QVERIFY(!bottom->tiles().dirtyRegions().empty());

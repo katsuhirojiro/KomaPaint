@@ -138,7 +138,6 @@ jobs:
           Write-Host "=== Discovered $($exes.Count) test executable(s) in ${{ env.TEST_DIR }} ==="
           foreach ($exe in $exes) {
             Write-Host ">>> Running $($exe.Name) <<<"
-            Write-Host "::notice title=Test started::$($exe.Name)"
             if ($exe.Name -eq 'test_canvas_viewport.exe') {
               $resultFile = Join-Path $env:RUNNER_TEMP 'viewport-test.txt'
               $output = & $exe.FullName -o "$resultFile,txt" 2>&1 | Out-String
@@ -149,8 +148,6 @@ jobs:
               $code = $LASTEXITCODE
             }
             Write-Host $output
-            $details = $output.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-            Write-Host "::notice title=Test result::$($exe.Name) exit $code $details"
             if ($code -ne 0) {
               Write-Host ">>> $($exe.Name) FAILED with exit code $code <<<"
               # Preserve diagnostic output in the run annotation as well as logs.
