@@ -270,7 +270,10 @@ jobs:
           $bin = "${{ env.STAGE_DIR }}"
           $env:PATH = "$bin;" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
-          $env:QT_LOGGING_RULES = "*.debug=true;qt.qml.binding.removal.info=true"
+          # Keep logging minimal for the first pass: *.debug=true floods the pipe
+          # and can obscure the actual failure; enable qt.qml / qt.quick warnings
+          # explicitly so QML errors are always printed.
+          $env:QT_LOGGING_RULES = "qt.qml.warning=true;qt.quick.warning=true;qt.qml.binding.removal.warning=true;qt.qml.import.warning=true;*.debug=false;qt.qml.debug=false"
           $exe = "$bin\komapaint.exe"
           Write-Host "=== Launching $exe (offscreen) ==="
           Write-Host "--- staged tree (recursive) ---"

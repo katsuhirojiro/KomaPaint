@@ -3,12 +3,16 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <cstdio>
+#include <cstdlib>
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
 #include <QFontDatabase>
 #include <QList>
+#include <QMessageLogContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QQmlError>
@@ -52,8 +56,31 @@ void KomaPaintApp::loadUi()
     ctx->setContextProperty(QStringLiteral("Panels"),      &m_panels);
     ctx->setContextProperty(QStringLiteral("Workspace"),   &m_workspace);
 
-    qInfo() << "[KomaPaint] Starting up; Qt version =" << qVersion();
-    qInfo() << "[KomaPaint] Application dir =" << QCoreApplication::applicationDirPath();
+    fprintf(stdout, "[KomaPaint] Starting up; Qt version %s\n", qVersion());
+    fprintf(stdout, "[KomaPaint] Application dir = %s\n",
+            QCoreApplication::applicationDirPath().toUtf8().constData());
+    fprintf(stdout, "[KomaPaint] Arguments (argc = %d):\n",
+            QCoreApplication::arguments().size());
+    for (const QString& a : QCoreApplication::arguments()) {
+        fprintf(stdout, "   %s\n", a.toUtf8().constData());
+    }
+    fflush(stdout);
+    qInstallMessageHandler([](QtMsgType type, const QMessageLogContext& ctx, const QString& msg) {
+        const char* tag = "INFO ";
+        switch (type) {
+            case QtDebugMsg:    tag = "DEBUG"; break;
+            case QtInfoMsg:     tag = "INFO "; break;
+            case QtWarningMsg:  tag = "WARN "; break;
+            case QtCriticalMsg: tag = "CRIT "; break;
+            case QtFatalMsg:    tag = "FATAL"; break;
+        }
+        fprintf(stderr, "[%s] %s (%s:%u, %s)\n", tag,
+                msg.toUtf8().constData(),
+                ctx.file ? ctx.file : "",
+                ctx.line,
+                ctx.function ? ctx.function : "");
+        fflush(stderr);
+    });
 
     // Log any QML warnings/errors so startup failures are visible even when
     // the user launches from Explorer with no console attached.
@@ -94,27 +121,49 @@ void KomaPaintApp::loadUi()
         return;
     }
 
+    fprintf(stdout, "[KomaPaint] About to load QML: %s\n", loadUrl.toString().toUtf8().constData());
+    fflush(stdout);
     m_engine.load(loadUrl);
+    fprintf(stdout, "[KomaPaint] m_engine.load() returned. Root objects: %d\n",
+            m_engine.rootObjects().size());
+    for (QObject* o : m_engine.rootObjects()) {
+        fprintf(stdout, "   root object: %s\n", o->metaObject()->className());
+    }
+    fflush(stdout);
+    // If QML load failed to produce ANY root object, exit immediately.
+    // (The objectCreated signal may not have been dispatched yet depending on
+    // connection type, so check synchronously after load returns.)
+    if (m_engine.rootObjects().isEmpty()) {
+        fprintf(stderr, "[KomaPaint] CRITICAL: m_engine.rootObjects() is empty after load.\n");
+        fflush(stderr);
+        QTimer::singleShot(0, QCoreApplication::instance(), []{ QCoreApplication::exit(-4); });
+    }
 
     QObject::connect(&m_engine, &QQmlApplicationEngine::objectCreated,
                      this, [this, loadUrl](QObject* obj, const QUrl& url) {
         if (url != loadUrl) return;  // only react to the main window creation
+        fprintf(stdout, "[KomaPaint] objectCreated fired: obj=%p url=%s\n",
+                (void*)obj, url.toString().toUtf8().constData());
+        fflush(stdout);
         if (!obj) {
-            qCritical() << "[KomaPaint] Failed to instantiate main QML:" << url;
+            fprintf(stderr, "[KomaPaint] CRITICAL: Failed to instantiate main QML: %s\n",
+                    url.toString().toUtf8().constData());
+            fflush(stderr);
             QCoreApplication::exit(-1);
             return;
         }
         m_window = qobject_cast<QQuickWindow*>(obj);
         if (!m_window) {
-            qCritical() << "[KomaPaint] Root QML object is not a QQuickWindow; check that"
-                        << "MainWindow.qml is an ApplicationWindow.";
+            fprintf(stderr, "[KomaPaint] CRITICAL: Root QML object (%s) is not a QQuickWindow.\n",
+                    obj->metaObject()->className());
+            fflush(stderr);
             QCoreApplication::exit(-3);
             return;
         }
-        qInfo() << "[KomaPaint] Main window created; showing.";
+        fprintf(stdout, "[KomaPaint] Main window created; calling show().\n");
+        fflush(stdout);
         m_window->show();
-    }, Qt::QueuedConnection);
-}
+    }, Qt::DirectConnection);
 
 int KomaPaintApp::run()
 {
