@@ -1,8 +1,8 @@
 # Milestone 2.2: sparse tile storage and rendering design
 
-Status: proposed implementation plan. Neither tile storage nor the renderer
-exists yet. Validate each component before moving on; painting is not part of
-this milestone. The current QML blank-canvas preview is temporary and is not
+Status: geometry and initial sparse per-layer storage are implemented; dirty
+tracking, compositing and the renderer remain planned. Validate each component
+before moving on; painting is not part of this milestone. The current QML blank-canvas preview is temporary and is not
 an artwork store or production renderer.
 
 ## Boundaries and ownership
@@ -116,3 +116,16 @@ add dirty-document protection for replace/close and eventually save.
 
 Build and run the existing suite and new component tests for each increment.
 Do not start the brush or claim undo functionality as part of this milestone.
+
+## Implemented storage constraints
+
+The initial store uses full-sized CPU tiles with inaccessible edge padding,
+only allocates for a nontransparent write, and reclaims a tile as soon as its
+last nontransparent pixel is cleared. Its default 256 MiB budget is **per
+layer** and counts pixel buffers only, not map/vector overhead, snapshots,
+composite caches or other layers; a document-wide budget remains future work.
+Individual pixel writes report failure without modifying the store. Multi-tile
+atomic edits, operation history and change notifications are not yet provided,
+so the low-level write API must not be exposed as a finished painting tool.
+Document resizing is rejected when any layer contains pixels until a safe
+resize/crop operation is designed.
