@@ -2,6 +2,8 @@
 add_library(komapaint_canvas STATIC
     CanvasDocument.h
     CanvasDocument.cpp
+    TileGeometry.h
+    TileGeometry.cpp
 )
 target_include_directories(komapaint_canvas PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/..)
