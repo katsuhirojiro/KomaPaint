@@ -96,8 +96,18 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build build --config ${{ env.BUILD_TYPE }} --verbose
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $buildLog = & cmake --build build --config ${{ env.BUILD_TYPE }} --verbose 2>&1 | Out-String
+          $buildExit = $LASTEXITCODE
+          Write-Host $buildLog
+          if ($buildExit -ne 0) {
+            $errors = ($buildLog -split "`n" | Where-Object { $_ -match '(error C[0-9]+|fatal error|error:|FAILED:)' }) -join "`n"
+            if (!$errors) { $errors = $buildLog }
+            $escaped = $errors.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error title=Build diagnostics::$escaped"
+            exit $buildExit
+          }
 
       - name: Verify executable exists
         shell: pwsh
