@@ -1,0 +1,21 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="workspaces/MainWindow.qml">../ui/workspaces/MainWindow.qml</file>
+        <file alias="components/MainToolbar.qml">../ui/components/MainToolbar.qml</file>
+        <file alias="components/ToolbarButton.qml">../ui/components/ToolbarButton.qml</file>
+        <file alias="components/Sep.qml">../ui/components/Sep.qml</file>
+        <file alias="components/ToolPalette.qml">../ui/components/ToolPalette.qml</file>
+        <file alias="components/PanelHeader.qml">../ui/components/PanelHeader.qml</file>
+        <file alias="components/CanvasWorkspace.qml">../ui/components/CanvasWorkspace.qml</file>
+        <file alias="components/StatusBar.qml">../ui/components/StatusBar.qml</file>
+        <file alias="panels/LayersPanel.qml">../ui/panels/LayersPanel.qml</file>
+        <file alias="panels/PropertiesPanel.qml">../ui/panels/PropertiesPanel.qml</file>
+        <file alias="panels/ColorPanel.qml">../ui/panels/ColorPanel.qml</file>
+        <file alias="panels/TimelinePanel.qml">../ui/panels/TimelinePanel.qml</file>
+        <file alias="themes/KomaTheme.qml">../ui/themes/KomaTheme.qml</file>
+        <file alias="components/qmldir">../ui/components/qmldir</file>
+        <file alias="panels/qmldir">../ui/panels/qmldir</file>
+        <file alias="themes/qmldir">../ui/themes/qmldir</file>
+        <file alias="workspaces/qmldir">../ui/workspaces/qmldir</file>
+    </qresource>
+</RCC>

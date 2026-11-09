@@ -1,0 +1,5 @@
+module panels
+LayersPanel 1.0 LayersPanel.qml
+PropertiesPanel 1.0 PropertiesPanel.qml
+ColorPanel 1.0 ColorPanel.qml
+TimelinePanel 1.0 TimelinePanel.qml

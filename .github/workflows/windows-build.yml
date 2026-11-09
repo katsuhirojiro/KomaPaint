@@ -1,0 +1,351 @@
+name: Windows Build
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  build:
+    name: Windows x64 (MSVC 2022, Qt 6.8.3)
+    runs-on: windows-2022
+
+    env:
+      QT_VERSION: 6.8.3
+      QT_ARCH: win64_msvc2022_64
+      QT_INSTALL_DIR: ${{ github.workspace }}\qt
+      BUILD_TYPE: Release
+      BUILD_DIR: ${{ github.workspace }}\build
+      OUTPUT_DIR: ${{ github.workspace }}\build\bin
+      TEST_DIR: ${{ github.workspace }}\build\tests\bin
+      STAGE_DIR: ${{ github.workspace }}\dist\KomaPaint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up MSVC x64 developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+
+      - name: Set up Python (for aqtinstall)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install aqtinstall
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "aqtinstall==3.3.0" "py7zr==1.1.0"
+
+      - name: Install Qt ${{ env.QT_VERSION }} (${{ env.QT_ARCH }})
+        shell: pwsh
+        run: |
+          # Qt for Windows desktop ships qtdeclarative, qttools, qtshadertools etc.
+          # as *archives* (top-level .7z packages), not as `-m` addon modules.
+          # Using --archives with no base "all" subset does the full install minus
+          # the archives we omit; we only pull what KomaPaint actually uses so the
+          # job stays fast.
+          aqt install-qt --outputdir "${{ env.QT_INSTALL_DIR }}" `
+            windows desktop ${{ env.QT_VERSION }} ${{ env.QT_ARCH }} `
+            --archives qtbase qtdeclarative qtquickcontrols2 qtshadertools qttools `
+                       icu
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Locate Qt installation
+        id: qt
+        shell: pwsh
+        run: |
+          # aqt places the install at <outputdir>/<version>/<arch>.
+          # In case the directory layout differs from what we expect, search for qmake.
+          $qtInstallRoot = "${{ env.QT_INSTALL_DIR }}"
+          Write-Host "--- Contents of $qtInstallRoot (recursive, top 2 levels):"
+          Get-ChildItem $qtInstallRoot -Depth 2 -ErrorAction SilentlyContinue | Select FullName | Out-String | Write-Host
+          $qmake = Get-ChildItem $qtInstallRoot -Recurse -Filter qmake.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $qmake) {
+            Write-Error "qmake.exe not found anywhere under $qtInstallRoot -- Qt installation failed."
+            exit 1
+          }
+          $qtBin = Split-Path $qmake.FullName -Parent
+          $qtDir = Split-Path $qtBin -Parent
+          Write-Host "Qt root : $qtDir"
+          Write-Host "Qt bin  : $qtBin"
+          echo "qtDir=$qtDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          echo "qtBin=$qtBin" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          # Expose Qt DLLs on PATH so test executables can find them.
+          echo "$qtBin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Configure CMake (Ninja, C++20, Release)
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
+            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qtDir }}" `
+            -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="${{ env.OUTPUT_DIR }}" `
+            -DKOMAPAINT_BUILD_TESTS=ON `
+            -DKOMAPAINT_ENABLE_WARNINGS=ON
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build --config ${{ env.BUILD_TYPE }} --verbose
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify executable exists
+        shell: pwsh
+        run: |
+          $exe = "${{ env.OUTPUT_DIR }}\komapaint.exe"
+          if (!(Test-Path $exe)) {
+            Write-Error "Expected build output not found: $exe"
+            Write-Host "Files in build\bin:"
+            Get-ChildItem ${{ env.OUTPUT_DIR }} -File -ErrorAction SilentlyContinue | Select Name | Out-String | Write-Host
+            exit 1
+          }
+          Write-Host "Built executable:"
+          Get-Item $exe | Format-List Name,Length,LastWriteTime
+          Write-Host ""
+          Write-Host "Test executables (must be OUTSIDE build\bin so they are not shipped):"
+          $testExes = Get-ChildItem "${{ env.TEST_DIR }}" -Filter "test_*.exe" -ErrorAction SilentlyContinue
+          $testExes | ForEach-Object { Write-Host ("  " + $_.FullName) }
+          $strayTests = Get-ChildItem "${{ env.OUTPUT_DIR }}" -Filter "test_*.exe" -ErrorAction SilentlyContinue
+          if ($strayTests) {
+            Write-Error "Test executables leaked into the app output directory:"
+            $strayTests | ForEach-Object { Write-Host ("  " + $_.FullName) }
+            exit 1
+          }
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          $env:PATH = "${{ steps.qt.outputs.qtBin }};${{ env.TEST_DIR }};" + $env:PATH
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $failed = 0
+          $exes = Get-ChildItem "${{ env.TEST_DIR }}" -Filter "test_*.exe" | Sort-Object Name
+          if ($exes.Count -eq 0) {
+            Write-Error "No test executables were produced in ${{ env.TEST_DIR }}"
+            exit 1
+          }
+          Write-Host "=== Discovered $($exes.Count) test executable(s) in ${{ env.TEST_DIR }} ==="
+          foreach ($exe in $exes) {
+            Write-Host ">>> Running $($exe.Name) <<<"
+            $output = & $exe.FullName 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Write-Host $output
+            if ($code -ne 0) {
+              Write-Host ">>> $($exe.Name) FAILED with exit code $code <<<"
+              $failed++
+            } else {
+              Write-Host ">>> $($exe.Name) PASSED (exit $code) <<<"
+            }
+            Write-Host ""
+          }
+          if ($failed -gt 0) {
+            Write-Host "=== $failed test(s) FAILED ==="
+            exit 1
+          }
+          Write-Host "=== All tests passed ==="
+
+      - name: Stage application directory
+        shell: pwsh
+        run: |
+          # Start from a clean staging directory containing only komapaint.exe.
+          # Do NOT pre-create qt.conf: windeployqt writes its own qt.conf into
+          # --dir pointing Plugins/Qml2Imports at the relative subdirectories it
+          # creates; overwriting it with "Plugins=." can break plugin lookup.
+          if (Test-Path "${{ env.STAGE_DIR }}") { Remove-Item "${{ env.STAGE_DIR }}" -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path "${{ env.STAGE_DIR }}" | Out-Null
+          Copy-Item "${{ env.OUTPUT_DIR }}\komapaint.exe" "${{ env.STAGE_DIR }}\komapaint.exe" -Force
+          Write-Host "Staged komapaint.exe into ${{ env.STAGE_DIR }}"
+
+      - name: Deploy Qt runtime dependencies (windeployqt)
+        shell: pwsh
+        run: |
+          $windeploy = Join-Path "${{ steps.qt.outputs.qtBin }}" "windeployqt.exe"
+          if (!(Test-Path $windeploy)) {
+            Write-Error "windeployqt.exe not found at $windeploy"
+            exit 1
+          }
+          $exe    = "${{ env.STAGE_DIR }}\komapaint.exe"
+          $qmlDir = "${{ github.workspace }}\ui"
+          # Run windeployqt against the STAGED (single-exe) folder so only the
+          # runtime dependencies actually needed by komapaint.exe are pulled in.
+          # QML is bundled inside the executable via the qml.qrc resource, but
+          # we still pass --qmldir so windeployqt picks up any QML plugin modules
+          # (QtQuick, QtQuickControls2, QtQuickLayouts) that the QML engine loads
+          # at runtime.
+          Push-Location "${{ env.STAGE_DIR }}"
+          # IMPORTANT: do NOT pass --no-platform-plugins / do NOT restrict to a
+          # single platform plugin. The offscreen plugin (qoffscreen.dll) is
+          # required for headless smoke testing in CI, and shipping qwindows.dll
+          # alone is not enough for all runtime scenarios.
+          # --no-system-d3d-compiler / --no-opengl-sw keep the payload small.
+          & $windeploy --release --no-compiler-runtime --no-system-d3d-compiler `
+            --no-opengl-sw --qmldir $qmlDir --dir . $exe
+          # Ensure offscreen platform plugin is present for headless smoke test.
+          # (A stock release does not need it but CI does.)
+          $pluginsRoot = (Resolve-Path "${{ steps.qt.outputs.qtBin }}\..\plugins").Path
+          $offSrc = Join-Path $pluginsRoot "platforms\qoffscreen.dll"
+          $offDst = "${{ env.STAGE_DIR }}\platforms\qoffscreen.dll"
+          Write-Host "offscreen plugin source: $offSrc"
+          if (Test-Path $offSrc) {
+            Copy-Item $offSrc $offDst -Force
+            Write-Host "Copied qoffscreen.dll -> $offDst"
+          } else {
+            Write-Error "qoffscreen.dll not found at $offSrc"
+            exit 1
+          }
+          $deployExit = $LASTEXITCODE
+          Pop-Location
+          if ($deployExit -ne 0) { exit $deployExit }
+
+      - name: Verify no test-only DLLs leaked into the package
+        shell: pwsh
+        run: |
+          $stage = "${{ env.STAGE_DIR }}"
+          $forbidden = @(
+            "Qt6Test.dll",
+            "Qt6Test.pdb"
+          )
+          foreach ($f in $forbidden) {
+            $found = Get-ChildItem $stage -Recurse -Filter $f -ErrorAction SilentlyContinue
+            if ($found) {
+              Write-Error "Test-only file leaked into release package: $($found.FullName)"
+              exit 1
+            }
+          }
+          $testExes = Get-ChildItem $stage -Recurse -Filter "test_*.exe" -ErrorAction SilentlyContinue
+          if ($testExes) {
+            Write-Error "Test executables leaked into release package:"
+            $testExes | ForEach-Object { Write-Host ("  " + $_.FullName) }
+            exit 1
+          }
+          Write-Host "Package is clean: no Qt6Test.dll, no test_*.exe."
+
+      - name: Sanity-check deployed tree
+        shell: pwsh
+        run: |
+          $bin = "${{ env.STAGE_DIR }}"
+          $required = @(
+            "$bin\komapaint.exe",
+            "$bin\Qt6Core.dll",
+            "$bin\Qt6Gui.dll",
+            "$bin\Qt6Qml.dll",
+            "$bin\Qt6Quick.dll",
+            "$bin\Qt6QuickControls2.dll",
+            "$bin\Qt6Widgets.dll",
+            "$bin\platforms\qwindows.dll",
+            "$bin\platforms\qoffscreen.dll"
+          )
+          foreach ($f in $required) {
+            if (!(Test-Path $f)) {
+              Write-Error "Missing required deployed file: $f"
+              Write-Host "Deployed Qt6 DLLs:"
+              Get-ChildItem $bin -File -Filter "Qt6*.dll" | Select Name | Format-Table -AutoSize | Out-String | Write-Host
+              exit 1
+            }
+          }
+          Write-Host "--- Deployed files (top-level):"
+          Get-ChildItem $bin -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
+
+      - name: Smoke-test packaged executable launches
+        shell: pwsh
+        run: |
+          $bin = "${{ env.STAGE_DIR }}"
+          $qtBin = "${{ steps.qt.outputs.qtBin }}"
+          $env:PATH = "$bin;$qtBin;" + $env:PATH
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $exe = "$bin\komapaint.exe"
+
+          Write-Host "============================================"
+          Write-Host "SMOKE TEST: launching komapaint.exe directly"
+          Write-Host "  exe:       $exe"
+          Write-Host "  cwd:       $bin"
+          Write-Host "  QT_QPA_PLATFORM=$env:QT_QPA_PLATFORM"
+          Write-Host "============================================"
+
+          # Diagnostics: list files the app actually needs
+          Write-Host ""
+          Write-Host "[DIAG] komapaint.exe exists: $(Test-Path $exe)"
+          Write-Host "[DIAG] Qt6Core.dll in stage:  $(Test-Path "$bin\Qt6Core.dll")"
+          Write-Host "[DIAG] Qt6Gui.dll in stage:   $(Test-Path "$bin\Qt6Gui.dll")"
+          Write-Host "[DIAG] Qt6Qml.dll in stage:   $(Test-Path "$bin\Qt6Qml.dll")"
+          Write-Host "[DIAG] Qt6Quick.dll in stage: $(Test-Path "$bin\Qt6Quick.dll")"
+          Write-Host "[DIAG] qwindows.dll:          $(Test-Path "$bin\platforms\qwindows.dll")"
+          Write-Host "[DIAG] qoffscreen.dll:        $(Test-Path "$bin\platforms\qoffscreen.dll")"
+          Write-Host "[DIAG] qt.conf:               $(Test-Path "$bin\qt.conf")"
+          if (Test-Path "$bin\qt.conf") {
+            Write-Host "--- qt.conf contents ---"
+            Get-Content "$bin\qt.conf" | ForEach-Object { Write-Host "  $_" }
+          }
+          Write-Host ""
+
+          # Launch with Start-Process, NO redirection, -NoNewWindow so the
+          # console-subsystem exe inherits the current PowerShell stdout/stderr
+          # directly. Every printf/Qt warning goes straight to the Actions
+          # console — no buffering, no events, no deadlocks.
+          Write-Host ">>> STARTING komapaint.exe"
+          $p = Start-Process -FilePath $exe -WorkingDirectory $bin -PassThru -NoNewWindow
+          Write-Host ">>> Started PID $($p.Id) at $(Get-Date -Format o)"
+
+          # Wait up to 5 seconds. If it's still alive after that the event loop
+          # started successfully; close the window.
+          $deadline = (Get-Date).AddSeconds(5)
+          $exitedEarly = $false
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            $p.Refresh()
+            if ($p.HasExited) {
+              Write-Host ">>> PROCESS EXITED EARLY with code $($p.ExitCode) at $(Get-Date -Format o)"
+              $exitedEarly = $true
+              break
+            }
+          }
+
+          if (-not $exitedEarly) {
+            Write-Host ">>> Process alive after 5s - event loop is running."
+            $null = $p.CloseMainWindow()
+            if (-not $p.WaitForExit(5000)) {
+              Write-Warning "Process did not respond to CloseMainWindow within 5s; killing."
+              $p.Kill()
+              $p.WaitForExit()
+            }
+            Write-Host ">>> Process exited with code $($p.ExitCode) after close."
+            if ($p.ExitCode -ne 0) {
+              Write-Error "Smoke test FAILED: non-zero exit code $($p.ExitCode)."
+              exit 1
+            }
+            Write-Host "=== Smoke test PASSED ==="
+          } else {
+            Write-Error "Smoke test FAILED: komapaint.exe exited prematurely with code $($p.ExitCode)."
+            exit 1
+          }
+
+      - name: Package into ZIP
+        shell: pwsh
+        run: |
+          $zip = "${{ github.workspace }}\KomaPaint-Windows-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          # Zip the staged folder so the archive contains a single top-level
+          # "KomaPaint" directory with the exe and its dependencies.
+          Compress-Archive -Path "${{ env.STAGE_DIR }}" -DestinationPath $zip -CompressionLevel Optimal
+          if (!(Test-Path $zip)) {
+            Write-Error "Packaging failed; zip not produced."
+            exit 1
+          }
+          Get-Item $zip | Format-List Name,Length
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KomaPaint-Windows-x64-Qt${{ env.QT_VERSION }}
+          path: KomaPaint-Windows-x64.zip
+          if-no-files-found: error
+          retention-days: 30
