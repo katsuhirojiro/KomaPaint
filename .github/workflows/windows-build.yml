@@ -263,58 +263,65 @@ jobs:
           $env:PATH = "$bin;$qtBin;" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
           $exe = "$bin\komapaint.exe"
-          $logDir = "${{ github.workspace }}\smoke-logs"
-          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-          $outFile = "$logDir\stdout.log"
-          $errFile = "$logDir\stderr.log"
-          Remove-Item $outFile,$errFile -Force -ErrorAction SilentlyContinue
-          Write-Host "=== Launching $exe (console build, logs -> $logDir) ==="
+          Write-Host "=== Launching $exe (console build) ==="
           Write-Host "--- staged top-level ---"
           Get-ChildItem $bin | Select Name,Length | Format-Table -AutoSize | Out-String | Write-Host
           Write-Host "--- platforms/ ---"
-          Get-ChildItem "$bin\platforms" | Select Name | Format-Table -AutoSize | Out-String | Write-Host
+          Get-ChildItem "$bin\platforms" -ErrorAction SilentlyContinue | Select Name | Format-Table -AutoSize | Out-String | Write-Host
+          Write-Host "--- styles/ ---"
+          Get-ChildItem "$bin\styles" -Recurse -ErrorAction SilentlyContinue | Select Name | Format-Table -AutoSize | Out-String | Write-Host
           Write-Host "--- qt.conf ---"
           if (Test-Path "$bin\qt.conf") { Get-Content "$bin\qt.conf" | Write-Host } else { Write-Host "(no qt.conf)" }
-          # Launch with cmd.exe /c start /b so we inherit the console and have
-          # cmd redirect stdout/stderr for us; the child's console output is
-          # reliably captured this way even for WIN32_EXECUTABLE=TRUE builds.
-          $p = Start-Process -FilePath "cmd.exe" `
-               -ArgumentList "/c","`"$exe`" > `"$outFile`" 2> `"$errFile`"" `
-               -WorkingDirectory $bin -PassThru
-          # Wait for cmd to spawn komapaint.exe.
-          Start-Sleep -Milliseconds 500
-          # Find the child komapaint process launched by cmd.
-          $kp = Get-Process komapaint -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $kp) {
-            Write-Host "komapaint.exe never appeared after cmd start."
-            Write-Host "--- stdout so far ---"; if (Test-Path $outFile) { Get-Content $outFile | Write-Host }
-            Write-Host "--- stderr so far ---"; if (Test-Path $errFile) { Get-Content $errFile | Write-Host }
-            Write-Error "Smoke test FAILED: process never started."
+          # Synchronously run the console exe with stdout/stderr captured into
+          # variables using .NET Process; the console subsystem build inherits
+          # the parent's stdio when UseShellExecute=false, but we redirect to
+          # capture reliably.
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = $exe
+          $psi.WorkingDirectory = $bin
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $psi.CreateNoWindow = $true
+          $p = [System.Diagnostics.Process]::Start($psi)
+          # Poll for 5 seconds; collect output incrementally.
+          $deadline = (Get-Date).AddSeconds(5)
+          $allOut = New-Object System.Text.StringBuilder
+          $allErr = New-Object System.Text.StringBuilder
+          while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
+            # Read what's available without blocking.
+            while (-not $p.StandardOutput.EndOfStream) {
+              $line = $p.StandardOutput.ReadLine()
+              if ($null -ne $line) { [void]$allOut.AppendLine($line); Write-Host "OUT: $line" }
+            }
+            while (-not $p.StandardError.EndOfStream) {
+              $line = $p.StandardError.ReadLine()
+              if ($null -ne $line) { [void]$allErr.AppendLine($line); Write-Host "ERR: $line" }
+            }
+            Start-Sleep -Milliseconds 200
+          }
+          if (-not $p.HasExited) {
+            Write-Host "Process still alive after 5s - event loop running."
+            $p.CloseMainWindow() | Out-Null
+            if (-not $p.WaitForExit(5000)) { $p.Kill(); $p.WaitForExit() }
+            # Drain remaining output
+            $restOut = $p.StandardOutput.ReadToEnd()
+            $restErr = $p.StandardError.ReadToEnd()
+            if ($restOut) { Write-Host "OUT (remaining): $restOut" }
+            if ($restErr) { Write-Host "ERR (remaining): $restErr" }
+            Write-Host "Exit code: $($p.ExitCode)"
+            if ($p.ExitCode -ne 0) { Write-Error "Smoke test FAILED: exit code $($p.ExitCode)"; exit 1 }
+            Write-Host "=== Smoke test PASSED ==="
+          } else {
+            # Exited early - drain remaining output
+            $restOut = $p.StandardOutput.ReadToEnd()
+            $restErr = $p.StandardError.ReadToEnd()
+            Write-Host "OUT (final): $restOut"
+            Write-Host "ERR (final): $restErr"
+            Write-Host "Exit code: $($p.ExitCode)"
+            Write-Error "Smoke test FAILED: exited prematurely with code $($p.ExitCode)"
             exit 1
           }
-          Write-Host "Found komapaint.exe PID $($kp.Id)"
-          for ($i=1; $i -le 5; $i++) {
-            Start-Sleep -Seconds 1
-            Write-Host "--- tick $i : stdout so far ---"
-            if (Test-Path $outFile) { Get-Content $outFile -Raw | Write-Host } else { Write-Host "(no stdout)" }
-            Write-Host "--- tick $i : stderr so far ---"
-            if (Test-Path $errFile) { Get-Content $errFile -Raw | Write-Host } else { Write-Host "(no stderr)" }
-            $kp.Refresh()
-            if ($kp.HasExited) {
-              Write-Host "komapaint.exe exited with code $($kp.ExitCode) after $i seconds."
-              Write-Error "Smoke test FAILED: process exited prematurely."
-              exit 1
-            }
-          }
-          Write-Host "Process alive after 5 seconds."
-          $kp.CloseMainWindow() | Out-Null
-          if (-not $kp.WaitForExit(5000)) { $kp.Kill(); $kp.WaitForExit() }
-          Start-Sleep -Milliseconds 300
-          Write-Host "--- final stdout ---"; Get-Content $outFile -Raw | Write-Host
-          Write-Host "--- final stderr ---"; Get-Content $errFile -Raw | Write-Host
-          Write-Host "Exit code: $($kp.ExitCode)"
-          if ($kp.ExitCode -ne 0) { Write-Error "Smoke test FAILED: exit code $($kp.ExitCode)"; exit 1 }
-          Write-Host "=== Smoke test PASSED ==="
 
       - name: Upload smoke-test logs (always)
         uses: actions/upload-artifact@v4
