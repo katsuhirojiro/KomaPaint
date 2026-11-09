@@ -111,8 +111,23 @@ jobs:
       - name: Run unit tests (CTest)
         shell: pwsh
         run: |
-          ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure --no-tests=error
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $ErrorActionPreference = 'Continue'
+          Write-Host "--- PATH entries relevant to test run:"
+          $env:PATH -split ';' | Where-Object { $_ -match 'Qt|MSVC|windows' } | Out-String | Write-Host
+          Write-Host "--- Test executables produced:"
+          Get-ChildItem build -Recurse -Filter "test_*.exe" -ErrorAction SilentlyContinue | Select FullName | Out-String | Write-Host
+          Write-Host "--- Qt DLLs reachable from PATH:"
+          Get-ChildItem (Split-Path (Get-Command qmake.exe).Source) -Filter "Qt6Test.dll" -ErrorAction SilentlyContinue | Select FullName | Out-String | Write-Host
+          ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure --no-tests=error -V
+          $ctestExit = $LASTEXITCODE
+          if ($ctestExit -ne 0) {
+            Write-Host "--- ctest failed; dumping individual test binary logs:"
+            Get-ChildItem build -Recurse -Filter "LastTest.log" -ErrorAction SilentlyContinue | ForEach-Object {
+              Write-Host "========= $($_.FullName) ========="
+              Get-Content $_.FullName | Out-String | Write-Host
+            }
+            exit $ctestExit
+          }
 
       - name: Deploy Qt runtime dependencies (windeployqt)
         shell: pwsh
