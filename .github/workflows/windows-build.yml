@@ -149,15 +149,12 @@ jobs:
           Write-Host "=== Discovered $($exes.Count) test executable(s) in ${{ env.TEST_DIR }} ==="
           foreach ($exe in $exes) {
             Write-Host ">>> Running $($exe.Name) <<<"
-            if ($exe.Name -eq 'test_canvas_viewport.exe') {
-              $resultFile = Join-Path $env:RUNNER_TEMP 'viewport-test.txt'
-              $output = & $exe.FullName -o "$resultFile,txt" 2>&1 | Out-String
-              $code = $LASTEXITCODE
-              if (Test-Path $resultFile) { $output += Get-Content $resultFile -Raw }
-            } else {
-              $output = & $exe.FullName 2>&1 | Out-String
-              $code = $LASTEXITCODE
-            }
+            # -o writes the QTest log to a file directly; it survives even when
+            # the process crashes and stdout is lost.
+            $resultFile = Join-Path $env:RUNNER_TEMP ($exe.BaseName + '.txt')
+            $output = & $exe.FullName -o "$resultFile,txt" 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            if (Test-Path $resultFile) { $output += "`n" + (Get-Content $resultFile -Raw) }
             Write-Host $output
             if ($code -ne 0) {
               Write-Host ">>> $($exe.Name) FAILED with exit code $code <<<"
@@ -165,7 +162,7 @@ jobs:
               # Build a compact single-line diagnostic for the annotation.
               $annotation = $output.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' || ')
               if ($annotation.Length -gt 1000) { $annotation = "...(truncated) " + $annotation.Substring($annotation.Length - 1000) }
-              $failingSummary += "$($exe.Name): $annotation"
+              $failingSummary += "$($exe.Name) (exit $code): $annotation"
             } else {
               Write-Host ">>> $($exe.Name) PASSED (exit $code) <<<"
             }
