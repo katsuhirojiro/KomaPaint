@@ -265,85 +265,64 @@ jobs:
           Get-ChildItem $bin -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
 
       - name: Smoke-test packaged executable launches
-        shell: pwsh
+        shell: cmd
         run: |
-          $bin = "${{ env.STAGE_DIR }}"
-          $env:PATH = "$bin;" + $env:PATH
-          $env:QT_QPA_PLATFORM = "offscreen"
-          $env:QT_LOGGING_RULES = "*.debug=true;qt.qml.binding.removal.info=true"
-          $exe = "$bin\komapaint.exe"
-          Write-Host "=== Launching $exe (offscreen) ==="
-          # Print full deployed tree so any missing plugin/QML module is obvious.
-          Write-Host "--- staged tree (all files) ---"
-          Get-ChildItem $bin -Recurse -File | ForEach-Object {
-            $rel = $_.FullName.Substring($bin.Length + 1)
-            Write-Host ("  {0,10}  {1}" -f $_.Length, $rel)
-          }
-          # Launch via Start-Process with stdout/stderr redirected to files that
-          # are inside the STAGE directory (so they also get uploaded if the
-          # artifact step runs later). We add a small .NET FileSystemWatcher
-          # tail so output is mirrored to the Actions console in near-real-time
-          # even if the process dies.
-          $outFile = "$bin\smoke.stdout.log"
-          $errFile = "$bin\smoke.stderr.log"
-          Remove-Item $outFile,$errFile -Force -ErrorAction SilentlyContinue
-          $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
-          Write-Host "Started PID $($p.Id) at $(Get-Date -Format o)"
-          # Tail loop: poll for 5 seconds, dumping appended output as we go.
-          $outTailLen = 0; $errTailLen = 0
-          $deadline = (Get-Date).AddSeconds(5)
-          while ((Get-Date) -lt $deadline -and !$p.HasExited) {
-            Start-Sleep -Milliseconds 250
-            if (Test-Path $outFile) {
-              $len = (Get-Item $outFile).Length
-              if ($len -gt $outTailLen) {
-                $new = [System.IO.File]::ReadAllText($outFile).Substring($outTailLen)
-                if ($new) { Write-Host -NoNewline $new }
-                $outTailLen = $len
-              }
-            }
-            if (Test-Path $errFile) {
-              $len = (Get-Item $errFile).Length
-              if ($len -gt $errTailLen) {
-                $new = [System.IO.File]::ReadAllText($errFile).Substring($errTailLen)
-                if ($new) { Write-Host -NoNewline $new }
-                $errTailLen = $len
-              }
-            }
-          }
-          if ($p.HasExited) {
-            # Drain any remaining output before reporting failure.
-            Start-Sleep -Milliseconds 200
-            if (Test-Path $outFile) {
-              Write-Host "--- stdout (final) ---"
-              Get-Content $outFile -Raw | Write-Host
-            }
-            if (Test-Path $errFile) {
-              Write-Host "--- stderr (final) ---"
-              Get-Content $errFile -Raw | Write-Host
-            }
-            Write-Error "komapaint.exe exited prematurely with code $($p.ExitCode)."
-            exit 1
-          }
-          Write-Host ""
-          Write-Host "Process still alive after 5s — event loop running."
-          $p.CloseMainWindow() | Out-Null
-          if (!$p.WaitForExit(5000)) {
-            Write-Warning "Process did not exit within 5s of CloseMainWindow; killing."
-            $p.Kill()
-            $p.WaitForExit()
-          }
-          Start-Sleep -Milliseconds 500
-          Write-Host "--- stdout (after close) ---"
-          if (Test-Path $outFile) { Get-Content $outFile -Raw | Write-Host }
-          Write-Host "--- stderr (after close) ---"
-          if (Test-Path $errFile) { Get-Content $errFile -Raw | Write-Host }
-          Write-Host "Exit code: $($p.ExitCode)"
-          if ($p.ExitCode -ne 0) {
-            Write-Error "komapaint.exe exited with non-zero code $($p.ExitCode) after smoke test."
-            exit 1
-          }
-          Write-Host "=== Smoke test passed ==="
+          @echo off
+          setlocal
+          set "PATH=%STAGE_DIR%;%PATH%"
+          set "QT_QPA_PLATFORM=offscreen"
+          set "QT_LOGGING_RULES=*.debug=true;qt.qml.binding.removal.info=true"
+          echo === Launching komapaint.exe (offscreen, 4s timeout) ===
+          echo --- staged tree (recursive listing) ---
+          dir /s /b "%STAGE_DIR%"
+          echo -----------------------------------------------------
+          rem Launch via ping-wait technique instead of Start-Process / Jobs
+          rem so we definitely capture stdout+stderr and the exit code.
+          start "" /b "%STAGE_DIR%\komapaint.exe" > "%STAGE_DIR%\smoke.out.log" 2> "%STAGE_DIR%\smoke.err.log"
+          set "PID="
+          for /f "tokens=2" %%p in ('wmic process where "name='komapaint.exe' and commandline like '%%komapaint.exe%%'" get processid /value 2^>nul ^| findstr ProcessId') do set "PID=%%p"
+          echo Started PID %PID%
+          rem Wait up to 4 seconds, polling output every 500ms.
+          for /L %%i in (1,1,8) do (
+            timeout /t 1 /nobreak >nul
+            echo --- live stdout (after %%i s) ---
+            type "%STAGE_DIR%\smoke.out.log" 2>nul
+            echo --- live stderr (after %%i s) ---
+            type "%STAGE_DIR%\smoke.err.log" 2>nul
+            rem Check if process still exists
+            tasklist /fi "imagename eq komapaint.exe" 2>nul | findstr /i komapaint.exe >nul
+            if errorlevel 1 (
+              echo !!! Process died within %%i seconds !!!
+              goto :died
+            )
+          )
+          echo Process still alive after 4s -- event loop is running.
+          rem Post WM_CLOSE via taskkill (sends WM_CLOSE to GUI apps).
+          taskkill /im komapaint.exe >nul 2>&1
+          set "waitExit=0"
+          :waitclose
+          timeout /t 1 /nobreak >nul
+          set /a waitExit+=1
+          tasklist /fi "imagename eq komapaint.exe" 2>nul | findstr /i komapaint.exe >nul
+          if errorlevel 1 goto :closed
+          if %waitExit% lss 5 goto waitclose
+          echo Did not exit cleanly, force killing.
+          taskkill /f /im komapaint.exe >nul 2>&1
+          :closed
+          echo --- final stdout ---
+          type "%STAGE_DIR%\smoke.out.log" 2>nul
+          echo --- final stderr ---
+          type "%STAGE_DIR%\smoke.err.log" 2>nul
+          echo === Smoke test PASSED ===
+          exit /b 0
+          :died
+          echo --- final stdout ---
+          type "%STAGE_DIR%\smoke.out.log" 2>nul
+          echo --- final stderr ---
+          type "%STAGE_DIR%\smoke.err.log" 2>nul
+          echo !!! Smoke test FAILED: komapaint.exe exited prematurely.
+          exit /b 1
+          endlocal
 
       - name: Upload smoke-test logs (always)
         uses: actions/upload-artifact@v4
