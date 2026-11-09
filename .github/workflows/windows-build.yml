@@ -108,25 +108,33 @@ jobs:
           Write-Host "Built executable:"
           Get-Item $exe | Format-List Name,Length,LastWriteTime
 
-      - name: Run unit tests (CTest)
+      - name: Run unit tests
         shell: pwsh
         run: |
           $env:PATH = "${{ steps.qt.outputs.qtBin }};" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
-          Write-Host "=== Test executables produced ==="
-          Get-ChildItem build -Recurse -Filter "test_*.exe" | ForEach-Object { Write-Host $_.FullName }
+          $failed = 0
+          $exes = Get-ChildItem build -Recurse -Filter "test_*.exe" | Sort-Object Name
+          Write-Host "=== Discovered $($exes.Count) test executable(s) ==="
+          $exes | ForEach-Object { Write-Host ("  " + $_.FullName) }
           Write-Host ""
-          Write-Host "=== Qt bin (for DLL resolution): ${{ steps.qt.outputs.qtBin }} ==="
-          Get-ChildItem "${{ steps.qt.outputs.qtBin }}\Qt6Core.dll", "${{ steps.qt.outputs.qtBin }}\Qt6Test.dll" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_.FullName }
-          Write-Host ""
-          Write-Host "=== Running ctest (verbose) ==="
-          # Run ctest via cmd /c so stdout/stderr are flushed line-by-line to
-          # the Actions console instead of being buffered by PowerShell.
-          & cmd /c "ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure --verbose --no-tests=error 2>&1"
-          $ctestExit = $LASTEXITCODE
-          Write-Host ""
-          Write-Host "=== ctest exit code: $ctestExit ==="
-          exit $ctestExit
+          Write-Host "=== Qt bin on PATH: ${{ steps.qt.outputs.qtBin }} ==="
+          foreach ($exe in $exes) {
+            Write-Host ">>> Running $($exe.Name) <<<"
+            & $exe.FullName 2>&1 | Out-Host
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host ">>> $($exe.Name) FAILED with exit code $LASTEXITCODE <<<"
+              $failed++
+            } else {
+              Write-Host ">>> $($exe.Name) PASSED <<<"
+            }
+            Write-Host ""
+          }
+          if ($failed -gt 0) {
+            Write-Host "=== $failed test(s) FAILED ==="
+            exit 1
+          }
+          Write-Host "=== All tests passed ==="
 
       - name: Deploy Qt runtime dependencies (windeployqt)
         shell: pwsh
