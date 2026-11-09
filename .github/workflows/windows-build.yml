@@ -109,25 +109,23 @@ jobs:
           Get-Item $exe | Format-List Name,Length,LastWriteTime
 
       - name: Run unit tests (CTest)
-        shell: pwsh
+        shell: cmd /c
         run: |
-          $ErrorActionPreference = 'Continue'
-          Write-Host "--- PATH entries relevant to test run:"
-          $env:PATH -split ';' | Where-Object { $_ -match 'Qt|MSVC|windows' } | Out-String | Write-Host
-          Write-Host "--- Test executables produced:"
-          Get-ChildItem build -Recurse -Filter "test_*.exe" -ErrorAction SilentlyContinue | Select FullName | Out-String | Write-Host
-          Write-Host "--- Qt DLLs reachable from PATH:"
-          Get-ChildItem (Split-Path (Get-Command qmake.exe).Source) -Filter "Qt6Test.dll" -ErrorAction SilentlyContinue | Select FullName | Out-String | Write-Host
-          ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure --no-tests=error -V
-          $ctestExit = $LASTEXITCODE
-          if ($ctestExit -ne 0) {
-            Write-Host "--- ctest failed; dumping individual test binary logs:"
-            Get-ChildItem build -Recurse -Filter "LastTest.log" -ErrorAction SilentlyContinue | ForEach-Object {
-              Write-Host "========= $($_.FullName) ========="
-              Get-Content $_.FullName | Out-String | Write-Host
-            }
-            exit $ctestExit
-          }
+          echo === Test executables produced ===
+          dir /b /s build\test_*.exe 2>nul
+          echo.
+          echo === Qt bin on PATH (for DLL resolution) ===
+          set "PATH=${{ steps.qt.outputs.qtBin }};%PATH%"
+          set QT_QPA_PLATFORM=offscreen
+          echo Qt bin: ${{ steps.qt.outputs.qtBin }}
+          dir "${{ steps.qt.outputs.qtBin }}\Qt6Core.dll" "${{ steps.qt.outputs.qtBin }}\Qt6Test.dll" 2>nul
+          echo.
+          echo === Running ctest (verbose) ===
+          ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure --verbose --no-tests=error
+          set EXITCODE=%ERRORLEVEL%
+          echo.
+          echo === ctest exit code: %EXITCODE% ===
+          exit /b %EXITCODE%
 
       - name: Deploy Qt runtime dependencies (windeployqt)
         shell: pwsh

@@ -17,6 +17,12 @@ function(komapaint_add_test NAME SOURCE)
         ${CMAKE_SOURCE_DIR}/src/core
     )
     add_test(NAME ${NAME} COMMAND ${NAME})
+    # Run headless, and ensure Qt DLLs are discoverable at test runtime on Windows
+    # by prepending Qt's bin directory to PATH (rather than replacing PATH entirely).
+    set_tests_properties(${NAME} PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+    )
 endfunction()
 
 komapaint_add_test(test_undostack TestUndoStack.cpp)
