@@ -206,10 +206,16 @@ void TestCanvasViewport::actualWindowShortcuts()
     auto& tiles = workspace.layers()->layerAt(0)->tiles();
     const TilePoint pixel{static_cast<int>(docPoint.x()) + 10, static_cast<int>(docPoint.y())};
     const auto painted = tiles.pixel(pixel).value(); QVERIFY(painted != 0);
+    canvas->refreshNow();
+    const auto visiblePaint = canvas->frameSnapshot().pixelColor(110, 100);
     QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
     QCOMPARE(tiles.pixel(pixel).value(), 0U);
+    canvas->refreshNow();
+    QVERIFY(canvas->frameSnapshot().pixelColor(110, 100) != visiblePaint);
     QTest::keyClick(window, Qt::Key_Y, Qt::ControlModifier);
     QCOMPARE(tiles.pixel(pixel).value(), painted);
+    canvas->refreshNow();
+    QCOMPARE(canvas->frameSnapshot().pixelColor(110, 100), visiblePaint);
     const auto secondLocation = location + QPoint(0, 30);
     const TilePoint secondPixel{pixel.x, pixel.y + 30};
     QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, secondLocation);
