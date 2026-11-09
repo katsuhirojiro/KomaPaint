@@ -60,6 +60,11 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
     auto index = static_cast<std::size_t>(a->local.y) * static_cast<std::size_t>(m_geometry.tileSize()) + static_cast<std::size_t>(a->local.x);
     auto& old = it->second.pixels[index];
     if (old == value) return WriteResult::Unchanged;
+    if (m_beforeChange && !m_beforeChange(m_beforeContext, a->tile, !created,
+                                           created ? std::span<const std::uint32_t>{} : std::span<const std::uint32_t>{it->second.pixels})) {
+        if (created) m_tiles.erase(it);
+        return WriteResult::HistoryLimit;
+    }
     const auto dirty = m_dirty.mark({point.x, point.y, point.x + 1, point.y + 1});
     if (dirty != DirtyTileTracker::Result::Marked) {
         if (created) m_tiles.erase(it);
@@ -78,6 +83,55 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
         }
     } else if (m_callback) m_callback(m_callbackContext, a->tile);
     return WriteResult::Changed;
+}
+SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<TileSnapshot>& snapshots)
+{
+    if (!isValid() || m_beforeChange) return WriteResult::InvalidPixel;
+    try {
+        // All allocations and dirty tracking happen before changing artwork.
+        auto dirty = m_dirty;
+        std::unordered_map<TilePoint, Tile, Hash> staged;
+        staged.reserve(snapshots.size());
+        std::size_t count = m_tiles.size();
+        for (const auto& snapshot : snapshots) {
+            auto bounds = m_geometry.tileBounds(snapshot.tile);
+            if (!bounds || staged.find(snapshot.tile) != staged.end()) return WriteResult::InvalidPixel;
+            Tile tile;
+            if (!snapshot.pixels.empty()) {
+                if (snapshot.pixels.size() != m_tileBytes / sizeof(std::uint32_t)) return WriteResult::InvalidPixel;
+                tile.pixels = snapshot.pixels;
+                for (auto value : tile.pixels) {
+                    auto alpha = value >> 24;
+                    if (((value >> 16) & 255U) > alpha || ((value >> 8) & 255U) > alpha || (value & 255U) > alpha) return WriteResult::InvalidPixel;
+                    if (value) ++tile.nonzero;
+                }
+                if (!tile.nonzero) return WriteResult::InvalidPixel;
+            }
+            const bool exists = m_tiles.find(snapshot.tile) != m_tiles.end();
+            if (exists && tile.pixels.empty()) --count;
+            if (!exists && !tile.pixels.empty()) ++count;
+            if (dirty.mark(*bounds) != DirtyTileTracker::Result::Marked) return WriteResult::TrackingLimit;
+            staged.emplace(snapshot.tile, std::move(tile));
+        }
+        if (count > m_pixelBudget / m_tileBytes) return WriteResult::MemoryLimit;
+        // Reserve for the maximum number of insertions regardless of removals.
+        m_tiles.reserve(m_tiles.size() + staged.size());
+        m_dirty = std::move(dirty);
+        for (const auto& snapshot : snapshots) {
+            auto incoming = staged.extract(snapshot.tile);
+            auto current = m_tiles.find(snapshot.tile);
+            if (incoming.mapped().pixels.empty()) {
+                if (current != m_tiles.end()) m_tiles.erase(current);
+            } else if (current != m_tiles.end()) {
+                current->second = std::move(incoming.mapped());
+            } else {
+                m_tiles.insert(std::move(incoming));
+            }
+        }
+        if (m_callback) for (const auto& snapshot : snapshots) m_callback(m_callbackContext, snapshot.tile);
+        return WriteResult::Changed;
+    } catch (const std::bad_alloc&) { return WriteResult::AllocationFailed; }
+      catch (const std::length_error&) { return WriteResult::AllocationFailed; }
 }
 void SparseTileStore::beginBatch() noexcept { ++m_batchDepth; }
 void SparseTileStore::endBatch() noexcept

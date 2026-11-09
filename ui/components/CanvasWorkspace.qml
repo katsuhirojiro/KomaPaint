@@ -13,6 +13,7 @@ Rectangle {
         objectName: "canvasViewport"
         anchors.fill: parent
         document: Workspace.document
+        history: Workspace.history
         zoom: Workspace.zoom
         onZoomRequested: function(value) { Workspace.zoom = value }
         onStrokeError: function(message) { brushError.text = message; brushErrorDialog.open() }

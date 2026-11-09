@@ -11,10 +11,15 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     m_timeline = new TimelineState(this);
     m_colors   = new ColorPalette(this);
     m_history  = new UndoStack(this);
+    connect(m_document->layers(), &QAbstractItemModel::rowsAboutToBeRemoved, this, [this] {
+        if (m_history->strokeActive()) m_history->cancelStroke();
+        if (m_history->canUndo() || m_history->canRedo()) { m_history->clear(); emit m_history->errorOccurred(QStringLiteral("Artwork history was cleared because a layer was deleted.")); }
+    });
 }
 
 bool WorkspaceState::newDocument(int width, int height, bool transparent, const QColor& background)
 {
+    if (m_history->strokeActive()) return false;
     if (!CanvasDocument::validSize(QSize(width, height)) || !background.isValid()
         || background.alpha() != 255) return false;
     auto* next = new CanvasDocument(this);
@@ -22,8 +27,12 @@ bool WorkspaceState::newDocument(int width, int height, bool transparent, const 
     next->setBackgroundColor(background);
     next->setTransparentBackground(transparent);
     auto* previous = m_document;
-    m_document = next;
     m_history->clear();
+    m_document = next;
+    connect(m_document->layers(), &QAbstractItemModel::rowsAboutToBeRemoved, this, [this] {
+        if (m_history->strokeActive()) m_history->cancelStroke();
+        if (m_history->canUndo() || m_history->canRedo()) { m_history->clear(); emit m_history->errorOccurred(QStringLiteral("Artwork history was cleared because a layer was deleted.")); }
+    });
     emit documentChanged();
     previous->deleteLater();
     return true;

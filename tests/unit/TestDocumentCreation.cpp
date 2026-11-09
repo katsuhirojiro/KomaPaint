@@ -17,7 +17,9 @@ void TestDocumentCreation::createsIndependentDocument()
     WorkspaceState workspace;
     auto* old = workspace.document();
     workspace.layers()->addLayer();
-    workspace.history()->push("test");
+    QVERIFY(workspace.history()->beginStroke(workspace.layers()->layerAt(0)));
+    workspace.layers()->layerAt(0)->tiles().setPixel({0, 0}, 0xffffffffU);
+    QVERIFY(workspace.history()->commitStroke());
     QSignalSpy changed(&workspace, &WorkspaceState::documentChanged);
     QVERIFY(workspace.newDocument(321, 654, false, QColor("#123456")));
     QCOMPARE(changed.count(), 1);

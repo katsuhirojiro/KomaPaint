@@ -29,6 +29,22 @@ ApplicationWindow {
         }
     }
 
+    readonly property bool editingText: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
+    Shortcut { sequence: "Ctrl+Z"; enabled: !root.editingText && Workspace.history.canUndo; onActivated: Workspace.history.undo() }
+    Shortcut { sequence: "Ctrl+Y"; enabled: !root.editingText && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
+    Connections {
+        target: Workspace.history
+        function onErrorOccurred(message) { historyErrorText.text = message; historyErrorDialog.open() }
+    }
+    Dialog {
+        id: historyErrorDialog
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Artwork history")
+        standardButtons: Dialog.Ok
+        contentItem: Label { id: historyErrorText; color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+    }
+
     minimumWidth: 1024
     minimumHeight: 640
 

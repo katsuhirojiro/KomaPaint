@@ -14,13 +14,19 @@ namespace komapaint {
 // This low-level store is not an editing transaction or undo mechanism.
 class SparseTileStore {
 public:
-    enum class WriteResult { Changed, Unchanged, OutOfBounds, InvalidPixel, MemoryLimit, TrackingLimit, AllocationFailed };
+    enum class WriteResult { Changed, Unchanged, OutOfBounds, InvalidPixel, MemoryLimit, TrackingLimit, HistoryLimit, AllocationFailed };
     static constexpr std::size_t DefaultPixelBudget = 256U * 1024U * 1024U;
     SparseTileStore(std::int64_t width, std::int64_t height,
                     int tileSize = TileGeometry::DefaultTileSize,
                     std::size_t pixelBudget = DefaultPixelBudget);
     SparseTileStore(const SparseTileStore&) = delete;
     SparseTileStore& operator=(const SparseTileStore&) = delete;
+    struct TileSnapshot { TilePoint tile; std::vector<std::uint32_t> pixels; }; // empty pixels = absent
+    using BeforeChange = bool (*)(void*, TilePoint, bool, std::span<const std::uint32_t>) noexcept;
+    void setBeforeChange(BeforeChange callback, void* context) noexcept { m_beforeChange = callback; m_beforeContext = context; }
+    // All snapshots are applied atomically, or no pixels change.
+    WriteResult restoreTiles(const std::vector<TileSnapshot>& snapshots);
+    std::size_t tileBytes() const { return m_tileBytes; }
     using ChangeCallback = void (*)(void*, TilePoint) noexcept;
     void setChangeCallback(ChangeCallback callback, void* context) noexcept { m_callback = callback; m_callbackContext = context; }
     bool isValid() const { return m_geometry.isValid() && m_tileSizeValid; }
@@ -46,6 +52,8 @@ private:
     unsigned m_batchDepth = 0;
     bool m_batchChanged = false;
     TilePoint m_batchFirst{}, m_batchLast{};
+    BeforeChange m_beforeChange = nullptr;
+    void* m_beforeContext = nullptr;
     ChangeCallback m_callback = nullptr;
     void* m_callbackContext = nullptr;
     TileGeometry m_geometry;

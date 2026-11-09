@@ -12,14 +12,18 @@
 namespace komapaint {
 class CanvasDocument;
 class Layer;
+class UndoStack;
 class CanvasViewport : public QQuickPaintedItem {
     Q_OBJECT
     Q_PROPERTY(QObject* document READ document WRITE setDocument NOTIFY documentChanged)
+    Q_PROPERTY(QObject* history READ history WRITE setHistory NOTIFY historyChanged)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged)
 public:
     explicit CanvasViewport(QQuickItem* parent = nullptr);
     QObject* document() const;
     void setDocument(QObject* document);
+    QObject* history() const;
+    void setHistory(QObject* history);
     qreal zoom() const { return m_zoom; }
     void setZoom(qreal zoom);
     Q_INVOKABLE void zoomAt(qreal x, qreal y, qreal factor);
@@ -38,6 +42,7 @@ public:
     std::size_t compositeCount() const { return m_compositeCount; }
 signals:
     void documentChanged();
+    void historyChanged();
     void zoomChanged();
     void zoomRequested(qreal zoom);
     void strokeError(const QString& message);
@@ -52,6 +57,7 @@ private:
     std::vector<CompositeLayer> layers() const;
     QImage composedTile(TilePoint tile, const std::vector<CompositeLayer>& layers, std::uint32_t background);
     QPointer<CanvasDocument> m_document;
+    QPointer<UndoStack> m_history;
     QPointer<Layer> m_strokeLayer;
     std::unique_ptr<BrushStroke> m_stroke;
     CompositeInvalidation m_invalidation;

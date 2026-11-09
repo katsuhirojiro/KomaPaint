@@ -5,5 +5,5 @@ add_library(komapaint_history STATIC
 )
 target_include_directories(komapaint_history PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(komapaint_history PUBLIC komapaint::core Qt6::Core)
+target_link_libraries(komapaint_history PUBLIC komapaint::core komapaint::layers komapaint::tile_data Qt6::Core)
 add_library(komapaint::history ALIAS komapaint_history)

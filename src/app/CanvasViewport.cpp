@@ -1,5 +1,6 @@
 #include "CanvasViewport.h"
 #include "BrushSettings.h"
+#include "../history/UndoStack.h"
 #include "../canvas/CanvasDocument.h"
 #include "../layers/Layer.h"
 #include "../layers/LayerModel.h"
@@ -17,6 +18,13 @@ CanvasViewport::CanvasViewport(QQuickItem* parent) : QQuickPaintedItem(parent)
 {
     setOpaquePainting(true);
     setAntialiasing(false);
+}
+QObject* CanvasViewport::history() const { return m_history.data(); }
+void CanvasViewport::setHistory(QObject* object)
+{
+    auto* next = qobject_cast<UndoStack*>(object);
+    if (m_history == next) return;
+    cancelStroke(); m_history = next; emit historyChanged();
 }
 QObject* CanvasViewport::document() const { return m_document.data(); }
 void CanvasViewport::setDocument(QObject* object)
@@ -154,11 +162,15 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
 {
     cancelStroke();
     auto* brush = qobject_cast<BrushSettings*>(settings);
-    if (!m_document || !brush || !color.isValid()) return false;
+    if (!m_document || !m_history || !brush || !color.isValid()) return false;
     auto* model = m_document->layers();
     auto* layer = model->layerAt(model->activeLayerIndex());
     if (!layer || layer->isLocked() || !layer->isVisible()) {
         emit strokeError(QStringLiteral("Select a visible, unlocked layer to paint."));
+        return false;
+    }
+    if (!m_history->beginStroke(layer)) {
+        emit strokeError(QStringLiteral("Could not start stroke history; no paint was applied."));
         return false;
     }
     BrushDefinition definition;
@@ -167,11 +179,12 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
     definition.tip = brush->textured() ? BrushTip::Textured : BrushTip::Round;
     definition.color = color.rgba();
     try { m_stroke = std::make_unique<BrushStroke>(layer->tiles(), definition); }
-    catch (const std::bad_alloc&) { emit strokeError(QStringLiteral("Not enough memory to start a stroke.")); return false; }
+    catch (const std::bad_alloc&) { m_history->cancelStroke(); emit strokeError(QStringLiteral("Not enough memory to start a stroke.")); return false; }
     m_strokeLayer = layer;
     auto point = viewportToDocument(x, y);
     if (!m_stroke->begin({point.x(), point.y(), pressure})) {
-        cancelStroke(); emit strokeError(QStringLiteral("Stroke stopped: memory or tile limit reached. Some paint may already have been applied.")); return false;
+        m_stroke.reset(); m_strokeLayer = nullptr; m_history->commitStroke();
+        emit strokeError(QStringLiteral("Stroke stopped: history, memory or tile limit reached. Any paint applied can be undone.")); return false;
     }
     return true;
 }
@@ -182,7 +195,8 @@ void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
         m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) { cancelStroke(); return; }
     auto point = viewportToDocument(x, y);
     if (!m_stroke->extend({point.x(), point.y(), pressure})) {
-        cancelStroke(); emit strokeError(QStringLiteral("Stroke stopped: memory or tile limit reached. Some paint may already have been applied."));
+        m_stroke.reset(); m_strokeLayer = nullptr; if (m_history) m_history->commitStroke();
+        emit strokeError(QStringLiteral("Stroke stopped: history, memory or tile limit reached. Any paint applied can be undone."));
     }
 }
 void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
@@ -191,11 +205,15 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
     if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
         m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) { cancelStroke(); return; }
     auto point = viewportToDocument(x, y);
-    if (!m_stroke->end({point.x(), point.y(), pressure}))
-        emit strokeError(QStringLiteral("Stroke stopped: memory or tile limit reached. Some paint may already have been applied."));
-    cancelStroke();
+    const bool ok = m_stroke->end({point.x(), point.y(), pressure});
+    m_stroke.reset(); m_strokeLayer = nullptr;
+    if (m_history) m_history->commitStroke();
+    if (!ok) emit strokeError(QStringLiteral("Stroke stopped: history, memory or tile limit reached. Any paint applied can be undone."));
 }
-void CanvasViewport::cancelStroke() { m_stroke.reset(); m_strokeLayer = nullptr; }
+void CanvasViewport::cancelStroke() {
+    m_stroke.reset(); m_strokeLayer = nullptr;
+    if (m_history && m_history->strokeActive()) m_history->cancelStroke();
+}
 
 void CanvasViewport::paint(QPainter* painter)
 {

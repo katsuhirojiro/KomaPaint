@@ -41,5 +41,24 @@ int main() {
     CHECK(store.pixel({0, 0}) == 0xffffffffU);
     CHECK(store.pixel({1, 0}) == 0U);
     CHECK(store.dirtyRegions().empty());
+    int restoreFailures = 0;
+    for (int n = 0; n < 16; ++n) {
+        SparseTileStore s(8, 8, 4);
+        CHECK(s.setPixel({0, 0}, 0xffffffffU) == SparseTileStore::WriteResult::Changed);
+        CHECK(s.setPixel({4, 0}, 0xff112233U) == SparseTileStore::WriteResult::Changed);
+        std::vector<SparseTileStore::TileSnapshot> snapshots{{{0, 0}, {}}, {{1, 0}, std::vector<std::uint32_t>(16, 0xff00ff00U)}};
+        failAfter = n;
+        auto status = s.restoreTiles(snapshots);
+        failAfter = -1;
+        if (status != SparseTileStore::WriteResult::Changed) {
+            ++restoreFailures;
+            CHECK(s.pixel({0, 0}) == 0xffffffffU);
+            CHECK(s.pixel({4, 0}) == 0xff112233U);
+        } else {
+            CHECK(s.pixel({0, 0}) == 0U);
+            CHECK(s.pixel({4, 0}) == 0xff00ff00U);
+        }
+    }
+    CHECK(restoreFailures >= 3);
     std::cout << "Allocation failure tests passed\n";
 }

@@ -106,7 +106,8 @@ void TestCanvasViewport::dirtyAndLayers()
 void TestCanvasViewport::brushInputAndLayerRules()
 {
     CanvasDocument doc; doc.setSize(QSize(600, 400));
-    CanvasViewport view; view.setWidth(320); view.setHeight(240); view.setDocument(&doc); view.refreshNow();
+    UndoStack history;
+    CanvasViewport view; view.setHistory(&history); view.setWidth(320); view.setHeight(240); view.setDocument(&doc); view.refreshNow();
     BrushSettings brush; brush.setSize(8);
     auto* layer = doc.layers()->layerAt(0);
     auto point = view.documentToViewport(300, 200);
@@ -159,6 +160,12 @@ void TestCanvasViewport::qmlMouseStroke()
     QVERIFY(tiles.pixel({static_cast<int>(point.x()), static_cast<int>(point.y())}).value() != 0);
     QVERIFY(tiles.pixel({static_cast<int>(point.x()) + 25, static_cast<int>(point.y())}).value() != 0);
     QVERIFY(tiles.pixel({static_cast<int>(point.x()) + 49, static_cast<int>(point.y())}).value() != 0);
+    const auto after = tiles.pixel({static_cast<int>(point.x()) + 25, static_cast<int>(point.y())}).value();
+    QVERIFY(workspace.history()->canUndo());
+    workspace.history()->undo(); canvas->refreshNow();
+    QCOMPARE(tiles.pixel({static_cast<int>(point.x()) + 25, static_cast<int>(point.y())}).value(), 0U);
+    workspace.history()->redo(); canvas->refreshNow();
+    QCOMPARE(tiles.pixel({static_cast<int>(point.x()) + 25, static_cast<int>(point.y())}).value(), after);
     delete root;
 }
 
