@@ -34,6 +34,14 @@ class NewProjectSettings : public QObject
     Q_PROPERTY(int widthPixels READ widthPixels NOTIFY pixelsChanged)
     Q_PROPERTY(int heightPixels READ heightPixels NOTIFY pixelsChanged)
 
+signals:
+    void nameChanged();
+    void unitsChanged();
+    void dpiChanged();
+    void backgroundChanged();
+    void pixelsChanged();
+    void displayChanged();
+
 public:
     // Matches CanvasDocument::MaxDimension; kept here so core does not depend
     // on the canvas module.
