@@ -1,6 +1,5 @@
 #include "NewProjectSettings.h"
 
-#include <QColor>
 #include <QStringList>
 #include <cmath>
 #include <limits>
@@ -124,9 +123,8 @@ void NewProjectSettings::setTransparentBackground(bool transparent)
     emit backgroundChanged();
 }
 
-void NewProjectSettings::setBackgroundColor(const QColor& color)
+void NewProjectSettings::setBackgroundColor(const QString& color)
 {
-    if (!color.isValid() || color.alpha() != 255) return;
     if (m_backgroundColor == color) return;
     m_backgroundColor = color;
     emit backgroundChanged();
@@ -149,7 +147,7 @@ bool NewProjectSettings::isValid() const
     if (!std::isfinite(m_widthInches) || !std::isfinite(m_heightInches)) return false;
     if (m_widthInches <= 0 || m_heightInches <= 0) return false;
     if (!std::isfinite(m_dpi) || m_dpi <= 0) return false;
-    if (!m_backgroundColor.isValid() || m_backgroundColor.alpha() != 255) return false;
+    if (m_backgroundColor.isEmpty()) return false;
     // Derived pixel dimensions must fit within the document limits.
     if (m_widthPixels < 1 || m_widthPixels > MaxDimension) return false;
     if (m_heightPixels < 1 || m_heightPixels > MaxDimension) return false;
@@ -166,8 +164,8 @@ QString NewProjectSettings::validationError() const
     if (!std::isfinite(m_dpi) || m_dpi <= 0) {
         return QStringLiteral("Resolution (DPI) must be greater than zero.");
     }
-    if (!m_backgroundColor.isValid() || m_backgroundColor.alpha() != 255) {
-        return QStringLiteral("Background colour must be fully opaque.");
+    if (m_backgroundColor.isEmpty()) {
+        return QStringLiteral("Background colour is required.");
     }
     if (m_widthPixels < 1 || m_heightPixels < 1) {
         return QStringLiteral("Canvas dimensions are too small.");
@@ -190,7 +188,7 @@ void NewProjectSettings::resetToDefaults()
     m_heightInches = 11.0;
     if (!qFuzzyCompare(m_dpi, 300.0)) m_dpi = 300.0;
     m_transparent = true;
-    m_backgroundColor = Qt::white;
+    m_backgroundColor = QStringLiteral("#FFFFFF");
     recomputePixels();
     emit dpiChanged();
     emit backgroundChanged();

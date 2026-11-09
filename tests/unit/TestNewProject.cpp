@@ -122,13 +122,13 @@ void TestNewProject::whiteAndTransparentBackgrounds()
     QCOMPARE(settings.backgroundColor(), QColor("white"));
 
     settings.setTransparentBackground(false);
-    settings.setBackgroundColor(QColor("#123456"));
+    settings.setBackgroundColor("#123456");
     QVERIFY(!settings.transparentBackground());
-    QCOMPARE(settings.backgroundColor(), QColor("#123456"));
+    QCOMPARE(settings.backgroundColor(), QString("#123456"));
 
     // Transparent background keeps an opaque background colour on record.
     settings.setTransparentBackground(true);
-    QCOMPARE(settings.backgroundColor(), QColor("#123456"));
+    QCOMPARE(settings.backgroundColor(), QString("#123456"));
 }
 
 void TestNewProject::creatingProjectReplacesCurrentProject()
@@ -140,7 +140,7 @@ void TestNewProject::creatingProjectReplacesCurrentProject()
     workspace.layers()->addLayer();
 
     QSignalSpy changed(&workspace, &WorkspaceState::documentChanged);
-    QVERIFY(workspace.newProject("My Illustration", 800, 600, false, QColor("#123456"), 150.0));
+    QVERIFY(workspace.newProject("My Illustration", 800, 600, false, "#123456", 150.0));
     QCOMPARE(changed.count(), 1);
     QVERIFY(workspace.document() != original);
     QCOMPARE(workspace.document()->title(), QString("My Illustration"));
@@ -164,7 +164,7 @@ void TestNewProject::creatingProjectWhileAnotherOpenClearsHistory()
     QVERIFY(workspace.history()->commitStroke());
     QVERIFY(workspace.history()->canUndo());
 
-    QVERIFY(workspace.newProject("Second", 200, 200, true, QColor("white"), 72.0));
+    QVERIFY(workspace.newProject("Second", 200, 200, true, "white", 72.0));
     QVERIFY(!workspace.history()->canUndo());
     QVERIFY(!workspace.history()->canRedo());
     QCOMPARE(workspace.document()->title(), QString("Second"));

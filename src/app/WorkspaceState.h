@@ -51,7 +51,7 @@ public:
     // project cleanly (history cleared, previous document discarded). Returns
     // false and leaves the current project untouched on invalid input.
     Q_INVOKABLE bool newProject(const QString& name, int width, int height, bool transparent,
-                                const QColor& background, qreal dpi);
+                                const QString& backgroundColor, qreal dpi);
     // Saves the current document. pathOrUrl may be a plain local path or a
     // file:// URL (as delivered by QML FileDialog). Empty path saves to the
     // current file when one is set. On failure the file on disk is untouched

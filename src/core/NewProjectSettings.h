@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QColor>
 #include <QObject>
 #include <QString>
 
@@ -15,8 +14,9 @@ namespace komapaint {
 // the nearest integer (half away from zero) at the last moment.
 //
 // This is a pure, UI-free value object: it knows nothing of CanvasDocument,
-// layers or tiles. It is exposed to QML as a context property so the New
-// Project dialog has a single source of truth for conversion and validation.
+// layers or tiles. It deliberately does not depend on Qt6::Gui (no QColor)
+// so it can live in the core module. The background colour is stored as a
+// colour string (e.g. "#FFFFFF") and converted to QColor in the app layer.
 class NewProjectSettings : public QObject
 {
     Q_OBJECT
@@ -26,7 +26,8 @@ class NewProjectSettings : public QObject
     Q_PROPERTY(qreal dpi READ dpi WRITE setDpi NOTIFY dpiChanged)
     Q_PROPERTY(bool transparentBackground READ transparentBackground
                WRITE setTransparentBackground NOTIFY backgroundChanged)
-    Q_PROPERTY(QColor backgroundColor READ backgroundColor WRITE setBackgroundColor
+    // Background colour as a string (e.g. "#FFFFFF"), valid for QColor.
+    Q_PROPERTY(QString backgroundColor READ backgroundColor WRITE setBackgroundColor
                NOTIFY backgroundChanged)
     // Derived pixel dimensions (read only): round(inches * dpi).
     Q_PROPERTY(int widthPixels READ widthPixels NOTIFY pixelsChanged)
@@ -66,8 +67,8 @@ public:
     // ---- Background ------------------------------------------------------
     bool transparentBackground() const { return m_transparent; }
     void setTransparentBackground(bool transparent);
-    QColor backgroundColor() const { return m_backgroundColor; }
-    void setBackgroundColor(const QColor& color);
+    QString backgroundColor() const { return m_backgroundColor; }
+    void setBackgroundColor(const QString& color);
 
     // ---- Derived pixels (rounded) ----------------------------------------
     int widthPixels() const { return m_widthPixels; }
@@ -84,6 +85,7 @@ public:
     static qreal pixelsFromInches(qreal inches, qreal dpi);
     static qreal inchesFromPixels(qreal pixels, qreal dpi);
     static qreal convert(qreal value, const QString& from, const QString& to);
+    // Exposed to QML as a ComboBox model for the unit picker.
     Q_INVOKABLE QStringList availableUnits() const;
 
 private:
@@ -96,7 +98,7 @@ private:
     qreal   m_heightInches = 11.0;  // US letter height
     qreal   m_dpi          = 300.0;
     bool    m_transparent  = true;
-    QColor  m_backgroundColor = Qt::white;
+    QString m_backgroundColor = QStringLiteral("#FFFFFF");
     int     m_widthPixels  = 2550;
     int     m_heightPixels = 3300;
 };

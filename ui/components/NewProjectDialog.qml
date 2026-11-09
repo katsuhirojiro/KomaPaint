@@ -176,7 +176,7 @@ Dialog {
                     }
                     Rectangle {
                         width: 30; height: 30
-                        color: NewProject.backgroundColor
+                        color: Qt.color(NewProject.backgroundColor)
                         border.color: KP.border
                     }
                 }
@@ -238,7 +238,13 @@ Dialog {
     ColorDialog {
         id: backgroundPicker
         title: qsTr("Background colour")
-        selectedColor: NewProject.backgroundColor
-        onAccepted: NewProject.backgroundColor = selectedColor
+        selectedColor: Qt.color(NewProject.backgroundColor)
+        onAccepted: {
+            var c = selectedColor;
+            NewProject.backgroundColor = "#" +
+                ("0" + c.red.toString(16)).slice(-2) +
+                ("0" + c.green.toString(16)).slice(-2) +
+                ("0" + c.blue.toString(16)).slice(-2);
+        }
     }
 }

@@ -1,5 +1,7 @@
 #include "WorkspaceState.h"
 
+#include <QColor>
+
 #include "FileAssociation.h"
 #include "../core/Settings.h"
 #include "../files/DocumentFile.h"
@@ -86,17 +88,18 @@ bool WorkspaceState::newDocument(int width, int height, bool transparent, const 
 }
 
 bool WorkspaceState::newProject(const QString& name, int width, int height, bool transparent,
-                                const QColor& background, qreal dpi)
+                                const QString& backgroundColor, qreal dpi)
 {
     if (m_history->strokeActive()) return false;
     if (name.trimmed().isEmpty()) return false;
-    if (!CanvasDocument::validSize(QSize(width, height)) || !background.isValid()
-        || background.alpha() != 255 || dpi <= 0) return false;
+    QColor bgColor(backgroundColor);
+    if (!CanvasDocument::validSize(QSize(width, height)) || !bgColor.isValid()
+        || bgColor.alpha() != 255 || dpi <= 0) return false;
     auto* next = new CanvasDocument(this);
     next->setTitle(name.trimmed());
     next->setSize(QSize(width, height));
     next->setDpi(dpi);
-    next->setBackgroundColor(background);
+    next->setBackgroundColor(bgColor);
     next->setTransparentBackground(transparent);
     replaceDocument(next);
     return true;
