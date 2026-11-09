@@ -41,6 +41,7 @@ public slots:
     void setIndex(int index);
 
 signals:
+    void artworkChanged(qint64 tileX, qint64 tileY);
     void nameChanged();
     void visibilityChanged();
     void lockedChanged();

@@ -1,4 +1,5 @@
 #include "KomaPaintApp.h"
+#include "CanvasViewport.h"
 #include "core/Version.h"
 
 #include <QApplication>
@@ -29,6 +30,7 @@ KomaPaintApp::~KomaPaintApp() = default;
 void KomaPaintApp::registerTypes()
 {
     qRegisterMetaType<PanelManager*>();
+    qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
 }
 
 void KomaPaintApp::loadStyles() {}

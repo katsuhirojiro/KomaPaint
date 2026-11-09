@@ -19,6 +19,10 @@ public:
     SparseTileStore(std::int64_t width, std::int64_t height,
                     int tileSize = TileGeometry::DefaultTileSize,
                     std::size_t pixelBudget = DefaultPixelBudget);
+    SparseTileStore(const SparseTileStore&) = delete;
+    SparseTileStore& operator=(const SparseTileStore&) = delete;
+    using ChangeCallback = void (*)(void*, TilePoint) noexcept;
+    void setChangeCallback(ChangeCallback callback, void* context) noexcept { m_callback = callback; m_callbackContext = context; }
     bool isValid() const { return m_geometry.isValid() && m_tileSizeValid; }
     const TileGeometry& geometry() const { return m_geometry; }
     const DirtyTileTracker::Regions& dirtyRegions() const { return m_dirty.regions(); }
@@ -35,6 +39,8 @@ public:
 private:
     struct Hash { std::size_t operator()(const TilePoint& p) const noexcept; };
     struct Tile { std::vector<std::uint32_t> pixels; std::size_t nonzero = 0; };
+    ChangeCallback m_callback = nullptr;
+    void* m_callbackContext = nullptr;
     TileGeometry m_geometry;
     DirtyTileTracker m_dirty;
     bool m_tileSizeValid;

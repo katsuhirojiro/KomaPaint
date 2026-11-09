@@ -1,110 +1,39 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import KomaPaint 1.0
 import "../themes"
 
 Rectangle {
     id: ws
     color: KP.canvasBg
-
-    // Inner scrollable working area
-    Flickable {
-        id: flick
+    function fitCanvas() { canvas.fit() }
+    CanvasViewport {
+        id: canvas
         anchors.fill: parent
-        anchors.margins: 24
-        contentWidth: canvasDoc.width + 40
-        contentHeight: canvasDoc.height + 40
-        boundsBehavior: Flickable.DragAndOvershootBounds
-        ScrollBar.horizontal: ScrollBar {
-            active: true
+        document: Workspace.document
+        zoom: Workspace.zoom
+        onZoomRequested: function(value) { Workspace.zoom = value }
+    }
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.MiddleButton | Qt.LeftButton
+        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
+        property real lastX
+        property real lastY
+        onPressed: function(mouse) { lastX = mouse.x; lastY = mouse.y }
+        onPositionChanged: function(mouse) {
+            if (pressed) { canvas.panBy(mouse.x - lastX, mouse.y - lastY); lastX = mouse.x; lastY = mouse.y }
         }
-        ScrollBar.vertical: ScrollBar {
-            active: true
-        }
-
-        Item {
-            id: docHost
-            width: flick.contentWidth
-            height: flick.contentHeight
-
-            // Document frame
-            Rectangle {
-                id: canvasDoc
-                anchors.centerIn: parent
-                property real displayScale: Math.min(Workspace.zoom / 100, 900 / Workspace.document.width, 700 / Workspace.document.height)
-                width: Math.max(1, Workspace.document.width * displayScale)
-                height: Math.max(1, Workspace.document.height * displayScale)
-                color: "transparent"
-                border.color: "#0c0d0f"
-                border.width: 1
-
-                // Drop shadow / document edge
-                Rectangle {
-                    anchors.fill: parent
-                    anchors.topMargin: -4
-                    anchors.leftMargin: -4
-                    anchors.rightMargin: 6
-                    anchors.bottomMargin: 8
-                    z: -1
-                    color: "transparent"
-                    layer.enabled: true
-                    Rectangle {
-                        anchors.fill: parent
-                        color: "#00000040"
-                        radius: 1
-                    }
-                }
-
-                // Checkerboard + paper content
-                Canvas {
-                    id: canvasSurface
-                    anchors.fill: parent
-                    onPaint: {
-                        var ctx = getContext("2d");
-                        ctx.reset();
-                        var cell = Math.max(6, Math.round(12 * Workspace.zoom / 100));
-                        if (Workspace.document.hasTransparentBackground) {
-                            // checkerboard
-                            ctx.fillStyle = "#5a5d63";
-                            ctx.fillRect(0, 0, width, height);
-                            ctx.fillStyle = "#767a81";
-                            for (var y = 0; y < height; y += cell)
-                                for (var x = 0; x < width; x += cell)
-                                    if (((x / cell) + (y / cell)) % 2 === 0)
-                                        ctx.fillRect(x, y, cell, cell);
-                        } else {
-                            ctx.fillStyle = Workspace.document.backgroundColor;
-                            ctx.fillRect(0, 0, width, height);
-                        }
-                    }
-                    Connections {
-                        target: Workspace
-                        function onDocumentChanged() {
-                            canvasSurface.requestPaint();
-                        }
-                        function onZoomChanged() {
-                            canvasSurface.requestPaint();
-                        }
-                    }
-                    Connections {
-                        target: Workspace.document
-                        function onBackgroundChanged() {
-                            canvasSurface.requestPaint();
-                        }
-                    }
-                }
-
-
-            }
+        onWheel: function(wheel) {
+            canvas.zoomAt(wheel.x, wheel.y, Math.pow(1.0015, wheel.angleDelta.y))
+            wheel.accepted = true
         }
     }
-
-    // Corner zoom / doc info overlay (bottom-left)
     Rectangle {
         anchors.left: parent.left
         anchors.bottom: parent.bottom
-        anchors.leftMargin: 6
-        anchors.bottomMargin: 6
+        anchors.margins: 6
         width: infoText.implicitWidth + 12
         height: infoText.implicitHeight + 6
         color: "#00000066"

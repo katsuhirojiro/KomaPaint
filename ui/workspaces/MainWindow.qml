@@ -167,7 +167,7 @@ ApplicationWindow {
                     action: Action {
                         text: qsTr("Fit to Window")
                         shortcut: "Ctrl+0"
-                        onTriggered: Workspace.zoomFit()
+                        onTriggered: canvasArea.fitCanvas()
                     }
                 }
                 MenuSeparator {
@@ -294,6 +294,7 @@ ApplicationWindow {
             id: toolbar
             Layout.fillWidth: true
             onNewDocumentRequested: newDocumentDialog.open()
+            onFitRequested: canvasArea.fitCanvas()
         }
 
         // ----------------------------------------------------- Center + panels

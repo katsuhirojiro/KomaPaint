@@ -7,6 +7,7 @@ Item {
     id: root
     implicitHeight: KP.toolbarHeight
     signal newDocumentRequested()
+    signal fitRequested()
 
     Rectangle {
         anchors.fill: parent
@@ -94,7 +95,7 @@ Item {
         ToolbarButton {
             iconText: "⤧"
             tooltip: "Fit to window"
-            onClicked: Workspace.zoomFit()
+            onClicked: root.fitRequested()
         }
         Sep {
         }

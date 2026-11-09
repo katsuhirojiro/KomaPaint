@@ -69,6 +69,7 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
     if (value == 0) --it->second.nonzero;
     old = value;
     if (it->second.nonzero == 0) m_tiles.erase(it);
+    if (m_callback) m_callback(m_callbackContext, a->tile);
     return WriteResult::Changed;
 }
 bool SparseTileStore::resizeEmpty(std::int64_t width, std::int64_t height)

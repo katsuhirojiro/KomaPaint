@@ -2,9 +2,14 @@
 
 namespace komapaint {
 
-Layer::Layer(QObject* parent) : QObject(parent) {}
+Layer::Layer(QObject* parent) : QObject(parent)
+{
+    m_tiles.setChangeCallback([](void* context, TilePoint tile) noexcept {
+        emit static_cast<Layer*>(context)->artworkChanged(tile.x, tile.y);
+    }, this);
+}
 Layer::Layer(const QString& name, QObject* parent)
-    : QObject(parent), m_name(name) {}
+    : Layer(parent) { m_name = name; }
 
 void Layer::setName(const QString& name)
 {

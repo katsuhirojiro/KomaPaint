@@ -1,5 +1,7 @@
 # Application-level services (QML engine, main window controller).
 add_library(komapaint_app STATIC
+    CanvasViewport.cpp
+    CanvasViewport.h
     KomaPaintApp.cpp
     KomaPaintApp.h
     PanelManager.cpp
