@@ -16,9 +16,13 @@ target_link_libraries(komapaint PRIVATE
     Qt6::Widgets   # QApplication for native menus / file dialogs
 )
 
+# TEMPORARY: build komapaint as a console app during startup diagnostics so
+# stdout/stderr are visible from cmd / PowerShell / CI without needing
+# AttachConsole tricks or log-file redirection. Restore WIN32_EXECUTABLE TRUE
+# once the smoke test passes and the artifact launches cleanly.
 set_target_properties(komapaint PROPERTIES
-    WIN32_EXECUTABLE TRUE
-    MACOSX_BUNDLE   TRUE
+    WIN32_EXECUTABLE FALSE
+    MACOSX_BUNDLE   FALSE
 )
 
 # Finalize the executable in the same directory scope where it is declared.
