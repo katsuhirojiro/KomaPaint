@@ -14,7 +14,7 @@ Rectangle {
         anchors.rightMargin: 8
         spacing: KP.gapM
         Label {
-            text: "Ready"
+            text: "Artwork cannot yet be saved or undone"
             color: KP.textMuted
             font.family: KP.fontUi
             font.pixelSize: KP.fontXS

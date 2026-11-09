@@ -100,7 +100,7 @@ Rectangle {
                             id: rSpin
                             from: 0
                             to: 255
-                            value: Workspace.colors.foreground.r
+                            value: Math.round(Workspace.colors.foreground.r * 255)
                             editable: true
                             Layout.fillWidth: true
                             font.pixelSize: KP.fontS
@@ -127,7 +127,7 @@ Rectangle {
                             id: gSpin
                             from: 0
                             to: 255
-                            value: Workspace.colors.foreground.g
+                            value: Math.round(Workspace.colors.foreground.g * 255)
                             editable: true
                             Layout.fillWidth: true
                             font.pixelSize: KP.fontS
@@ -154,7 +154,7 @@ Rectangle {
                             id: bSpin
                             from: 0
                             to: 255
-                            value: Workspace.colors.foreground.b
+                            value: Math.round(Workspace.colors.foreground.b * 255)
                             editable: true
                             Layout.fillWidth: true
                             font.pixelSize: KP.fontS
@@ -213,7 +213,7 @@ Rectangle {
 
     function hex(c) {
         function h(v) {
-            return v.toString(16).padStart(2, '0');
+            return Math.round(v * 255).toString(16).padStart(2, '0');
         }
         return ("#" + h(c.r) + h(c.g) + h(c.b)).toUpperCase();
     }

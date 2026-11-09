@@ -1,5 +1,6 @@
 #include "SparseTileStore.h"
 #include <functional>
+#include <algorithm>
 #include <new>
 #include <stdexcept>
 #include <utility>
@@ -69,8 +70,29 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
     if (value == 0) --it->second.nonzero;
     old = value;
     if (it->second.nonzero == 0) m_tiles.erase(it);
-    if (m_callback) m_callback(m_callbackContext, a->tile);
+    if (m_batchDepth) {
+        if (!m_batchChanged) { m_batchFirst = m_batchLast = a->tile; m_batchChanged = true; }
+        else {
+            m_batchFirst.x = std::min(m_batchFirst.x, a->tile.x); m_batchFirst.y = std::min(m_batchFirst.y, a->tile.y);
+            m_batchLast.x = std::max(m_batchLast.x, a->tile.x); m_batchLast.y = std::max(m_batchLast.y, a->tile.y);
+        }
+    } else if (m_callback) m_callback(m_callbackContext, a->tile);
     return WriteResult::Changed;
+}
+void SparseTileStore::beginBatch() noexcept { ++m_batchDepth; }
+void SparseTileStore::endBatch() noexcept
+{
+    if (!m_batchDepth || --m_batchDepth || !m_batchChanged) return;
+    const auto first = m_batchFirst, last = m_batchLast;
+    m_batchChanged = false;
+    if (!m_callback) return;
+    for (auto y = first.y;; ++y) {
+        for (auto x = first.x;; ++x) {
+            m_callback(m_callbackContext, {x, y});
+            if (x == last.x) break;
+        }
+        if (y == last.y) break;
+    }
 }
 bool SparseTileStore::resizeEmpty(std::int64_t width, std::int64_t height)
 {

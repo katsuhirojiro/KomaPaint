@@ -1,4 +1,5 @@
 #include "CanvasViewport.h"
+#include "BrushSettings.h"
 #include "../canvas/CanvasDocument.h"
 #include "../layers/Layer.h"
 #include "../layers/LayerModel.h"
@@ -28,6 +29,7 @@ void CanvasViewport::setDocument(QObject* object)
         for (int i = 0; i < m_document->layers()->rowCount(); ++i)
             disconnect(m_document->layers()->layerAt(i), nullptr, this, nullptr);
     }
+    cancelStroke();
     m_document = doc;
     m_invalidation.reset();
     m_cache.clear(); m_cacheBytes = 0;
@@ -148,6 +150,53 @@ QImage CanvasViewport::composedTile(TilePoint tile, const std::vector<CompositeL
     if (bytes <= CacheLimit) { m_cache.emplace(tile, CacheEntry{image, bytes, ++m_clock}); m_cacheBytes += bytes; }
     return image;
 }
+bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* settings, const QColor& color)
+{
+    cancelStroke();
+    auto* brush = qobject_cast<BrushSettings*>(settings);
+    if (!m_document || !brush || !color.isValid()) return false;
+    auto* model = m_document->layers();
+    auto* layer = model->layerAt(model->activeLayerIndex());
+    if (!layer || layer->isLocked() || !layer->isVisible()) {
+        emit strokeError(QStringLiteral("Select a visible, unlocked layer to paint."));
+        return false;
+    }
+    BrushDefinition definition;
+    definition.size = brush->size(); definition.opacity = brush->opacity() / 100.0;
+    definition.flow = brush->flow() / 100.0; definition.spacing = brush->spacing() / 100.0;
+    definition.tip = brush->textured() ? BrushTip::Textured : BrushTip::Round;
+    definition.color = color.rgba();
+    try { m_stroke = std::make_unique<BrushStroke>(layer->tiles(), definition); }
+    catch (const std::bad_alloc&) { emit strokeError(QStringLiteral("Not enough memory to start a stroke.")); return false; }
+    m_strokeLayer = layer;
+    auto point = viewportToDocument(x, y);
+    if (!m_stroke->begin({point.x(), point.y(), pressure})) {
+        cancelStroke(); emit strokeError(QStringLiteral("Stroke stopped: memory or tile limit reached. Some paint may already have been applied.")); return false;
+    }
+    return true;
+}
+void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
+{
+    if (!m_stroke || !m_strokeLayer || !m_document) { cancelStroke(); return; }
+    if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
+        m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) { cancelStroke(); return; }
+    auto point = viewportToDocument(x, y);
+    if (!m_stroke->extend({point.x(), point.y(), pressure})) {
+        cancelStroke(); emit strokeError(QStringLiteral("Stroke stopped: memory or tile limit reached. Some paint may already have been applied."));
+    }
+}
+void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
+{
+    if (!m_stroke || !m_strokeLayer || !m_document) { cancelStroke(); return; }
+    if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
+        m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) { cancelStroke(); return; }
+    auto point = viewportToDocument(x, y);
+    if (!m_stroke->end({point.x(), point.y(), pressure}))
+        emit strokeError(QStringLiteral("Stroke stopped: memory or tile limit reached. Some paint may already have been applied."));
+    cancelStroke();
+}
+void CanvasViewport::cancelStroke() { m_stroke.reset(); m_strokeLayer = nullptr; }
+
 void CanvasViewport::paint(QPainter* painter)
 {
     QMutexLocker lock(&m_frameMutex);

@@ -1,5 +1,7 @@
 #pragma once
 #include "../canvas/CpuTileCompositor.h"
+#include "../drawing/BrushEngine.h"
+#include <memory>
 #include <QQuickPaintedItem>
 #include <QImage>
 #include <QMutex>
@@ -9,6 +11,7 @@
 
 namespace komapaint {
 class CanvasDocument;
+class Layer;
 class CanvasViewport : public QQuickPaintedItem {
     Q_OBJECT
     Q_PROPERTY(QObject* document READ document WRITE setDocument NOTIFY documentChanged)
@@ -24,6 +27,10 @@ public:
     Q_INVOKABLE QPointF viewportToDocument(qreal x, qreal y) const;
     Q_INVOKABLE QPointF documentToViewport(qreal x, qreal y) const;
     Q_INVOKABLE void fit();
+    Q_INVOKABLE bool beginStroke(qreal x, qreal y, qreal pressure, QObject* settings, const QColor& color);
+    Q_INVOKABLE void continueStroke(qreal x, qreal y, qreal pressure);
+    Q_INVOKABLE void endStroke(qreal x, qreal y, qreal pressure);
+    Q_INVOKABLE void cancelStroke();
     void paint(QPainter* painter) override;
     // Test hooks: explicit synchronous refresh and a copy-on-write snapshot.
     void refreshNow();
@@ -33,6 +40,7 @@ signals:
     void documentChanged();
     void zoomChanged();
     void zoomRequested(qreal zoom);
+    void strokeError(const QString& message);
 protected:
     void geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry) override;
 private:
@@ -44,6 +52,8 @@ private:
     std::vector<CompositeLayer> layers() const;
     QImage composedTile(TilePoint tile, const std::vector<CompositeLayer>& layers, std::uint32_t background);
     QPointer<CanvasDocument> m_document;
+    QPointer<Layer> m_strokeLayer;
+    std::unique_ptr<BrushStroke> m_stroke;
     CompositeInvalidation m_invalidation;
     std::map<TilePoint, CacheEntry, TilePointLess> m_cache;
     std::size_t m_cacheBytes = 0;

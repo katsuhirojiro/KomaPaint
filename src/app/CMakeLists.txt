@@ -1,5 +1,6 @@
 # Application-level services (QML engine, main window controller).
 add_library(komapaint_app STATIC
+    BrushSettings.h
     CanvasViewport.cpp
     CanvasViewport.h
     KomaPaintApp.cpp
@@ -18,6 +19,7 @@ target_include_directories(komapaint_app PUBLIC
 target_link_libraries(komapaint_app PUBLIC
     komapaint::core
     komapaint::canvas
+    komapaint::drawing
     komapaint::layers
     komapaint::animation
     komapaint::color

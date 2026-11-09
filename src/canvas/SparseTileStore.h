@@ -33,12 +33,19 @@ public:
     std::size_t allocatedTiles() const { return m_tiles.size(); }
     std::size_t allocatedPixelBytes() const { return m_tiles.size() * m_tileBytes; }
     std::optional<std::uint32_t> pixel(TilePoint point) const;
+    // Coalesce change notifications for one bounded dab; pixel storage and dirty
+    // tracking still update immediately. Must be paired on the owning thread.
+    void beginBatch() noexcept;
+    void endBatch() noexcept;
     WriteResult setPixel(TilePoint point, std::uint32_t argbPremultiplied);
     // Resizing is deliberately restricted until a real crop/resize operation exists.
     bool resizeEmpty(std::int64_t width, std::int64_t height);
 private:
     struct Hash { std::size_t operator()(const TilePoint& p) const noexcept; };
     struct Tile { std::vector<std::uint32_t> pixels; std::size_t nonzero = 0; };
+    unsigned m_batchDepth = 0;
+    bool m_batchChanged = false;
+    TilePoint m_batchFirst{}, m_batchLast{};
     ChangeCallback m_callback = nullptr;
     void* m_callbackContext = nullptr;
     TileGeometry m_geometry;

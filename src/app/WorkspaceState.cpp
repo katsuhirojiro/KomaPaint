@@ -6,6 +6,7 @@ namespace komapaint {
 
 WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
 {
+    m_brush = new BrushSettings(this);
     m_document = new CanvasDocument(this);
     m_timeline = new TimelineState(this);
     m_colors   = new ColorPalette(this);

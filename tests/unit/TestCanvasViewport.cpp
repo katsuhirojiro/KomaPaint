@@ -1,5 +1,11 @@
 #include <QtTest/QtTest>
 #include "app/CanvasViewport.h"
+#include "app/WorkspaceState.h"
+#include <QQmlEngine>
+#include <QQmlContext>
+#include <QQmlComponent>
+#include <QQuickWindow>
+#include <QSGRendererInterface>
 #include "canvas/CanvasDocument.h"
 #include "layers/Layer.h"
 #include <cmath>
@@ -10,6 +16,8 @@ class TestCanvasViewport : public QObject {
 private slots:
     void navigationAndVisibleTiles();
     void dirtyAndLayers();
+    void brushInputAndLayerRules();
+    void qmlMouseStroke();
 };
 void TestCanvasViewport::navigationAndVisibleTiles()
 {
@@ -95,5 +103,61 @@ void TestCanvasViewport::dirtyAndLayers()
     QVERIFY(bottom->tiles().dirtyRegions().empty());
     QCOMPARE(view.frameSnapshot().pixelColor(10, 10), QColor(Qt::green));
 }
+void TestCanvasViewport::brushInputAndLayerRules()
+{
+    CanvasDocument doc; doc.setSize(QSize(600, 400));
+    CanvasViewport view; view.setWidth(320); view.setHeight(240); view.setDocument(&doc); view.refreshNow();
+    BrushSettings brush; brush.setSize(8);
+    auto* layer = doc.layers()->layerAt(0);
+    auto point = view.documentToViewport(300, 200);
+    QVERIFY(view.beginStroke(point.x(), point.y(), 1, &brush, Qt::red));
+    view.continueStroke(point.x() + 50, point.y(), 1);
+    view.endStroke(point.x() + 50, point.y(), 1);
+    QVERIFY(doc.isModified());
+    QVERIFY(layer->tiles().pixel({300, 200}).value() != 0);
+    QVERIFY(layer->tiles().pixel({349, 200}).value() != 0);
+    auto count = layer->tiles().allocatedTiles();
+    layer->setLocked(true);
+    QVERIFY(!view.beginStroke(point.x(), point.y(), 1, &brush, Qt::blue));
+    QCOMPARE(layer->tiles().allocatedTiles(), count);
+    layer->setLocked(false); layer->setVisible(false);
+    QVERIFY(!view.beginStroke(point.x(), point.y(), 1, &brush, Qt::blue));
+    layer->setVisible(true);
+    view.zoomAt(point.x(), point.y(), 2);
+    auto target = view.documentToViewport(310, 210);
+    QVERIFY(view.beginStroke(target.x(), target.y(), 0.5, &brush, Qt::blue));
+    view.endStroke(target.x(), target.y(), 0.5);
+    QVERIFY((layer->tiles().pixel({310, 210}).value() >> 24) > 0);
+}
+void TestCanvasViewport::qmlMouseStroke()
+{
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
+    qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
+    WorkspaceState workspace;
+    QQmlEngine engine;
+    engine.addImportPath(QStringLiteral("qrc:/"));
+    engine.rootContext()->setContextProperty(QStringLiteral("Workspace"), &workspace);
+    QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/components/CanvasWorkspace.qml")));
+    if (component.isError()) qWarning() << component.errors();
+    QObject* root = component.create();
+    QVERIFY2(root, qPrintable(component.errorString()));
+    auto* item = qobject_cast<QQuickItem*>(root);
+    QVERIFY(item);
+    QQuickWindow window; window.resize(320, 240);
+    item->setParentItem(window.contentItem()); item->setWidth(320); item->setHeight(240);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    auto* canvas = root->findChild<CanvasViewport*>(QStringLiteral("canvasViewport"));
+    QVERIFY(canvas);
+    QTest::qWait(30); canvas->refreshNow();
+    auto point = canvas->viewportToDocument(100, 100);
+    QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
+    QTest::mouseMove(&window, QPoint(150, 100), 20);
+    QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, QPoint(150, 100));
+    QVERIFY(workspace.document()->isModified());
+    QVERIFY(workspace.layers()->layerAt(0)->tiles().pixel({static_cast<int>(point.x()), static_cast<int>(point.y())}).value() != 0);
+    delete root;
+}
+
 QTEST_MAIN(TestCanvasViewport)
 #include "TestCanvasViewport.moc"

@@ -12,6 +12,7 @@ namespace komapaint {
 class CanvasDocument : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(bool modified READ isModified NOTIFY modifiedChanged)
     Q_PROPERTY(LayerModel* layers READ layers CONSTANT)
     Q_PROPERTY(QColor backgroundColor READ backgroundColor WRITE setBackgroundColor NOTIFY backgroundChanged)
     Q_PROPERTY(QString title    READ title    WRITE setTitle    NOTIFY titleChanged)
@@ -29,6 +30,7 @@ public:
 
     static CanvasDocument* createDefault(QObject* parent = nullptr);
 
+    bool isModified() const { return m_modified; }
     LayerModel* layers() const { return m_layers; }
     QColor backgroundColor() const { return m_backgroundColor; }
     QString title() const { return m_title; }
@@ -48,12 +50,15 @@ public slots:
     void setTransparentBackground(bool t);
 
 signals:
+    void modifiedChanged();
     void titleChanged();
     void sizeChanged();
     void dpiChanged();
     void backgroundChanged();
 
 private:
+    void connectArtworkSignals();
+    bool m_modified = false;
     LayerModel* m_layers;
     QColor m_backgroundColor = Qt::white;
     QString m_title = QStringLiteral("Untitled");

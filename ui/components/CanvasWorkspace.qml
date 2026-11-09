@@ -10,14 +10,16 @@ Rectangle {
     function fitCanvas() { canvas.fit() }
     CanvasViewport {
         id: canvas
+        objectName: "canvasViewport"
         anchors.fill: parent
         document: Workspace.document
         zoom: Workspace.zoom
         onZoomRequested: function(value) { Workspace.zoom = value }
+        onStrokeError: function(message) { brushError.text = message; brushErrorDialog.open() }
     }
     MouseArea {
         anchors.fill: parent
-        acceptedButtons: Qt.MiddleButton | Qt.LeftButton
+        acceptedButtons: Qt.MiddleButton
         cursorShape: pressed ? Qt.ClosedHandCursor : Qt.ArrowCursor
         property real lastX
         property real lastY
@@ -29,6 +31,45 @@ Rectangle {
             canvas.zoomAt(wheel.x, wheel.y, Math.pow(1.0015, wheel.angleDelta.y))
             wheel.accepted = true
         }
+    }
+    // Qt Quick pointer handlers deliver mouse and stylus samples independently.
+    PointHandler {
+        id: mouseBrush
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        acceptedButtons: Qt.LeftButton
+        enabled: Workspace.activeTool === "brush"
+        property bool drawing: false
+        property point lastPosition
+        onActiveChanged: {
+            if (active) { lastPosition = point.position; drawing = canvas.beginStroke(lastPosition.x, lastPosition.y, 1, Workspace.brush, Workspace.colors.foreground) }
+            else if (drawing) { canvas.endStroke(lastPosition.x, lastPosition.y, 1); drawing = false }
+        }
+        onPointChanged: if (active && drawing) { lastPosition = point.position; canvas.continueStroke(lastPosition.x, lastPosition.y, 1) }
+        onCanceled: { canvas.cancelStroke(); drawing = false }
+    }
+    PointHandler {
+        id: penBrush
+        acceptedDevices: PointerDevice.Stylus | PointerDevice.Airbrush
+        acceptedPointerTypes: PointerDevice.Pen
+        acceptedButtons: Qt.LeftButton
+        enabled: Workspace.activeTool === "brush"
+        property bool drawing: false
+        property point lastPosition
+        property real lastPressure: 0
+        onActiveChanged: {
+            if (active) { lastPosition = point.position; lastPressure = point.pressure; drawing = canvas.beginStroke(lastPosition.x, lastPosition.y, lastPressure, Workspace.brush, Workspace.colors.foreground) }
+            else if (drawing) { canvas.endStroke(lastPosition.x, lastPosition.y, lastPressure); drawing = false }
+        }
+        onPointChanged: if (active && drawing) { lastPosition = point.position; lastPressure = point.pressure; canvas.continueStroke(lastPosition.x, lastPosition.y, lastPressure) }
+        onCanceled: { canvas.cancelStroke(); drawing = false }
+    }
+    Dialog {
+        id: brushErrorDialog
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Unable to paint")
+        standardButtons: Dialog.Ok
+        contentItem: Label { id: brushError; color: KP.text; wrapMode: Text.WordWrap; width: 360 }
     }
     Rectangle {
         anchors.left: parent.left

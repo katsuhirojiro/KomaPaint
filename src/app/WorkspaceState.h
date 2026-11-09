@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../animation/TimelineState.h"
+#include "BrushSettings.h"
 #include "../canvas/CanvasDocument.h"
 #include "../color/ColorPalette.h"
 #include "../history/UndoStack.h"
@@ -20,6 +21,7 @@ class Settings;
 class WorkspaceState : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(BrushSettings* brush READ brush CONSTANT)
     Q_PROPERTY(CanvasDocument* document  READ document  NOTIFY documentChanged)
     Q_PROPERTY(LayerModel*     layers    READ layers    NOTIFY documentChanged)
     Q_PROPERTY(TimelineState*  timeline  READ timeline  CONSTANT)
@@ -31,6 +33,7 @@ class WorkspaceState : public QObject
 public:
     explicit WorkspaceState(QObject* parent = nullptr);
 
+    BrushSettings* brush() const { return m_brush; }
     CanvasDocument* document() const { return m_document; }
     LayerModel*     layers()   const { return m_document->layers(); }
     TimelineState*  timeline() const { return m_timeline; }
@@ -56,6 +59,7 @@ signals:
     void zoomChanged(qreal zoom);
 
 private:
+    BrushSettings* m_brush;
     CanvasDocument* m_document;
     TimelineState*  m_timeline;
     ColorPalette*   m_colors;

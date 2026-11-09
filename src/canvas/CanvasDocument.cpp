@@ -2,7 +2,21 @@
 
 namespace komapaint {
 
-CanvasDocument::CanvasDocument(QObject* parent) : QObject(parent), m_layers(new LayerModel(this)) {}
+CanvasDocument::CanvasDocument(QObject* parent) : QObject(parent), m_layers(new LayerModel(this))
+{
+    connect(m_layers, &QAbstractItemModel::rowsInserted, this, [this] { connectArtworkSignals(); });
+    connectArtworkSignals();
+}
+void CanvasDocument::connectArtworkSignals()
+{
+    for (int i = 0; i < m_layers->rowCount(); ++i) {
+        auto* layer = m_layers->layerAt(i);
+        disconnect(layer, &Layer::artworkChanged, this, nullptr);
+        connect(layer, &Layer::artworkChanged, this, [this] {
+            if (!m_modified) { m_modified = true; emit modifiedChanged(); }
+        });
+    }
+}
 
 bool CanvasDocument::validSize(const QSize& size)
 {

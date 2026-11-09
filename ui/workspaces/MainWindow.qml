@@ -17,6 +17,18 @@ ApplicationWindow {
     visibility: Settings.windowMaximized ? Window.Maximized : Window.Windowed
     color: KP.windowBg
 
+    property bool allowCloseWithArtwork: false
+    function requestNewDocument() {
+        if (Workspace.document.modified) discardForNew.open()
+        else newDocumentDialog.open()
+    }
+    onClosing: function(event) {
+        if (Workspace.document.modified && !allowCloseWithArtwork) {
+            event.accepted = false
+            discardForClose.open()
+        }
+    }
+
     minimumWidth: 1024
     minimumHeight: 640
 
@@ -73,7 +85,7 @@ ApplicationWindow {
                 title: qsTr("&File")
                 MenuItem {
                     text: qsTr("&New...")
-                    onTriggered: newDocumentDialog.open()
+                    onTriggered: root.requestNewDocument()
                 }
                 MenuItem {
                     text: qsTr("&Open...")
@@ -104,7 +116,7 @@ ApplicationWindow {
                 }
                 MenuItem {
                     text: qsTr("E&xit")
-                    onTriggered: Qt.quit()
+                    onTriggered: root.close()
                 }
             }
             Menu {
@@ -293,7 +305,7 @@ ApplicationWindow {
         MainToolbar {
             id: toolbar
             Layout.fillWidth: true
-            onNewDocumentRequested: newDocumentDialog.open()
+            onNewDocumentRequested: root.requestNewDocument()
             onFitRequested: canvasArea.fitCanvas()
         }
 
@@ -395,6 +407,25 @@ ApplicationWindow {
                 }
             }
         }
+    }
+
+    Dialog {
+        id: discardForNew
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Discard artwork?")
+        standardButtons: Dialog.Yes | Dialog.Cancel
+        contentItem: Label { text: qsTr("Artwork cannot be saved yet. Creating a new document will permanently discard it."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+        onAccepted: newDocumentDialog.open()
+    }
+    Dialog {
+        id: discardForClose
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Discard artwork?")
+        standardButtons: Dialog.Yes | Dialog.Cancel
+        contentItem: Label { text: qsTr("Artwork cannot be saved yet. Closing KomaPaint will permanently discard it."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+        onAccepted: { root.allowCloseWithArtwork = true; root.close() }
     }
 
     Dialog {
