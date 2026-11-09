@@ -261,11 +261,13 @@ jobs:
           $bin = "${{ env.STAGE_DIR }}"
           $env:PATH = "$bin;${{ steps.qt.outputs.qtBin }};" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
-          $env:QT_FORCE_STDERR_LOGGING = "1"
+          $logFile = "$bin\komapaint.log"
+          $env:KOMAPAINT_LOG_FILE = $logFile
+          if (Test-Path $logFile) { Remove-Item $logFile -Force }
           $exe = "$bin\komapaint.exe"
-          Write-Host "=== Launching $exe (offscreen) ==="
+          Write-Host "=== Launching $exe (offscreen), log -> $logFile ==="
           Write-Host "--- staged tree (recursive) ---"
-          Get-ChildItem $bin -Recurse -File | ForEach-Object {
+          Get-ChildItem $bin -Recurse -File | Where-Object { $_.Name -notlike "*.dll" -and $_.Name -notlike "*.qml" -and $_.Extension -in ".exe",".conf",".log" -or $_.Name -like "qt*" -or $_.DirectoryName -like "*platforms*" } | ForEach-Object {
             $rel = $_.FullName.Substring($bin.Length + 1)
             Write-Host ("  {0,10}  {1}" -f $_.Length, $rel)
           }
@@ -274,7 +276,11 @@ jobs:
           $p = Start-Process -FilePath $exe -WorkingDirectory $bin -PassThru
           Write-Host "Started PID $($p.Id)"
           Start-Sleep -Seconds 4
+          Write-Host "--- komapaint.log (after 4s) ---"
+          if (Test-Path $logFile) { Get-Content $logFile -Raw | Write-Host } else { Write-Host "(no log file was created - process likely died before main())" }
           if ($p.HasExited) {
+            Write-Host "--- komapaint.log (final) ---"
+            if (Test-Path $logFile) { Get-Content $logFile -Raw | Write-Host }
             Write-Host "Process exited prematurely with code $($p.ExitCode)."
             Write-Error "Smoke test FAILED: process did not stay alive."
             exit 1
@@ -286,6 +292,8 @@ jobs:
             $p.Kill()
             $p.WaitForExit()
           }
+          Write-Host "--- komapaint.log (after close) ---"
+          if (Test-Path $logFile) { Get-Content $logFile -Raw | Write-Host }
           Write-Host "Process exited with code $($p.ExitCode)."
           if ($p.ExitCode -ne 0) {
             Write-Error "Smoke test FAILED: non-zero exit code $($p.ExitCode)."
