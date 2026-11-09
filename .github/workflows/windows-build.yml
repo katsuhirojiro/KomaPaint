@@ -179,8 +179,23 @@ jobs:
           # (QtQuick, QtQuickControls2, QtQuickLayouts) that the QML engine loads
           # at runtime.
           Push-Location "${{ env.STAGE_DIR }}"
+          # IMPORTANT: do NOT pass --no-platform-plugins / do NOT restrict to a
+          # single platform plugin. The offscreen plugin (qoffscreen.dll) is
+          # required for headless smoke testing in CI, and shipping qwindows.dll
+          # alone is not enough for all runtime scenarios.
+          # --no-system-d3d-compiler / --no-opengl-sw keep the payload small.
           & $windeploy --release --no-compiler-runtime --no-system-d3d-compiler `
             --no-opengl-sw --qmldir $qmlDir --dir . $exe
+          # Ensure offscreen platform plugin is present for headless smoke test.
+          # (A stock release does not need it but we want it in CI.)
+          $offSrc  = "${{ steps.qt.outputs.qtBin }}\..\plugins\platforms\qoffscreen.dll"
+          $offDst  = "${{ env.STAGE_DIR }}\platforms\qoffscreen.dll"
+          if (Test-Path $offSrc) {
+            Copy-Item $offSrc $offDst -Force
+            Write-Host "Copied qoffscreen.dll for headless smoke test."
+          } else {
+            Write-Warning "qoffscreen.dll not found at $offSrc; smoke test may fail if offscreen platform is needed."
+          }
           $deployExit = $LASTEXITCODE
           Pop-Location
           if ($deployExit -ne 0) { exit $deployExit }
@@ -219,8 +234,10 @@ jobs:
             "$bin\Qt6Qml.dll",
             "$bin\Qt6Quick.dll",
             "$bin\Qt6QuickControls2.dll",
+            "$bin\Qt6QuickControls2Basic.dll",
             "$bin\Qt6Widgets.dll",
-            "$bin\platforms\qwindows.dll"
+            "$bin\platforms\qwindows.dll",
+            "$bin\platforms\qoffscreen.dll"
           )
           foreach ($f in $required) {
             if (!(Test-Path $f)) {
