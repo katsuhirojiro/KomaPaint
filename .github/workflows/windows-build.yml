@@ -127,6 +127,8 @@ jobs:
         run: |
           $env:PATH = "${{ steps.qt.outputs.qtBin }};${{ env.TEST_DIR }};" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
           $failed = 0
           $exes = Get-ChildItem "${{ env.TEST_DIR }}" -Filter "test_*.exe" | Sort-Object Name
           if ($exes.Count -eq 0) {
@@ -136,6 +138,7 @@ jobs:
           Write-Host "=== Discovered $($exes.Count) test executable(s) in ${{ env.TEST_DIR }} ==="
           foreach ($exe in $exes) {
             Write-Host ">>> Running $($exe.Name) <<<"
+            Write-Host "::notice title=Test started::$($exe.Name)"
             $output = & $exe.FullName 2>&1 | Out-String
             $code = $LASTEXITCODE
             Write-Host $output
