@@ -179,10 +179,8 @@ jobs:
           # (QtQuick, QtQuickControls2, QtQuickLayouts) that the QML engine loads
           # at runtime.
           Push-Location "${{ env.STAGE_DIR }}"
-          # --no-translator keeps the payload small; --no-opengl-sw drops the
-          # software-renderer fallback we don't need.
           & $windeploy --release --no-compiler-runtime --no-system-d3d-compiler `
-            --no-opengl-sw --no-translator --qmldir $qmlDir --dir . $exe
+            --no-opengl-sw --qmldir $qmlDir --dir . $exe
           $deployExit = $LASTEXITCODE
           Pop-Location
           if ($deployExit -ne 0) { exit $deployExit }
