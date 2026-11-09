@@ -205,7 +205,7 @@ void TestCanvasViewport::actualWindowShortcuts()
     QCOMPARE(tiles.pixel(pixel).value(), painted);
     auto* title = object->findChild<QQuickItem*>(QStringLiteral("documentTitleField")); QVERIFY(title);
     title->forceActiveFocus(); QTest::qWait(20);
-    QTest::keyClicks(window, QStringLiteral("X"));
+    QTest::keyClick(window, Qt::Key_X);
     QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
     QCOMPARE(tiles.pixel(pixel).value(), painted); // text undo must not undo artwork
     delete object;
