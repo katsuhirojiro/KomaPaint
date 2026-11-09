@@ -142,6 +142,8 @@ jobs:
             $output = & $exe.FullName 2>&1 | Out-String
             $code = $LASTEXITCODE
             Write-Host $output
+            $details = $output.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::notice title=Test result::$($exe.Name) exit $code $details"
             if ($code -ne 0) {
               Write-Host ">>> $($exe.Name) FAILED with exit code $code <<<"
               # Preserve diagnostic output in the run annotation as well as logs.
