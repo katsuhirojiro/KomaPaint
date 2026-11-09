@@ -65,22 +65,6 @@ void KomaPaintApp::loadUi()
         fprintf(stdout, "   %s\n", a.toUtf8().constData());
     }
     fflush(stdout);
-    qInstallMessageHandler([](QtMsgType type, const QMessageLogContext& ctx, const QString& msg) {
-        const char* tag = "INFO ";
-        switch (type) {
-            case QtDebugMsg:    tag = "DEBUG"; break;
-            case QtInfoMsg:     tag = "INFO "; break;
-            case QtWarningMsg:  tag = "WARN "; break;
-            case QtCriticalMsg: tag = "CRIT "; break;
-            case QtFatalMsg:    tag = "FATAL"; break;
-        }
-        fprintf(stderr, "[%s] %s (%s:%u, %s)\n", tag,
-                msg.toUtf8().constData(),
-                ctx.file ? ctx.file : "",
-                ctx.line,
-                ctx.function ? ctx.function : "");
-        fflush(stderr);
-    });
 
     // Log any QML warnings/errors so startup failures are visible even when
     // the user launches from Explorer with no console attached.
