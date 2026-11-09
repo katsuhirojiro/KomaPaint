@@ -160,17 +160,19 @@ jobs:
           if (Test-Path "${{ env.STAGE_DIR }}") { Remove-Item "${{ env.STAGE_DIR }}" -Recurse -Force }
           New-Item -ItemType Directory -Force -Path "${{ env.STAGE_DIR }}" | Out-Null
           Copy-Item "${{ env.OUTPUT_DIR }}\komapaint.exe" "${{ env.STAGE_DIR }}\komapaint.exe" -Force
-          # Write a qt.conf so Qt resolves plugins, QML imports, and resources
-          # relative to the application directory rather than against any
-          # path baked in at configure time (which points at the CI Qt install
-          # directory and is wrong once the folder is moved/zipped).
-          @"
-[Paths]
-Prefix=.
-Plugins=.
-Imports=qml
-Qml2Imports=qml
-"@ | Set-Content -Path "${{ env.STAGE_DIR }}\qt.conf" -Encoding ASCII
+          # Write a qt.conf so Qt resolves plugins and QML imports relative to
+          # the application directory rather than against the path baked in at
+          # configure time (which points at the CI Qt install). We build the
+          # file line-by-line to avoid PowerShell here-string indentation
+          # problems inside a YAML block scalar.
+          $qtConfLines = @(
+            "[Paths]",
+            "Prefix=.",
+            "Plugins=.",
+            "Imports=qml",
+            "Qml2Imports=qml"
+          )
+          $qtConfLines | Set-Content -Path "${{ env.STAGE_DIR }}\qt.conf" -Encoding ASCII
           Write-Host "Staged komapaint.exe and qt.conf into ${{ env.STAGE_DIR }}"
           Get-Content "${{ env.STAGE_DIR }}\qt.conf"
 
@@ -245,12 +247,9 @@ Qml2Imports=qml
             "$bin\Qt6Core.dll",
             "$bin\Qt6Gui.dll",
             "$bin\Qt6Qml.dll",
-            "$bin\Qt6Network.dll",
             "$bin\Qt6Quick.dll",
             "$bin\Qt6QuickControls2.dll",
-            "$bin\Qt6QuickControls2Basic.dll",
             "$bin\Qt6Widgets.dll",
-            "$bin\styles\qquickbasicstyle.dll",
             "$bin\platforms\qwindows.dll",
             "$bin\platforms\qoffscreen.dll"
           )
