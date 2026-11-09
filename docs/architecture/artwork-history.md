@@ -38,4 +38,6 @@ The document modified flag is conservative and stays set after undo.
 Only brush pixel changes made through the recorded stroke path are commands.
 Future editing operations must participate in the same history protocol;
 untracked mutation of artwork can make older tile snapshots inappropriate.
-There is no save/load yet and no crash-recovery journal.
+Artwork can be saved and reopened as a `.koma` illustration (see
+file-format.md); history is never serialized and always starts empty after
+opening. There is no crash-recovery journal.

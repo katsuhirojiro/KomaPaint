@@ -17,6 +17,14 @@ SparseTileStore::SparseTileStore(std::int64_t w, std::int64_t h, int size, std::
       m_tileBytes(m_tileSizeValid ? static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * sizeof(std::uint32_t) : 0),
       m_pixelBudget(budget) {}
 
+std::vector<TilePoint> SparseTileStore::allocatedTilePoints() const
+{
+    std::vector<TilePoint> result;
+    result.reserve(m_tiles.size());
+    for (const auto& entry : m_tiles) result.push_back(entry.first);
+    return result;
+}
+
 std::span<const std::uint32_t> SparseTileStore::tilePixels(TilePoint tile) const noexcept
 {
     const auto it = m_tiles.find(tile);

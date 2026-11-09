@@ -24,6 +24,7 @@ target_link_libraries(komapaint_app PUBLIC
     komapaint::animation
     komapaint::color
     komapaint::history
+    komapaint::files
     Qt6::Core
     Qt6::Gui
     Qt6::Qml

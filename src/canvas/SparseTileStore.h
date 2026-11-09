@@ -38,6 +38,9 @@ public:
     std::span<const std::uint32_t> tilePixels(TilePoint tile) const noexcept;
     std::size_t allocatedTiles() const { return m_tiles.size(); }
     std::size_t allocatedPixelBytes() const { return m_tiles.size() * m_tileBytes; }
+    // All non-empty tiles ever allocated have nonzero content; returns their
+    // points so callers (serialization) can enumerate artwork without probing.
+    std::vector<TilePoint> allocatedTilePoints() const;
     std::optional<std::uint32_t> pixel(TilePoint point) const;
     // Coalesce change notifications for one bounded dab; pixel storage and dirty
     // tracking still update immediately. Must be paired on the owning thread.

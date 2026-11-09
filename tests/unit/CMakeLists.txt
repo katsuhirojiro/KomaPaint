@@ -42,6 +42,8 @@ komapaint_add_test(test_recent     TestRecentFiles.cpp)
 
 komapaint_add_test(test_document_creation TestDocumentCreation.cpp)
 target_link_libraries(test_document_creation PRIVATE komapaint::app)
+komapaint_add_test(test_document_file TestDocumentFile.cpp)
+target_link_libraries(test_document_file PRIVATE komapaint::app komapaint::files Qt6::Widgets Qt6::Quick)
 
 # Geometry is deliberately independent of Qt so it can also be tested standalone.
 add_executable(test_tile_geometry TestTileGeometry.cpp ${CMAKE_SOURCE_DIR}/src/canvas/TileGeometry.cpp)

@@ -7,11 +7,13 @@ It aims to combine a serious illustration and brush engine with frame-by-frame
 animation workflows inspired by Clip Studio Paint and OpenToonz, but with an
 original architecture, interface and identity.
 
-> **Status: Phase 1 (project foundation & desktop shell).**
-> This repository currently contains the C++/Qt 6 desktop application shell,
-> a custom QML-based interface, the core module boundaries, and unit tests
-> for the non-UI services. The painting engine, layer rendering, animation
-> timeline logic, file I/O and color management are not implemented yet.
+> **Status: early alpha (Phase 2).** Implemented so far: the C++/Qt 6 desktop
+> shell, a custom QML interface, the sparse tile storage engine, CPU tile
+> compositing, a first pressure-aware brush, undoable brush strokes
+> (bounded, tile-based undo/redo), pan/zoom/fit-to-screen, and saving /
+> reopening `.koma` illustrations with layers. Animation, 3D assistance,
+> comic layouts, export formats, physical tablet support and packaging for
+> release are not implemented yet.
 
 ---
 
@@ -206,47 +208,56 @@ restores defaults.
 
 ## 7. Current limitations
 
-Phase 1 is a foundation milestone. The following are **not** implemented:
+The application is an early alpha. The following are **not** implemented:
 
-* Brush / pencil / eraser engines and any raster painting.
+* Advanced brushes: tilt, rotation, velocity, custom tip images, response
+  curves, pickup/smudge/blending and procedural presets. The current brush
+  is a basic round/textured tip with size, opacity, flow, spacing, pressure
+  (opacity only) and per-dab buildup — it is not the final brush engine.
 * Fill, eyedropper, text, selection or move tools (interface placeholders only).
-* Layer pixel storage, masks, blending modes, layer groups or compositing.
+* Layer blend modes, masks, groups or transforms (basic opacity, visibility,
+  ordering and locking exist).
 * Timeline frames, keyframes, onion skinning or playback (only shell state).
-* File I/O (no open/save/export — menu items that do not work are disabled).
+* File I/O beyond open/save of `.koma` illustrations — no export (PNG/PSD/
+  PDF), no autosave, no recent-files menu.
 * Color picker HSB widget (the color panel is a placeholder).
-* Keyboard shortcuts beyond the small set wired into the View menu.
 * Preferences dialog.
-* Welcome screen / new-document dialog.
-* Cross-platform CI, installer packaging, signed Windows binary.
+* Welcome screen / new-document dialog (the New Document dialog is minimal:
+  size, background and transparent/white; the full New Project window with
+  units, DPI and comic/animation modes is not built yet).
+* Cross-platform installer packaging, signed Windows binary, auto-update.
+* Physical tablet/stylus verification has not been done on real hardware.
 
 Menus and buttons that would trigger unfinished features are visibly
 disabled and are never falsely presented as working.
 
 ## 8. Roadmap (next phases)
 
-* **Phase 2 — Document & brush engine.** Real document model, first
-  raster brush engine, layer pixel storage, basic undoable brush strokes,
-  pan and zoom in the canvas view.
+* **Phase 2 — Document & brush engine (in progress).** Done: real document
+  model, sparse tile storage, CPU compositing, first pressure-aware
+  raster brush, bounded tile-based undo/redo, pan and zoom, open/save of
+  `.koma` illustrations. Not yet: advanced/traditional-media brushes,
+  document-wide memory budget.
 * **Phase 3 — Layers & compositing.** Full layer list UI, opacity,
   visibility, basic blend modes, transforms, selections.
 * **Phase 4 — Animation.** Frame timeline, key exposure sheet, onion
   skinning, playback loop controls.
-* **Phase 5 — File I/O & export.** Native project format, import/export
-  of common image formats, autosave, recent files in File menu.
+* **Phase 5 — File I/O & export.** Export of common image formats,
+  autosave, recent files in the File menu. (Open/save of `.koma`
+  illustrations landed in Phase 2.)
 * **Phase 6 — Windows packaging.** Installer, signed binary, auto-update,
   crash reporting.
 
 ## 9. Validation
 
 * **Unit tests:** the `tests/unit` directory contains QtTest-based unit
-  tests for the undo stack, layer model, timeline state, canvas document
-  and recent-files list. They are registered with CTest via `add_test()`
-  in `tests/unit/CMakeLists.txt` and are discovered by `ctest`. **They
-  have not yet been executed in this CI environment** because the
-  Qt 6 native development SDK (with CMake configs and QtTest libraries)
-  is not present in the Linux container used to author this commit; they
-  are expected to build and pass once the Windows/MSVC prerequisites from
-  section 3 are installed locally.
+  tests for the undo stack, layer model, timeline state, canvas document,
+  tile geometry/storage, dirty tracking, CPU compositor, brush engine,
+  viewport, document creation and the `.koma` file format. They are
+  registered with CTest via `add_test()` in `tests/unit/CMakeLists.txt`
+  and run on Windows (MSVC 2022, Qt 6) in GitHub Actions on every push
+  to every branch; the packaged executable is also launch-smoke-tested
+  in that workflow. See `docs/development/building.md` for local builds.
 * **QML:** QML files have been processed with `qmlformat`; imports are
   structured so they resolve both from the source tree (for the PySide6
   launcher) and from the Qt resource bundle (for the production binary).

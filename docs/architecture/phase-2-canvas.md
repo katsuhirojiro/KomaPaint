@@ -4,8 +4,8 @@ Status: design direction, not an implementation of tile storage or painting.
 
 A document owns its layer model and background metadata; the workspace exposes
 its current document and changes the model together when creating a document.
-No file saving or dirty-document prompt exists yet. Before artwork can be
-edited, replacing or closing a modified document must warn the user.
+Saving and reopening illustrations now exists as `.koma` files (see
+file-format.md); replacing or closing a modified document prompts the user.
 
 ## Storage and drawing
 

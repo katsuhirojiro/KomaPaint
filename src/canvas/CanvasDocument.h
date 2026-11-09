@@ -31,6 +31,9 @@ public:
     static CanvasDocument* createDefault(QObject* parent = nullptr);
 
     bool isModified() const { return m_modified; }
+    // Marks the document as unmodified (after saving) or modified. Not
+    // exposed to QML; the UI must not be able to silently clear artwork state.
+    void setModified(bool modified) { if (m_modified != modified) { m_modified = modified; emit modifiedChanged(); } }
     LayerModel* layers() const { return m_layers; }
     QColor backgroundColor() const { return m_backgroundColor; }
     QString title() const { return m_title; }

@@ -11,7 +11,8 @@ ApplicationWindow {
     id: root
 
     visible: true
-    title: App.versionDisplay
+    // Keep "KomaPaint" as the leading token (packaging smoke test relies on it).
+    title: App.versionDisplay + " — " + Workspace.document.title + (Workspace.document.modified ? " *" : "")
     width: Settings.windowSize.width
     height: Settings.windowSize.height
     visibility: Settings.windowMaximized ? Window.Maximized : Window.Windowed
@@ -21,6 +22,14 @@ ApplicationWindow {
     function requestNewDocument() {
         if (Workspace.document.modified) discardForNew.open()
         else newDocumentDialog.open()
+    }
+    function requestOpenImage() {
+        if (Workspace.document.modified) discardForOpen.open()
+        else openImageDialog.open()
+    }
+    function saveImage() {
+        if (Workspace.currentFile.length > 0) Workspace.saveToPath(Workspace.currentFile)
+        else saveImageDialog.open()
     }
     onClosing: function(event) {
         if (Workspace.document.modified && !allowCloseWithArtwork) {
@@ -32,9 +41,16 @@ ApplicationWindow {
     readonly property bool editingText: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
     Shortcut { sequence: "Ctrl+Z"; enabled: !root.editingText && Workspace.history.canUndo; onActivated: Workspace.history.undo() }
     Shortcut { sequence: "Ctrl+Y"; enabled: !root.editingText && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
+    Shortcut { sequence: "Ctrl+O"; enabled: !root.editingText; onActivated: root.requestOpenImage() }
+    Shortcut { sequence: "Ctrl+S"; enabled: !root.editingText; onActivated: root.saveImage() }
+    Shortcut { sequence: "Ctrl+Shift+S"; enabled: !root.editingText; onActivated: saveImageDialog.open() }
     Connections {
         target: Workspace.history
         function onErrorOccurred(message) { historyErrorText.text = message; historyErrorDialog.open() }
+    }
+    Connections {
+        target: Workspace
+        function onFileErrorOccurred(message) { fileErrorText.text = message; fileErrorDialog.open() }
     }
     Dialog {
         id: historyErrorDialog
@@ -43,6 +59,32 @@ ApplicationWindow {
         title: qsTr("Artwork history")
         standardButtons: Dialog.Ok
         contentItem: Label { id: historyErrorText; color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+    }
+    Dialog {
+        id: fileErrorDialog
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Illustration file")
+        standardButtons: Dialog.Ok
+        contentItem: Label { id: fileErrorText; color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+    }
+    FileDialog {
+        id: openImageDialog
+        title: qsTr("Open illustration")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("KomaPaint illustrations (*.koma)"), qsTr("All files (*)")]
+        onAccepted: Workspace.openFromPath(selectedFile)
+    }
+    FileDialog {
+        id: saveImageDialog
+        title: qsTr("Save illustration")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "koma"
+        nameFilters: [qsTr("KomaPaint illustrations (*.koma)"), qsTr("All files (*)")]
+        selectedFile: Workspace.currentFile.length > 0
+                      ? Qt.resolvedUrl(Workspace.currentFile)
+                      : Qt.resolvedUrl(Workspace.document.title + ".koma")
+        onAccepted: Workspace.saveToPath(selectedFile)
     }
 
     minimumWidth: 1024
@@ -104,19 +146,16 @@ ApplicationWindow {
                     onTriggered: root.requestNewDocument()
                 }
                 MenuItem {
-                    text: qsTr("&Open...")
-                    onTriggered: /* placeholder */  {
-                    }
+                    text: qsTr("&Open...\tCtrl+O")
+                    onTriggered: root.requestOpenImage()
                 }
                 MenuItem {
-                    text: qsTr("&Save")
-                    onTriggered: /* placeholder */  {
-                    }
+                    text: qsTr("&Save\tCtrl+S")
+                    onTriggered: root.saveImage()
                 }
                 MenuItem {
-                    text: qsTr("Save &As...")
-                    onTriggered: /* placeholder */  {
-                    }
+                    text: qsTr("Save &As...\tCtrl+Shift+S")
+                    onTriggered: saveImageDialog.open()
                 }
                 MenuSeparator {
                 }
@@ -444,18 +483,27 @@ ApplicationWindow {
         id: discardForNew
         anchors.centerIn: parent
         modal: true
-        title: qsTr("Discard artwork?")
+        title: qsTr("Discard unsaved changes?")
         standardButtons: Dialog.Yes | Dialog.Cancel
-        contentItem: Label { text: qsTr("Artwork cannot be saved yet. Creating a new document will permanently discard it."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+        contentItem: Label { text: qsTr("Your artwork has unsaved changes. Creating a new document will permanently discard them."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
         onAccepted: newDocumentDialog.open()
+    }
+    Dialog {
+        id: discardForOpen
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Discard unsaved changes?")
+        standardButtons: Dialog.Yes | Dialog.Cancel
+        contentItem: Label { text: qsTr("Your artwork has unsaved changes. Opening another illustration will permanently discard them."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+        onAccepted: openImageDialog.open()
     }
     Dialog {
         id: discardForClose
         anchors.centerIn: parent
         modal: true
-        title: qsTr("Discard artwork?")
+        title: qsTr("Discard unsaved changes?")
         standardButtons: Dialog.Yes | Dialog.Cancel
-        contentItem: Label { text: qsTr("Artwork cannot be saved yet. Closing KomaPaint will permanently discard it."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+        contentItem: Label { text: qsTr("Your artwork has unsaved changes. Closing KomaPaint will permanently discard them."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
         onAccepted: { root.allowCloseWithArtwork = true; root.close() }
     }
 

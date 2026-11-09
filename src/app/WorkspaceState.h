@@ -27,6 +27,7 @@ class WorkspaceState : public QObject
     Q_PROPERTY(TimelineState*  timeline  READ timeline  CONSTANT)
     Q_PROPERTY(ColorPalette*   colors    READ colors    CONSTANT)
     Q_PROPERTY(UndoStack*      history   READ history   CONSTANT)
+    Q_PROPERTY(QString         currentFile READ currentFile NOTIFY currentFileChanged)
     Q_PROPERTY(QString         activeTool READ activeTool WRITE setActiveTool NOTIFY activeToolChanged)
     Q_PROPERTY(qreal           zoom      READ zoom      WRITE setZoom      NOTIFY zoomChanged)
 
@@ -42,8 +43,18 @@ public:
 
     QString activeTool() const { return m_activeTool; }
     qreal   zoom()       const { return m_zoom; }
+    QString currentFile() const { return m_currentFile; }
 
     Q_INVOKABLE bool newDocument(int width, int height, bool transparent, const QColor& background);
+    // Saves the current document. pathOrUrl may be a plain local path or a
+    // file:// URL (as delivered by QML FileDialog). Empty path saves to the
+    // current file when one is set. On failure the file on disk is untouched
+    // and fileErrorOccurred carries a user-facing message.
+    Q_INVOKABLE bool saveToPath(const QString& pathOrUrl);
+    // Loads the document at pathOrUrl, fully validates it, then atomically
+    // swaps it in as the current document. On any failure the current
+    // document is left completely unchanged and fileErrorOccurred fires.
+    Q_INVOKABLE bool openFromPath(const QString& pathOrUrl);
     Q_INVOKABLE void zoomIn();
     Q_INVOKABLE void zoomOut();
     Q_INVOKABLE void zoomFit();
@@ -57,14 +68,20 @@ signals:
     void documentChanged();
     void activeToolChanged(const QString& tool);
     void zoomChanged(qreal zoom);
+    void currentFileChanged();
+    void fileErrorOccurred(const QString& message);
 
 private:
+    // Clears artwork history when a layer is deleted, because layer deletion
+    // is not yet undoable. Connected to every document we own or swap in.
+    void connectLayerDeletion(const CanvasDocument* document);
     BrushSettings* m_brush;
     CanvasDocument* m_document;
     TimelineState*  m_timeline;
     ColorPalette*   m_colors;
     UndoStack*      m_history;
     QString         m_activeTool = QStringLiteral("brush");
+    QString         m_currentFile;
     qreal           m_zoom       = 100.0;
 };
 

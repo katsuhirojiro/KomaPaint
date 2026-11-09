@@ -20,7 +20,8 @@ this is not a stroke-wide opacity cap. Changing spacing can change buildup.
 
 ## Important safety and performance limitations
 
-Artwork cannot yet be saved. The interface warns before replacing or closing a
+Artwork can be saved and reopened as a `.koma` illustration (see
+file-format.md); the interface also prompts before replacing or closing a
 modified document. Brush strokes participate in bounded tile-based undo/redo;
 see artwork-history.md for failure handling and memory limits. A tile allocation
 or tracking failure can leave a partial stroke, which remains undoable. Do not
