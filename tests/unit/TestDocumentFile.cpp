@@ -94,7 +94,7 @@ void TestDocumentFile::roundTripsPixelsAndMetadata()
         ink->setName(QStringLiteral("Ink"));
         ink->setVisible(false);
         ink->setOpacity(0.5);
-        ink->tiles().setPixel({10, 10}, 0x800000ffU);
+        ink->tiles().setPixel({10, 10}, 0x80808080U); // premultiplied: channels must not exceed alpha
         doc.layers()->setActiveLayerIndex(doc.layers()->rowCount() - 1);
         QString error;
         QVERIFY2(DocumentFile::save(doc, path, &error), qPrintable(error));
