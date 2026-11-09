@@ -16,6 +16,7 @@ jobs:
     env:
       QT_VERSION: 6.8.3
       QT_ARCH: win64_msvc2022_64
+      QT_INSTALL_DIR: ${{ github.workspace }}\qt
       BUILD_TYPE: Release
       BUILD_DIR: ${{ github.workspace }}\build
       OUTPUT_DIR: ${{ github.workspace }}\build\bin
@@ -36,47 +37,53 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install Qt ${{ env.QT_VERSION }} (${{ env.QT_ARCH }})
-        uses: jurplel/install-qt-action@v4
-        id: qt
-        with:
-          version: ${{ env.QT_VERSION }}
-          host: windows
-          target: desktop
-          arch: ${{ env.QT_ARCH }}
-          dir: ${{ github.workspace }}\qt
-          set-env: true
-          setup-python: false
-          # Additional modules required beyond qtbase (which the action always installs):
-          # qtdeclarative : Qml, Quick, Quick Controls 2, Quick Layouts
-          # qtshadertools : runtime shader compiler required by QtQuick/QtQuickControls2
-          # qttools       : windeployqt
-          modules: 'qtdeclarative qtshadertools qttools'
-          aqtversion: '==3.3.*'
-          py7zrversion: '==1.1.*'
-          cache: true
-
-      - name: Locate Qt installation
+      - name: Install aqtinstall
         shell: pwsh
         run: |
-          $qtDir = "${{ steps.qt.outputs.qt-root-dir }}"
+          python -m pip install --upgrade pip
+          # Pin known-compatible versions (aqt 3.3 + py7zr 1.1) to avoid
+          # breaking changes in newer releases.
+          python -m pip install "aqtinstall==3.3.0" "py7zr==1.1.0"
+
+      - name: Install Qt base (Qt ${{ env.QT_VERSION }} ${{ env.QT_ARCH }})
+        shell: pwsh
+        run: |
+          aqt install-qt --outputdir "${{ env.QT_INSTALL_DIR }}" `
+            windows desktop ${{ env.QT_VERSION }} ${{ env.QT_ARCH }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install additional Qt modules
+        shell: pwsh
+        run: |
+          aqt install-qt --outputdir "${{ env.QT_INSTALL_DIR }}" `
+            windows desktop ${{ env.QT_VERSION }} ${{ env.QT_ARCH }} `
+            -m qtdeclarative qtshadertools qttools
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Locate Qt installation
+        id: qt
+        shell: pwsh
+        run: |
+          $qtDir = "${{ env.QT_INSTALL_DIR }}\${{ env.QT_VERSION }}\${{ env.QT_ARCH }}"
           $qtBin = Join-Path $qtDir "bin"
           if (!(Test-Path (Join-Path $qtBin "qmake.exe"))) {
             Write-Error "qmake.exe not found at $qtBin -- Qt installation failed."
+            dir $qtDir -Recurse -Filter qmake.exe -ErrorAction SilentlyContinue | Select FullName
             exit 1
           }
           Write-Host "Qt root : $qtDir"
           Write-Host "Qt bin  : $qtBin"
           echo "qtDir=$qtDir" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           echo "qtBin=$qtBin" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-        id: qtpaths
+          # Make Qt DLLs available for test executables later.
+          echo "$qtBin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Configure CMake (Ninja, C++20, Release)
         shell: pwsh
         run: |
           cmake -S . -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} `
-            -DCMAKE_PREFIX_PATH="${{ steps.qtpaths.outputs.qtDir }}" `
+            -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qtDir }}" `
             -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="${{ env.OUTPUT_DIR }}" `
             -DKOMAPAINT_BUILD_TESTS=ON `
             -DKOMAPAINT_ENABLE_WARNINGS=ON
@@ -102,14 +109,13 @@ jobs:
       - name: Run unit tests (CTest)
         shell: pwsh
         run: |
-          # The install-qt-action adds Qt to PATH, so test executables can find Qt6*.dll.
           ctest --test-dir build -C ${{ env.BUILD_TYPE }} --output-on-failure --no-tests=error
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Deploy Qt runtime dependencies (windeployqt)
         shell: pwsh
         run: |
-          $windeploy = Join-Path "${{ steps.qtpaths.outputs.qtBin }}" "windeployqt.exe"
+          $windeploy = Join-Path "${{ steps.qt.outputs.qtBin }}" "windeployqt.exe"
           if (!(Test-Path $windeploy)) {
             Write-Error "windeployqt.exe not found at $windeploy"
             exit 1
