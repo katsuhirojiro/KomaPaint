@@ -261,7 +261,11 @@ jobs:
           $bin = "${{ env.STAGE_DIR }}"
           $qtBin = "${{ steps.qt.outputs.qtBin }}"
           $env:PATH = "$bin;$qtBin;" + $env:PATH
-          $env:QT_QPA_PLATFORM = "offscreen"
+          # Use Qt's native Windows platform for the packaged-app smoke test.
+          # The offscreen QPA has no native HWND for .NET's Process object to
+          # find, so CloseMainWindow() can never deliver WM_CLOSE under it.
+          # The windows QPA exercises the same window path as a real launch.
+          $env:QT_QPA_PLATFORM = "windows"
           $exe = "$bin\komapaint.exe"
 
           Write-Host "============================================"
@@ -311,11 +315,40 @@ jobs:
 
           if (-not $exitedEarly) {
             Write-Host ">>> Process alive after 5s - event loop is running."
-            $null = $p.CloseMainWindow()
-            if (-not $p.WaitForExit(5000)) {
-              Write-Warning "Process did not respond to CloseMainWindow within 5s; killing."
+
+            # Prove that the packaged process created its actual native main
+            # window, rather than merely keeping a process alive.
+            $p.Refresh()
+            $mainWindowHandle = $p.MainWindowHandle
+            $mainWindowTitle = $p.MainWindowTitle
+            Write-Host ">>> MainWindowHandle: $mainWindowHandle"
+            Write-Host ">>> MainWindowTitle:  '$mainWindowTitle'"
+            if ($mainWindowHandle -eq [IntPtr]::Zero) {
               $p.Kill()
               $p.WaitForExit()
+              Write-Error "Smoke test FAILED: process has no native main-window handle."
+              exit 1
+            }
+            if ($mainWindowTitle -notlike "KomaPaint *") {
+              $p.Kill()
+              $p.WaitForExit()
+              Write-Error "Smoke test FAILED: unexpected main-window title '$mainWindowTitle'."
+              exit 1
+            }
+
+            $closeAccepted = $p.CloseMainWindow()
+            Write-Host ">>> CloseMainWindow accepted: $closeAccepted"
+            if (-not $closeAccepted) {
+              $p.Kill()
+              $p.WaitForExit()
+              Write-Error "Smoke test FAILED: CloseMainWindow could not deliver WM_CLOSE."
+              exit 1
+            }
+            if (-not $p.WaitForExit(5000)) {
+              $p.Kill()
+              $p.WaitForExit()
+              Write-Error "Smoke test FAILED: process did not exit within 5s after WM_CLOSE."
+              exit 1
             }
             Write-Host ">>> Process exited with code $($p.ExitCode) after close."
             if ($p.ExitCode -ne 0) {
