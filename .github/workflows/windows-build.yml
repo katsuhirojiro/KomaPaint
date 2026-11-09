@@ -109,7 +109,7 @@ jobs:
           Get-Item $exe | Format-List Name,Length,LastWriteTime
 
       - name: Run unit tests (CTest)
-        shell: cmd /c
+        shell: cmd
         run: |
           echo === Test executables produced ===
           dir /b /s build\test_*.exe 2>nul
