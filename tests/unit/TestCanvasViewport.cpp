@@ -133,6 +133,11 @@ void TestCanvasViewport::brushInputAndLayerRules()
     QVERIFY(view.beginStroke(target.x(), target.y(), 0.5, &brush, Qt::blue));
     view.endStroke(target.x(), target.y(), 0.5);
     QVERIFY((layer->tiles().pixel({310, 210}).value() >> 24) > 0);
+    auto beforeCancel = layer->tiles().pixel({325, 220}).value();
+    auto cancelPoint = view.documentToViewport(325, 220);
+    QVERIFY(view.beginStroke(cancelPoint.x(), cancelPoint.y(), 1, &brush, Qt::green));
+    view.cancelStroke();
+    QCOMPARE(layer->tiles().pixel({325, 220}).value(), beforeCancel);
 }
 void TestCanvasViewport::qmlMouseStroke()
 {
@@ -159,6 +164,7 @@ void TestCanvasViewport::qmlMouseStroke()
     QTest::mousePress(&window, Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
     QTest::mouseMove(&window, QPoint(150, 100), 20);
     QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, QPoint(150, 100));
+    QCoreApplication::processEvents();
     QVERIFY(workspace.document()->isModified());
     auto& tiles = workspace.layers()->layerAt(0)->tiles();
     QVERIFY(tiles.pixel({static_cast<int>(point.x()), static_cast<int>(point.y())}).value() != 0);
@@ -196,6 +202,7 @@ void TestCanvasViewport::actualWindowShortcuts()
     QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, location);
     QTest::mouseMove(window, location + QPoint(25, 0), 10);
     QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, location + QPoint(25, 0));
+    QCoreApplication::processEvents();
     auto& tiles = workspace.layers()->layerAt(0)->tiles();
     const TilePoint pixel{static_cast<int>(docPoint.x()) + 10, static_cast<int>(docPoint.y())};
     const auto painted = tiles.pixel(pixel).value(); QVERIFY(painted != 0);
@@ -203,6 +210,29 @@ void TestCanvasViewport::actualWindowShortcuts()
     QCOMPARE(tiles.pixel(pixel).value(), 0U);
     QTest::keyClick(window, Qt::Key_Y, Qt::ControlModifier);
     QCOMPARE(tiles.pixel(pixel).value(), painted);
+    const auto secondLocation = location + QPoint(0, 30);
+    const TilePoint secondPixel{pixel.x, pixel.y + 30};
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, secondLocation);
+    QTest::mouseMove(window, secondLocation + QPoint(25, 0), 10);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, secondLocation + QPoint(25, 0));
+    QCoreApplication::processEvents();
+    QVERIFY(tiles.pixel(secondPixel).value() != 0);
+    QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(tiles.pixel(secondPixel).value(), 0U);
+    QCOMPARE(tiles.pixel(pixel).value(), painted);
+    QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(tiles.pixel(pixel).value(), 0U);
+    QTest::keyClick(window, Qt::Key_Y, Qt::ControlModifier);
+    QCOMPARE(tiles.pixel(pixel).value(), painted);
+    QTest::keyClick(window, Qt::Key_Y, Qt::ControlModifier);
+    QVERIFY(tiles.pixel(secondPixel).value() != 0);
+    QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
+    const auto thirdLocation = location + QPoint(0, 60);
+    QTest::mousePress(window, Qt::LeftButton, Qt::NoModifier, thirdLocation);
+    QTest::mouseRelease(window, Qt::LeftButton, Qt::NoModifier, thirdLocation);
+    QCoreApplication::processEvents();
+    QVERIFY(!workspace.history()->canRedo());
+    QCOMPARE(tiles.pixel(secondPixel).value(), 0U);
     auto* title = object->findChild<QQuickItem*>(QStringLiteral("documentTitleField")); QVERIFY(title);
     title->forceActiveFocus(); QTest::qWait(20);
     QTest::keyClick(window, Qt::Key_X);

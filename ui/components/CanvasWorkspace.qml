@@ -41,9 +41,10 @@ Rectangle {
         enabled: Workspace.activeTool === "brush"
         property bool drawing: false
         property point lastPosition
+        function finish() { if (drawing) { canvas.endStroke(lastPosition.x, lastPosition.y, 1); drawing = false } }
         onActiveChanged: {
-            if (active) { lastPosition = point.position; drawing = canvas.beginStroke(lastPosition.x, lastPosition.y, 1, Workspace.brush, Workspace.colors.foreground) }
-            else if (drawing) { canvas.endStroke(lastPosition.x, lastPosition.y, 1); drawing = false }
+            if (active) { finish(); lastPosition = point.position; drawing = canvas.beginStroke(lastPosition.x, lastPosition.y, 1, Workspace.brush, Workspace.colors.foreground) }
+            else if (drawing) Qt.callLater(finish)
         }
         onPointChanged: if (active && drawing) { lastPosition = point.position; canvas.continueStroke(lastPosition.x, lastPosition.y, 1) }
         onCanceled: { canvas.cancelStroke(); drawing = false }
@@ -57,9 +58,10 @@ Rectangle {
         property bool drawing: false
         property point lastPosition
         property real lastPressure: 0
+        function finish() { if (drawing) { canvas.endStroke(lastPosition.x, lastPosition.y, lastPressure); drawing = false } }
         onActiveChanged: {
-            if (active) { lastPosition = point.position; lastPressure = point.pressure; drawing = canvas.beginStroke(lastPosition.x, lastPosition.y, lastPressure, Workspace.brush, Workspace.colors.foreground) }
-            else if (drawing) { canvas.endStroke(lastPosition.x, lastPosition.y, lastPressure); drawing = false }
+            if (active) { finish(); lastPosition = point.position; lastPressure = point.pressure; drawing = canvas.beginStroke(lastPosition.x, lastPosition.y, lastPressure, Workspace.brush, Workspace.colors.foreground) }
+            else if (drawing) Qt.callLater(finish)
         }
         onPointChanged: if (active && drawing) { lastPosition = point.position; lastPressure = point.pressure; canvas.continueStroke(lastPosition.x, lastPosition.y, lastPressure) }
         onCanceled: { canvas.cancelStroke(); drawing = false }

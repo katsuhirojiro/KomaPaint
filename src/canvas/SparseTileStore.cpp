@@ -86,7 +86,7 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
 }
 SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<TileSnapshot>& snapshots)
 {
-    if (!isValid() || m_beforeChange) return WriteResult::InvalidPixel;
+    if (!isValid() || m_beforeChange || m_batchDepth) return WriteResult::InvalidPixel;
     try {
         // All allocations and dirty tracking happen before changing artwork.
         auto dirty = m_dirty;
