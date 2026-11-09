@@ -157,24 +157,13 @@ jobs:
         shell: pwsh
         run: |
           # Start from a clean staging directory containing only komapaint.exe.
+          # Do NOT pre-create qt.conf: windeployqt writes its own qt.conf into
+          # --dir pointing Plugins/Qml2Imports at the relative subdirectories it
+          # creates; overwriting it with "Plugins=." can break plugin lookup.
           if (Test-Path "${{ env.STAGE_DIR }}") { Remove-Item "${{ env.STAGE_DIR }}" -Recurse -Force }
           New-Item -ItemType Directory -Force -Path "${{ env.STAGE_DIR }}" | Out-Null
           Copy-Item "${{ env.OUTPUT_DIR }}\komapaint.exe" "${{ env.STAGE_DIR }}\komapaint.exe" -Force
-          # Write a qt.conf so Qt resolves plugins and QML imports relative to
-          # the application directory rather than against the path baked in at
-          # configure time (which points at the CI Qt install). We build the
-          # file line-by-line to avoid PowerShell here-string indentation
-          # problems inside a YAML block scalar.
-          $qtConfLines = @(
-            "[Paths]",
-            "Prefix=.",
-            "Plugins=.",
-            "Imports=qml",
-            "Qml2Imports=qml"
-          )
-          $qtConfLines | Set-Content -Path "${{ env.STAGE_DIR }}\qt.conf" -Encoding ASCII
-          Write-Host "Staged komapaint.exe and qt.conf into ${{ env.STAGE_DIR }}"
-          Get-Content "${{ env.STAGE_DIR }}\qt.conf"
+          Write-Host "Staged komapaint.exe into ${{ env.STAGE_DIR }}"
 
       - name: Deploy Qt runtime dependencies (windeployqt)
         shell: pwsh
@@ -243,7 +232,6 @@ jobs:
           $bin = "${{ env.STAGE_DIR }}"
           $required = @(
             "$bin\komapaint.exe",
-            "$bin\qt.conf",
             "$bin\Qt6Core.dll",
             "$bin\Qt6Gui.dll",
             "$bin\Qt6Qml.dll",
