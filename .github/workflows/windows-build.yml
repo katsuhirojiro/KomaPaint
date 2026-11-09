@@ -236,40 +236,56 @@ jobs:
       - name: Smoke-test packaged executable launches
         shell: pwsh
         run: |
-          # Launch the staged (pre-zip) komapaint.exe headless and verify it
-          # actually starts its event loop and shows a window rather than
-          # bailing out during QML load.
           $bin = "${{ env.STAGE_DIR }}"
           $env:PATH = "$bin;" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
           $env:QT_LOGGING_RULES = "*.debug=false;qt.qml.binding.removal.info=false"
           $exe = "$bin\komapaint.exe"
-          Write-Host "=== Launching $exe (offscreen, 4s watch window) ==="
-          $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\komapaint.out.log" -RedirectStandardError "$env:RUNNER_TEMP\komapaint.err.log"
+          $outFile = "$env:RUNNER_TEMP\komapaint.out.log"
+          $errFile = "$env:RUNNER_TEMP\komapaint.err.log"
+          if (Test-Path $outFile) { Remove-Item $outFile -Force }
+          if (Test-Path $errFile) { Remove-Item $errFile -Force }
+          Write-Host "=== Launching $exe (offscreen) ==="
+          # Print staged-tree contents first for diagnostics
+          Write-Host "--- staged top-level ---"
+          Get-ChildItem $bin | Select Name,Length | Format-Table -AutoSize | Out-String | Write-Host
+          Write-Host "--- staged platforms/ ---"
+          if (Test-Path "$bin\platforms") { Get-ChildItem "$bin\platforms" | Select Name | Format-Table -AutoSize | Out-String | Write-Host }
+          Write-Host "--- staged qml/ (top) ---"
+          if (Test-Path "$bin\qml") { Get-ChildItem "$bin\qml" | Select Name | Format-Table -AutoSize | Out-String | Write-Host }
+          $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
           Write-Host "Started PID $($p.Id)"
-          Start-Sleep -Seconds 4
+          # Poll for 5 seconds, streaming output as we go so the Actions console
+          # shows every qInfo/qCritical line even if the process dies early.
+          $deadline = (Get-Date).AddSeconds(5)
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            if ($p.HasExited) { break }
+          }
+          # Give redirected streams a moment to flush
+          Start-Sleep -Milliseconds 500
+          Write-Host ""
+          Write-Host "--- stdout ---"
+          if (Test-Path $outFile) { Get-Content $outFile -Raw | Write-Host }
+          Write-Host "--- stderr ---"
+          if (Test-Path $errFile) { Get-Content $errFile -Raw | Write-Host }
           if ($p.HasExited) {
-            Write-Host "--- stdout ---"
-            if (Test-Path "$env:RUNNER_TEMP\komapaint.out.log") { Get-Content "$env:RUNNER_TEMP\komapaint.out.log" }
-            Write-Host "--- stderr ---"
-            if (Test-Path "$env:RUNNER_TEMP\komapaint.err.log") { Get-Content "$env:RUNNER_TEMP\komapaint.err.log" }
             Write-Error "komapaint.exe exited prematurely with code $($p.ExitCode); it failed to create/show the main window."
             exit 1
           }
-          # Process is still running after 4s → event loop + main window alive.
-          Write-Host "Process still alive after 4s — event loop running."
-          # Close cleanly by posting WM_CLOSE.
+          Write-Host "Process still alive after 5s — event loop running."
           $p.CloseMainWindow() | Out-Null
           if (!$p.WaitForExit(5000)) {
             Write-Warning "Process did not exit within 5s of CloseMainWindow; killing."
             $p.Kill()
             $p.WaitForExit()
           }
-          Write-Host "Process exited with code $($p.ExitCode)"
-          Write-Host "--- stdout tail ---"
-          if (Test-Path "$env:RUNNER_TEMP\komapaint.out.log") { Get-Content "$env:RUNNER_TEMP\komapaint.out.log" -Tail 50 }
-          Write-Host "--- stderr tail ---"
-          if (Test-Path "$env:RUNNER_TEMP\komapaint.err.log") { Get-Content "$env:RUNNER_TEMP\komapaint.err.log" -Tail 50 }
+          Start-Sleep -Milliseconds 500
+          Write-Host "--- stdout (after close) ---"
+          if (Test-Path $outFile) { Get-Content $outFile -Raw | Write-Host }
+          Write-Host "--- stderr (after close) ---"
+          if (Test-Path $errFile) { Get-Content $errFile -Raw | Write-Host }
+          Write-Host "Exit code: $($p.ExitCode)"
           if ($p.ExitCode -ne 0) {
             Write-Error "komapaint.exe exited with non-zero code $($p.ExitCode) after smoke test."
             exit 1
