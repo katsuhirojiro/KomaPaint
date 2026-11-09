@@ -140,6 +140,7 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
           $failed = 0
+          $failingNames = @()
           $exes = Get-ChildItem "${{ env.TEST_DIR }}" -Filter "test_*.exe" | Sort-Object Name
           if ($exes.Count -eq 0) {
             Write-Error "No test executables were produced in ${{ env.TEST_DIR }}"
@@ -160,10 +161,14 @@ jobs:
             Write-Host $output
             if ($code -ne 0) {
               Write-Host ">>> $($exe.Name) FAILED with exit code $code <<<"
-              # Preserve diagnostic output in the run annotation as well as logs.
-              $annotation = $output.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-              Write-Host "::error title=Test $($exe.Name) failed::$annotation"
               $failed++
+              $failingNames += $exe.Name
+              # Preserve diagnostic output in the run annotation as well as logs.
+              # GitHub silently drops oversized annotations, so cap the payload.
+              $annotation = $output.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+              $maxLen = 20000
+              if ($annotation.Length -gt $maxLen) { $annotation = "...(truncated)" + $annotation.Substring($annotation.Length - $maxLen) }
+              Write-Host "::error title=Test $($exe.Name) failed::$annotation"
             } else {
               Write-Host ">>> $($exe.Name) PASSED (exit $code) <<<"
             }
@@ -171,6 +176,8 @@ jobs:
           }
           if ($failed -gt 0) {
             Write-Host "=== $failed test(s) FAILED ==="
+            # Compact summary annotation: always small enough to survive.
+            Write-Host "::error title=Unit tests failed::$($failingNames -join ', ')"
             exit 1
           }
           Write-Host "=== All tests passed ==="

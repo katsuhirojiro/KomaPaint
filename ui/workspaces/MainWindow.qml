@@ -94,7 +94,7 @@ ApplicationWindow {
         selectedFile: Workspace.currentFile.length > 0
                       ? root.fileUrlForPath(Workspace.currentFile)
                       : Qt.resolvedUrl(Workspace.document.title + ".koma")
-        onAccepted: Workspace.saveToPath(selectedFile)
+        onAccepted: Workspace.saveToPath(selectedFile.toString())
     }
 
     minimumWidth: 1024
