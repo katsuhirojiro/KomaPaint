@@ -246,13 +246,15 @@ jobs:
           if (Test-Path $outFile) { Remove-Item $outFile -Force }
           if (Test-Path $errFile) { Remove-Item $errFile -Force }
           Write-Host "=== Launching $exe (offscreen) ==="
+          $env:QT_DEBUG_PLUGINS = "0"
+          $env:QML_IMPORT_TRACE = "0"
           # Print staged-tree contents first for diagnostics
           Write-Host "--- staged top-level ---"
           Get-ChildItem $bin | Select Name,Length | Format-Table -AutoSize | Out-String | Write-Host
-          Write-Host "--- staged platforms/ ---"
-          if (Test-Path "$bin\platforms") { Get-ChildItem "$bin\platforms" | Select Name | Format-Table -AutoSize | Out-String | Write-Host }
-          Write-Host "--- staged qml/ (top) ---"
-          if (Test-Path "$bin\qml") { Get-ChildItem "$bin\qml" | Select Name | Format-Table -AutoSize | Out-String | Write-Host }
+          foreach ($sub in @("platforms","styles","imageformats","qml")) {
+            Write-Host "--- staged $sub/ ---"
+            if (Test-Path "$bin\$sub") { Get-ChildItem "$bin\$sub" -Recurse -Depth 2 | Select-Object FullName | Format-Table -AutoSize | Out-String | Write-Host } else { Write-Host "(missing)" }
+          }
           $p = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $outFile -RedirectStandardError $errFile
           Write-Host "Started PID $($p.Id)"
           # Poll for 5 seconds, streaming output as we go so the Actions console
@@ -291,6 +293,17 @@ jobs:
             exit 1
           }
           Write-Host "=== Smoke test passed ==="
+
+      - name: Upload smoke-test logs (always)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test-logs
+          path: |
+            ${{ runner.temp }}\komapaint.out.log
+            ${{ runner.temp }}\komapaint.err.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Package into ZIP
         shell: pwsh
