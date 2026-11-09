@@ -294,15 +294,30 @@ jobs:
           $p.StartInfo.RedirectStandardOutput = $true
           $p.StartInfo.RedirectStandardError  = $true
           $p.StartInfo.CreateNoWindow = $true
+          # Subscribe to DataReceived events so stdout/stderr are drained
+          # asynchronously — doing synchronous ReadToEnd after WaitForExit
+          # deadlocks when the child fills the pipe buffer (Qt verbose logs
+          # can easily overflow the default 4KB buffer).
+          $sbOut = New-Object System.Text.StringBuilder
+          $sbErr = New-Object System.Text.StringBuilder
+          $evtOut = Register-ObjectEvent -InputObject $p -EventName OutputDataReceived -Action {
+            param($s,$e)
+            if ($e.Data -ne $null) { [void] $Event.MessageData.AppendLine($e.Data) }
+          } -MessageData $sbOut
+          $evtErr = Register-ObjectEvent -InputObject $p -EventName ErrorDataReceived -Action {
+            param($s,$e)
+            if ($e.Data -ne $null) { [void] $Event.MessageData.AppendLine($e.Data) }
+          } -MessageData $sbErr
           $null = $p.Start()
-          $stdoutTask = $p.StandardOutput.ReadToEndAsync()
-          $stderrTask = $p.StandardError.ReadToEndAsync()
+          $p.BeginOutputReadLine()
+          $p.BeginErrorReadLine()
           $exited = $p.WaitForExit(5000)  # wait up to 5s
-          # Wait for async reads to drain
-          $stdoutTask.Wait(2000) | Out-Null
-          $stderrTask.Wait(2000) | Out-Null
-          $stdout = $stdoutTask.Result
-          $stderr = $stderrTask.Result
+          # Give async event handlers a moment to deliver last bytes.
+          Start-Sleep -Milliseconds 300
+          $stdout = $sbOut.ToString()
+          $stderr = $sbErr.ToString()
+          Unregister-Event -SourceIdentifier $evtOut.Name -ErrorAction SilentlyContinue
+          Unregister-Event -SourceIdentifier $evtErr.Name -ErrorAction SilentlyContinue
           Write-Host "--- stdout ---"
           Write-Host $stdout
           Write-Host "--- stderr ---"
