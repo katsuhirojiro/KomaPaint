@@ -155,7 +155,10 @@ void TestCanvasViewport::qmlMouseStroke()
     QTest::mouseMove(&window, QPoint(150, 100), 20);
     QTest::mouseRelease(&window, Qt::LeftButton, Qt::NoModifier, QPoint(150, 100));
     QVERIFY(workspace.document()->isModified());
-    QVERIFY(workspace.layers()->layerAt(0)->tiles().pixel({static_cast<int>(point.x()), static_cast<int>(point.y())}).value() != 0);
+    auto& tiles = workspace.layers()->layerAt(0)->tiles();
+    QVERIFY(tiles.pixel({static_cast<int>(point.x()), static_cast<int>(point.y())}).value() != 0);
+    QVERIFY(tiles.pixel({static_cast<int>(point.x()) + 25, static_cast<int>(point.y())}).value() != 0);
+    QVERIFY(tiles.pixel({static_cast<int>(point.x()) + 49, static_cast<int>(point.y())}).value() != 0);
     delete root;
 }
 
