@@ -2,6 +2,8 @@
 add_library(komapaint_core_base STATIC
     ApplicationConfig.cpp
     ApplicationConfig.h
+    NewProjectSettings.cpp
+    NewProjectSettings.h
     Settings.cpp
     Settings.h
     ModuleInfo.h

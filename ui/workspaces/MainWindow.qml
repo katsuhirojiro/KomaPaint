@@ -21,7 +21,7 @@ ApplicationWindow {
     property bool allowCloseWithArtwork: false
     function requestNewDocument() {
         if (Workspace.document.modified) discardForNew.open()
-        else newDocumentDialog.open()
+        else newProjectDialog.open()
     }
     // Converts a plain local path (Unix, Windows drive, UNC) into a file:// URL
     // suitable for FileDialog. Qt.resolvedUrl would treat "C:/..." as scheme "c".
@@ -510,8 +510,8 @@ ApplicationWindow {
         modal: true
         title: qsTr("Discard unsaved changes?")
         standardButtons: Dialog.Yes | Dialog.Cancel
-        contentItem: Label { text: qsTr("Your artwork has unsaved changes. Creating a new document will permanently discard them."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
-        onAccepted: newDocumentDialog.open()
+        contentItem: Label { text: qsTr("Your artwork has unsaved changes. Creating a new project will permanently discard them."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+        onAccepted: newProjectDialog.open()
     }
     Dialog {
         id: discardForOpen
@@ -532,40 +532,8 @@ ApplicationWindow {
         onAccepted: { root.allowCloseWithArtwork = true; root.close() }
     }
 
-    Dialog {
-        id: newDocumentDialog
-        title: qsTr("New Document")
-        modal: true
-        anchors.centerIn: parent
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        property color selectedBackground: "white"
-        onOpened: {
-            widthInput.value = 1600
-            heightInput.value = 1200
-            transparentInput.checked = false
-            selectedBackground = "white"
-        }
-        onAccepted: Workspace.newDocument(widthInput.value, heightInput.value,
-                                          transparentInput.checked, selectedBackground)
-        contentItem: ColumnLayout {
-            spacing: 10
-            Label { text: qsTr("Width (pixels)") }
-            SpinBox { id: widthInput; from: 1; to: 32768; value: 1600; editable: true }
-            Label { text: qsTr("Height (pixels)") }
-            SpinBox { id: heightInput; from: 1; to: 32768; value: 1200; editable: true }
-            CheckBox { id: transparentInput; text: qsTr("Transparent background") }
-            RowLayout {
-                enabled: !transparentInput.checked
-                Button { text: qsTr("Background colour..."); onClicked: backgroundPicker.open() }
-                Rectangle { width: 30; height: 30; color: newDocumentDialog.selectedBackground; border.color: KP.border }
-            }
-        }
-    }
-    ColorDialog {
-        id: backgroundPicker
-        title: qsTr("Background colour")
-        selectedColor: newDocumentDialog.selectedBackground
-        onAccepted: newDocumentDialog.selectedBackground = selectedColor
+    NewProjectDialog {
+        id: newProjectDialog
     }
 
     // ------------------------------------------------------------- About dialog

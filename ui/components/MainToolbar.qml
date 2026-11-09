@@ -24,7 +24,7 @@ Item {
 
         ToolbarButton {
             iconText: "N"
-            tooltip: "New document"
+            tooltip: "New project"
             onClicked: root.newDocumentRequested()
         }
         ToolbarButton {
