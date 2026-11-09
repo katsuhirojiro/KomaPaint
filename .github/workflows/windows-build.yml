@@ -140,7 +140,7 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
           $failed = 0
-          $failingNames = @()
+          $failingSummary = @()
           $exes = Get-ChildItem "${{ env.TEST_DIR }}" -Filter "test_*.exe" | Sort-Object Name
           if ($exes.Count -eq 0) {
             Write-Error "No test executables were produced in ${{ env.TEST_DIR }}"
@@ -162,13 +162,10 @@ jobs:
             if ($code -ne 0) {
               Write-Host ">>> $($exe.Name) FAILED with exit code $code <<<"
               $failed++
-              $failingNames += $exe.Name
-              # Preserve diagnostic output in the run annotation as well as logs.
-              # GitHub silently drops oversized annotations, so cap the payload.
-              $annotation = $output.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-              $maxLen = 20000
-              if ($annotation.Length -gt $maxLen) { $annotation = "...(truncated)" + $annotation.Substring($annotation.Length - $maxLen) }
-              Write-Host "::error title=Test $($exe.Name) failed::$annotation"
+              # Build a compact single-line diagnostic for the annotation.
+              $annotation = $output.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' || ')
+              if ($annotation.Length -gt 1000) { $annotation = "...(truncated) " + $annotation.Substring($annotation.Length - 1000) }
+              $failingSummary += "$($exe.Name): $annotation"
             } else {
               Write-Host ">>> $($exe.Name) PASSED (exit $code) <<<"
             }
@@ -176,8 +173,11 @@ jobs:
           }
           if ($failed -gt 0) {
             Write-Host "=== $failed test(s) FAILED ==="
-            # Compact summary annotation: always small enough to survive.
-            Write-Host "::error title=Unit tests failed::$($failingNames -join ', ')"
+            # Compact summary annotation carrying the failing output tails:
+            # small enough to survive, so failures are diagnosable without logs.
+            $summary = $failingSummary -join ' ~~ '
+            if ($summary.Length -gt 5500) { $summary = "...(truncated) " + $summary.Substring($summary.Length - 5500) }
+            Write-Host "::error title=Unit tests failed ($failed)::$summary"
             exit 1
           }
           Write-Host "=== All tests passed ==="
