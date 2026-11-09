@@ -84,7 +84,7 @@ public:
     static qreal pixelsFromInches(qreal inches, qreal dpi);
     static qreal inchesFromPixels(qreal pixels, qreal dpi);
     static qreal convert(qreal value, const QString& from, const QString& to);
-    static QStringList availableUnits();
+    Q_INVOKABLE QStringList availableUnits() const;
 
 private:
     void recomputePixels();

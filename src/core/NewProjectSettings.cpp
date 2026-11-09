@@ -1,6 +1,7 @@
 #include "NewProjectSettings.h"
 
 #include <QColor>
+#include <QStringList>
 #include <cmath>
 #include <limits>
 
@@ -220,7 +221,7 @@ qreal NewProjectSettings::convert(qreal value, const QString& from, const QStrin
     return fromInches(toInches(value, from), to);
 }
 
-QStringList NewProjectSettings::availableUnits()
+QStringList NewProjectSettings::availableUnits() const
 {
     return { QStringLiteral("px"), QStringLiteral("mm"),
              QStringLiteral("cm"), QStringLiteral("inches") };

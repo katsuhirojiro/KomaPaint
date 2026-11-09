@@ -68,7 +68,6 @@ Dialog {
                 checkable: true
                 checked: false
                 enabled: false
-                tooltip: qsTr("Coming later")
                 Layout.fillWidth: true
             }
             ToolButton {
@@ -76,7 +75,6 @@ Dialog {
                 checkable: true
                 checked: false
                 enabled: false
-                tooltip: qsTr("Coming later")
                 Layout.fillWidth: true
             }
             ToolButton {
@@ -84,7 +82,6 @@ Dialog {
                 checkable: true
                 checked: false
                 enabled: false
-                tooltip: qsTr("Coming later")
                 Layout.fillWidth: true
             }
         }
