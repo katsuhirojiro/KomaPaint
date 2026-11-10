@@ -56,6 +56,11 @@ void CanvasViewport::setDocument(QObject* object)
         connect(model, &QAbstractItemModel::modelReset, this, [this] { reconnectLayers(); invalidateAll(); });
         reconnectLayers();
     }
+    // Fit the new document to the viewport so it is immediately visible
+    // and centred, preserving aspect ratio. A manually zoomed/panned
+    // viewport is only re-fitted when the document actually changes.
+    if (doc) fit();
+
     emit documentChanged();
     invalidateAll();
 }
