@@ -63,7 +63,7 @@ void NewProjectSettings::setSizeInUnit(const QString& unit, qreal width, qreal h
 {
     if (!isValidUnit(unit)) return;
     if (!std::isfinite(width) || !std::isfinite(height)) return;
-    if (width <= 0 || height <= 0) return;
+    if (width < 0 || height < 0) return;
 
     qreal widthInches = 0.0;
     qreal heightInches = 0.0;

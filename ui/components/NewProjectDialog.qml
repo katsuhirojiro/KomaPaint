@@ -39,7 +39,7 @@ Dialog {
     onOpened: {
         NewProject.resetToDefaults()
         nameInput.text = NewProject.name
-        unitCombo.currentText = NewProject.units
+        unitCombo.currentIndex = NewProject.availableUnits().indexOf(NewProject.units)
         widthInput.value  = NewProject.widthInUnit(NewProject.units)
         heightInput.value = NewProject.heightInUnit(NewProject.units)
         dpiInput.value    = NewProject.dpi
@@ -125,9 +125,10 @@ Dialog {
                     ComboBox {
                         id: unitCombo
                         model: NewProject.availableUnits()
-                        currentText: NewProject.units
+                        // currentText is read-only in Qt 6.8; set the index instead
+                        currentIndex: NewProject.availableUnits().indexOf(NewProject.units)
                         onActivated: {
-                            NewProject.setUnits(currentText)
+                            NewProject.setUnits(unitCombo.currentText)
                             widthInput.value  = NewProject.widthInUnit(NewProject.units)
                             heightInput.value = NewProject.heightInUnit(NewProject.units)
                         }
