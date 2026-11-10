@@ -536,6 +536,16 @@ ApplicationWindow {
         id: newProjectDialog
     }
 
+    // Fit each new document to the viewport so it is immediately visible
+    // and centred, preserving aspect ratio. Triggered whenever the document
+    // changes (new project, open file, etc.).
+    Connections {
+        target: Workspace
+        function onDocumentChanged() {
+            canvasArea.fitCanvas()
+        }
+    }
+
     // ------------------------------------------------------------- About dialog
     Dialog {
         id: aboutDialog
