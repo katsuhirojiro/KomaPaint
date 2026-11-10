@@ -22,6 +22,7 @@ private slots:
     void dirtyAndLayers();
     void brushInputAndLayerRules();
     void strokeFailureDiagnostics();
+    void compositeCacheAccounting();
     void qmlMouseStroke();
     void actualWindowShortcuts();
 };
@@ -161,14 +162,32 @@ void TestCanvasViewport::strokeFailureDiagnostics()
     const auto message = errors.takeFirst().at(0).toString();
     QVERIFY2(message.contains(QStringLiteral("Undo history capacity")), qPrintable(message));
     QVERIFY(message.contains(QStringLiteral("accounted")));
-    QVERIFY(history.canUndo());
+    QVERIFY(!history.canUndo());
+    QVERIFY(message.contains(QStringLiteral("rolled back")));
     auto& store = doc.layers()->layerAt(0)->tiles();
-    QVERIFY(store.pixel({100, 100}).value() != 0);
+    QCOMPARE(store.pixel({100, 100}).value(), 0U);
     QCOMPARE(store.pixel({300, 100}).value(), 0U);
-    history.undo();
     QCOMPARE(store.allocatedTiles(), std::size_t(0));
-    history.redo();
-    QVERIFY(store.pixel({100, 100}).value() != 0);
+    QVERIFY(!doc.isModified());
+}
+
+void TestCanvasViewport::compositeCacheAccounting()
+{
+    CanvasDocument doc;
+    doc.setSize(QSize(600, 400));
+    auto budget = doc.layers()->documentBudget();
+    {
+        CanvasViewport view;
+        view.setWidth(320); view.setHeight(240); view.setDocument(&doc); view.refreshNow();
+        QVERIFY(budget->cacheBytes() > 0);
+        const auto before = budget->cacheBytes();
+        QVERIFY(budget->usedBytes() >= before);
+        view.setDocument(nullptr);
+        QCOMPARE(budget->cacheBytes(), size_t(0));
+        view.setDocument(&doc); view.refreshNow();
+        QVERIFY(budget->cacheBytes() > 0);
+    }
+    QCOMPARE(budget->cacheBytes(), size_t(0));
 }
 
 void TestCanvasViewport::qmlMouseStroke()

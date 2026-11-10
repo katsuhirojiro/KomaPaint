@@ -20,6 +20,7 @@ class CanvasViewport : public QQuickPaintedItem {
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged)
 public:
     explicit CanvasViewport(QQuickItem* parent = nullptr);
+    ~CanvasViewport() override;
     QObject* document() const;
     void setDocument(QObject* document);
     QObject* history() const;
@@ -51,9 +52,11 @@ protected:
 private:
     struct CacheEntry { QImage image; std::size_t bytes; std::uint64_t used; };
     void reconnectLayers();
+    void clearCache() noexcept;
+    void eraseCacheTile(TilePoint tile) noexcept;
     void invalidateAll();
     void changedTile(qint64 x, qint64 y);
-    void reportStrokeFailure(SparseTileStore::WriteResult reason, bool committed, std::size_t tileBytes, std::size_t tileBudget);
+    void reportStrokeFailure(SparseTileStore::WriteResult reason, bool rolledBack, std::size_t tileBytes, std::size_t tileBudget);
     void schedule(const QRectF& region);
     std::vector<CompositeLayer> layers() const;
     QImage composedTile(TilePoint tile, const std::vector<CompositeLayer>& layers, std::uint32_t background);
@@ -64,12 +67,14 @@ private:
     CompositeInvalidation m_invalidation;
     std::map<TilePoint, CacheEntry, TilePointLess> m_cache;
     std::size_t m_cacheBytes = 0;
+    std::shared_ptr<DocumentMemoryBudget> m_cacheBudget;
     static constexpr std::size_t CacheLimit = 32U * 1024U * 1024U;
     std::uint64_t m_clock = 0;
     std::size_t m_compositeCount = 0;
     qreal m_zoom = 100;
     QPointF m_origin;
     bool m_originInitialized = false;
+    bool m_modifiedBeforeStroke = false;
     bool m_scheduled = false;
     QRectF m_pending;
     mutable QMutex m_frameMutex;

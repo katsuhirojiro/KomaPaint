@@ -137,6 +137,7 @@ bool WorkspaceState::newProject(const QString& name, int width, int height, bool
 
 bool WorkspaceState::saveToPath(const QString& pathOrUrl)
 {
+    if (m_history->strokeActive()) { emit fileErrorOccurred(QStringLiteral("Finish or cancel the current stroke before saving.")); return false; }
     QString path;
     if (pathOrUrl.isEmpty()) {
         // Bare save: reuse the current file if there is one.

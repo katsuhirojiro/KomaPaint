@@ -8,6 +8,8 @@ class TestUndoStack : public QObject {
 private slots:
     void exactStrokesAndLayers();
     void cancellationAndLimits();
+    void failedStrokePreservesRedoAndTileState();
+    void sharedHistoryBudget();
 };
 static std::vector<std::uint32_t> snapshot(const SparseTileStore& s, TilePoint p) {
     auto pixels = s.tilePixels(p); return {pixels.begin(), pixels.end()};
@@ -62,16 +64,75 @@ void TestUndoStack::cancellationAndLimits() {
     QVERIFY(history.beginStroke(&layer));
     QCOMPARE(layer.tiles().setPixel({1, 1}, 0xffffffffU), SparseTileStore::WriteResult::HistoryLimit);
     QCOMPARE(layer.tiles().allocatedTiles(), size_t(0));
-    QVERIFY(history.commitStroke()); QVERIFY(!history.canUndo());
+    QVERIFY(!history.commitStroke()); QVERIFY(!history.canUndo());
     QCOMPARE(history.memoryBytes(), qulonglong(0));
     QVERIFY(history.setByteLimit(2 * layer.tiles().tileBytes() + 512));
     QVERIFY(history.beginStroke(&layer));
     QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80800000U), SparseTileStore::WriteResult::Changed);
     QCOMPARE(layer.tiles().setPixel({257, 1}, 0xffffffffU), SparseTileStore::WriteResult::HistoryLimit);
+    QVERIFY(!history.commitStroke()); QVERIFY(!history.canUndo());
+    QCOMPARE(layer.tiles().pixel({1, 1}).value(), 0U);
+    QCOMPARE(layer.tiles().allocatedTiles(), size_t(0));
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80800000U), SparseTileStore::WriteResult::Changed);
     QVERIFY(history.commitStroke()); QVERIFY(history.canUndo());
     history.undo(); QCOMPARE(layer.tiles().pixel({1, 1}).value(), 0U);
-    QCOMPARE(layer.tiles().allocatedTiles(), size_t(0));
     history.redo(); QCOMPARE(layer.tiles().pixel({1, 1}).value(), 0x80800000U);
 }
+void TestUndoStack::failedStrokePreservesRedoAndTileState()
+{
+    UndoStack history;
+    Layer layer;
+    auto& store = layer.tiles();
+    QCOMPARE(store.setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+    const auto initial = snapshot(store, {0, 0});
+    const auto charge = 2 * store.tileBytes() + 512;
+    QVERIFY(history.setByteLimit(charge * 2));
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(store.setPixel({1, 1}, 0xffaabbccU), SparseTileStore::WriteResult::Changed);
+    QVERIFY(history.commitStroke());
+    const auto painted = snapshot(store, {0, 0});
+    history.undo();
+    QVERIFY(history.canRedo());
+    QVERIFY(snapshot(store, {0, 0}) == initial);
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(store.setPixel({1, 1}, 0U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(store.setPixel({257, 1}, 0xff000000U), SparseTileStore::WriteResult::HistoryLimit);
+    QVERIFY(!history.commitStroke());
+    QVERIFY(snapshot(store, {0, 0}) == initial);
+    QVERIFY(snapshot(store, {1, 0}).empty());
+    QCOMPARE(store.allocatedTiles(), size_t(1));
+    QVERIFY(history.canRedo());
+    history.redo();
+    QVERIFY(snapshot(store, {0, 0}) == painted);
+    history.undo();
+    QVERIFY(snapshot(store, {0, 0}) == initial);
+}
+void TestUndoStack::sharedHistoryBudget()
+{
+    UndoStack history;
+    Layer layer;
+    auto budget = std::make_shared<DocumentMemoryBudget>();
+    auto& store = layer.tiles();
+    QVERIFY(store.setDocumentBudget(budget));
+    const auto tile = store.tileBytes();
+    QCOMPARE(store.setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+    QVERIFY(budget->setLimit(2 * tile));
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(store.setPixel({1, 1}, 0xff123456U), SparseTileStore::WriteResult::DocumentMemoryLimit);
+    QVERIFY(!history.commitStroke());
+    QCOMPARE(store.pixel({1, 1}).value(), 0x80402010U);
+    QCOMPARE(budget->historyBytes(), size_t(0));
+    QVERIFY(budget->setLimit(3 * tile));
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(store.setPixel({1, 1}, 0xff123456U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(budget->historyBytes(), 2 * tile);
+    QVERIFY(history.commitStroke());
+    QCOMPARE(budget->historyBytes(), 2 * tile);
+    history.clear();
+    QCOMPARE(budget->historyBytes(), size_t(0));
+    QCOMPARE(budget->artworkBytes(), tile);
+}
+
 QTEST_APPLESS_MAIN(TestUndoStack)
 #include "TestUndoStack.moc"

@@ -25,9 +25,15 @@ public:
     SparseTileStore(const SparseTileStore&) = delete;
     SparseTileStore& operator=(const SparseTileStore&) = delete;
     struct TileSnapshot { TilePoint tile; std::vector<std::uint32_t> pixels; }; // empty pixels = absent
-    enum class CaptureResult { Ready, Limit, AllocationFailed };
+    enum class CaptureResult { Ready, Limit, DocumentLimit, AllocationFailed };
     using BeforeChange = CaptureResult (*)(void*, TilePoint, bool, std::span<const std::uint32_t>) noexcept;
     void setBeforeChange(BeforeChange callback, void* context) noexcept { m_beforeChange = callback; m_beforeContext = context; }
+    // A recorded stroke keeps emptied tile nodes alive so its already-captured
+    // before images can be restored without allocating.
+    bool beginRecordedStroke() noexcept;
+    bool recordedStrokeFailed() const noexcept { return m_recordedFailure; }
+    bool rollbackRecordedStroke(const std::vector<TileSnapshot>& before) noexcept;
+    void commitRecordedStroke() noexcept;
     // All snapshots are applied atomically, or no pixels change.
     WriteResult restoreTiles(const std::vector<TileSnapshot>& snapshots);
     std::size_t tileBytes() const { return m_tileBytes; }
@@ -59,6 +65,9 @@ public:
     // Resizing is deliberately restricted until a real crop/resize operation exists.
     bool resizeEmpty(std::int64_t width, std::int64_t height);
 private:
+    WriteResult setPixelImpl(TilePoint point, std::uint32_t value);
+    bool m_recordedStroke = false;
+    bool m_recordedFailure = false;
     struct Hash { std::size_t operator()(const TilePoint& p) const noexcept; };
     struct Tile { std::vector<std::uint32_t> pixels; std::size_t nonzero = 0; };
     unsigned m_batchDepth = 0;

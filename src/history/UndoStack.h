@@ -37,11 +37,15 @@ public:
 signals:
     void stackChanged();
     void errorOccurred(const QString& message);
+    void strokeRolledBack();
 private:
     struct StrokeCommand {
         QPointer<Layer> layer;
         std::vector<SparseTileStore::TileSnapshot> before, after;
         std::size_t bytes = 0;
+        std::shared_ptr<DocumentMemoryBudget> budget;
+        std::size_t historyBytes = 0;
+        ~StrokeCommand() { if (budget) budget->release(DocumentMemoryBudget::Category::History, historyBytes); }
     };
     static SparseTileStore::CaptureResult capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept;
     SparseTileStore::CaptureResult captureTile(TilePoint tile, bool existed, std::span<const std::uint32_t> pixels);

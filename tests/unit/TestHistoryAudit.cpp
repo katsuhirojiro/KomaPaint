@@ -52,7 +52,7 @@ void TestHistoryAudit::oneTileHistoryBudget()
         if (!stroke.begin({64, 64, 1})) {
             QCOMPARE(i, 127);
             QCOMPARE(layer.tiles().setPixel({64, 64}, 0xffff0000U), SparseTileStore::WriteResult::HistoryLimit);
-            QVERIFY(history.commitStroke());
+            QVERIFY(!history.commitStroke());
             break;
         }
         QVERIFY(stroke.end({64, 64, 1}));

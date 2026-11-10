@@ -44,7 +44,7 @@ SparseTileStore::~SparseTileStore()
 }
 bool SparseTileStore::setDocumentBudget(std::shared_ptr<DocumentMemoryBudget> budget) noexcept
 {
-    if (!m_tiles.empty() || m_beforeChange || m_batchDepth) return false;
+    if (!m_tiles.empty() || m_beforeChange || m_batchDepth || m_recordedStroke) return false;
     m_documentBudget = std::move(budget);
     return true;
 }
@@ -53,14 +53,14 @@ std::vector<TilePoint> SparseTileStore::allocatedTilePoints() const
 {
     std::vector<TilePoint> result;
     result.reserve(m_tiles.size());
-    for (const auto& entry : m_tiles) result.push_back(entry.first);
+    for (const auto& entry : m_tiles) if (entry.second.nonzero) result.push_back(entry.first);
     return result;
 }
 
 std::span<const std::uint32_t> SparseTileStore::tilePixels(TilePoint tile) const noexcept
 {
     const auto it = m_tiles.find(tile);
-    if (it == m_tiles.end()) return {};
+    if (it == m_tiles.end() || it->second.nonzero == 0) return {};
     return it->second.pixels;
 }
 
@@ -76,6 +76,14 @@ std::optional<std::uint32_t> SparseTileStore::pixel(TilePoint point) const
 }
 
 SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uint32_t value)
+{
+    if (m_recordedStroke && m_recordedFailure) return WriteResult::HistoryLimit;
+    const auto result = setPixelImpl(point, value);
+    if (m_recordedStroke && result != WriteResult::Changed && result != WriteResult::Unchanged)
+        m_recordedFailure = true;
+    return result;
+}
+SparseTileStore::WriteResult SparseTileStore::setPixelImpl(TilePoint point, std::uint32_t value)
 {
     if (!isValid()) return WriteResult::OutOfBounds;
     auto a = m_geometry.address(point);
@@ -109,7 +117,9 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
             created ? std::span<const std::uint32_t>{} : std::span<const std::uint32_t>{it->second.pixels});
         if (capture != CaptureResult::Ready) {
             if (created) m_tiles.erase(it);
-            return capture == CaptureResult::Limit ? WriteResult::HistoryLimit : WriteResult::HistoryAllocationFailed;
+            if (capture == CaptureResult::Limit) return WriteResult::HistoryLimit;
+            if (capture == CaptureResult::DocumentLimit) return WriteResult::DocumentMemoryLimit;
+            return WriteResult::HistoryAllocationFailed;
         }
     }
     const auto dirty = m_dirty.mark({point.x, point.y, point.x + 1, point.y + 1});
@@ -121,7 +131,7 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
     if (old == 0) ++it->second.nonzero;
     if (value == 0) --it->second.nonzero;
     old = value;
-    if (it->second.nonzero == 0) {
+    if (it->second.nonzero == 0 && !m_recordedStroke) {
         m_tiles.erase(it);
         if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, m_tileBytes);
     }
@@ -137,7 +147,7 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
 }
 SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<TileSnapshot>& snapshots)
 {
-    if (!isValid() || m_beforeChange || m_batchDepth) return WriteResult::InvalidPixel;
+    if (!isValid() || m_beforeChange || m_batchDepth || m_recordedStroke) return WriteResult::InvalidPixel;
     std::size_t stagedBytes = 0;
     for (const auto& snapshot : snapshots) {
         if (!snapshot.pixels.empty()) {
@@ -203,6 +213,53 @@ SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<Til
     } catch (const std::bad_alloc&) { return WriteResult::AllocationFailed; }
       catch (const std::length_error&) { return WriteResult::AllocationFailed; }
 }
+bool SparseTileStore::beginRecordedStroke() noexcept
+{
+    if (m_recordedStroke || m_batchDepth || m_beforeChange) return false;
+    m_recordedStroke = true;
+    m_recordedFailure = false;
+    return true;
+}
+void SparseTileStore::commitRecordedStroke() noexcept
+{
+    if (!m_recordedStroke) return;
+    for (auto it = m_tiles.begin(); it != m_tiles.end();) {
+        if (it->second.nonzero == 0) {
+            it = m_tiles.erase(it);
+            if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, m_tileBytes);
+        } else ++it;
+    }
+    m_recordedStroke = false;
+    m_recordedFailure = false;
+}
+bool SparseTileStore::rollbackRecordedStroke(const std::vector<TileSnapshot>& before) noexcept
+{
+    if (!m_recordedStroke || m_batchDepth || m_beforeChange) return false;
+    // Verify preconditions before touching anything. Existing tile nodes are
+    // retained even when emptied, so restoring their pixels cannot allocate.
+    for (const auto& snapshot : before) {
+        const auto it = m_tiles.find(snapshot.tile);
+        if (!snapshot.pixels.empty() && (it == m_tiles.end() || snapshot.pixels.size() != it->second.pixels.size())) return false;
+    }
+    for (const auto& snapshot : before) {
+        auto it = m_tiles.find(snapshot.tile);
+        if (snapshot.pixels.empty()) {
+            if (it != m_tiles.end()) {
+                m_tiles.erase(it);
+                if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, m_tileBytes);
+            }
+        } else {
+            std::copy(snapshot.pixels.begin(), snapshot.pixels.end(), it->second.pixels.begin());
+            it->second.nonzero = static_cast<std::size_t>(std::count_if(snapshot.pixels.begin(), snapshot.pixels.end(), [](std::uint32_t p) { return p != 0; }));
+        }
+    }
+    m_recordedStroke = false;
+    m_recordedFailure = false;
+    // The consumer must invalidate its composite cache on strokeRolledBack;
+    // dirty entries may already have been acknowledged while painting.
+    return true;
+}
+
 void SparseTileStore::beginBatch() noexcept { ++m_batchDepth; }
 void SparseTileStore::endBatch() noexcept
 {
@@ -221,7 +278,7 @@ void SparseTileStore::endBatch() noexcept
 bool SparseTileStore::resizeEmpty(std::int64_t width, std::int64_t height)
 {
     TileGeometry replacement(width, height, m_geometry.tileSize());
-    if (!m_tiles.empty() || !m_dirty.regions().empty() || !replacement.isValid() || !m_tileSizeValid) return false;
+    if (!m_tiles.empty() || !m_dirty.regions().empty() || m_recordedStroke || !replacement.isValid() || !m_tileSizeValid) return false;
     if (!m_dirty.resetGeometry(replacement)) return false;
     m_geometry = replacement;
     return true;

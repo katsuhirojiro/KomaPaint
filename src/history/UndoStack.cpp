@@ -6,7 +6,12 @@
 
 namespace komapaint {
 UndoStack::UndoStack(QObject* parent) : QObject(parent) {}
-UndoStack::~UndoStack() { detachCapture(); }
+UndoStack::~UndoStack() {
+    if (m_current && m_current->layer) {
+        detachCapture();
+        m_current->layer->tiles().rollbackRecordedStroke(m_current->before);
+    }
+}
 QString UndoStack::undoText() const { return canUndo() ? QStringLiteral("Brush stroke") : QString(); }
 QString UndoStack::redoText() const { return canRedo() ? QStringLiteral("Brush stroke") : QString(); }
 bool UndoStack::setByteLimit(std::size_t bytes) {
@@ -20,6 +25,8 @@ bool UndoStack::beginStroke(Layer* layer)
         m_commands.reserve(m_commands.size() + 1); // commit must not allocate
         m_current = std::make_unique<StrokeCommand>();
         m_current->layer = layer;
+        m_current->budget = layer->tiles().documentBudget();
+        if (!layer->tiles().beginRecordedStroke()) { m_current.reset(); return false; }
         layer->tiles().setBeforeChange(&UndoStack::capture, this);
         emit stackChanged();
         return true;
@@ -39,6 +46,16 @@ SparseTileStore::CaptureResult UndoStack::captureTile(TilePoint tile, bool exist
     const auto tileBytes = m_current->layer->tiles().tileBytes();
     const std::size_t charge = 2 * tileBytes + 512; // conservative allowance for containers
     if (charge > m_limit || m_bytes > m_limit - charge || m_currentBytes > m_limit - charge - m_bytes) return SparseTileStore::CaptureResult::Limit;
+    const std::size_t tracked = tileBytes * (existed ? 2 : 1);
+    struct Reservation {
+        DocumentMemoryBudget* budget;
+        std::size_t bytes;
+        bool retained = false;
+        ~Reservation() { if (budget && !retained) budget->release(DocumentMemoryBudget::Category::History, bytes); }
+    };
+    auto* budget = m_current->budget.get();
+    if (budget && !budget->reserve(DocumentMemoryBudget::Category::History, tracked)) return SparseTileStore::CaptureResult::DocumentLimit;
+    Reservation reservation{budget, tracked};
     SparseTileStore::TileSnapshot before{tile, {}}, after{tile, {}};
     if (existed) before.pixels.assign(pixels.begin(), pixels.end());
     after.pixels.resize(tileBytes / sizeof(std::uint32_t)); // reserve redo before painting
@@ -47,6 +64,8 @@ SparseTileStore::CaptureResult UndoStack::captureTile(TilePoint tile, bool exist
     m_current->before.push_back(std::move(before));
     m_current->after.push_back(std::move(after));
     m_currentBytes += charge;
+    m_current->historyBytes += tracked;
+    reservation.retained = true;
     return SparseTileStore::CaptureResult::Ready;
 }
 void UndoStack::detachCapture() noexcept
@@ -70,9 +89,14 @@ void UndoStack::finishCapture()
 bool UndoStack::commitStroke()
 {
     if (!m_current) return false;
+    if (m_current->layer && m_current->layer->tiles().recordedStrokeFailed()) {
+        cancelStroke();
+        return false;
+    }
     detachCapture();
     if (!m_current->layer) { m_current.reset(); m_currentBytes = 0; clear(); fail(QStringLiteral("Layer was removed; history was cleared.")); return false; }
     finishCapture();
+    m_current->layer->tiles().commitRecordedStroke();
     if (m_current->before.empty()) { m_current.reset(); m_currentBytes = 0; emit stackChanged(); return true; }
     while (m_commands.size() > m_cursor) { m_bytes -= m_commands.back()->bytes; m_commands.pop_back(); }
     m_current->bytes = m_currentBytes; m_bytes += m_currentBytes; m_currentBytes = 0;
@@ -84,16 +108,14 @@ bool UndoStack::cancelStroke()
     if (!m_current) return true;
     detachCapture();
     if (!m_current->layer) { m_current.reset(); m_currentBytes = 0; clear(); fail(QStringLiteral("Layer was removed; history was cleared.")); return false; }
-    finishCapture();
-    if (m_current->before.empty()) { m_current.reset(); m_currentBytes = 0; emit stackChanged(); return true; }
-    auto result = m_current->layer->tiles().restoreTiles(m_current->before);
-    if (result != SparseTileStore::WriteResult::Changed) {
-        // Keep the partial stroke as a real undoable command; never discard its history.
-        commitStroke();
-        fail(QStringLiteral("Could not cancel the stroke; partial paint remains and can be undone."));
+    if (!m_current->layer->tiles().rollbackRecordedStroke(m_current->before)) {
+        fail(QStringLiteral("Could not roll back the stroke; the history transaction is still active."));
         return false;
     }
-    m_current.reset(); m_currentBytes = 0; emit stackChanged(); return true;
+    m_current.reset(); m_currentBytes = 0;
+    emit strokeRolledBack();
+    emit stackChanged();
+    return true;
 }
 void UndoStack::undo()
 {

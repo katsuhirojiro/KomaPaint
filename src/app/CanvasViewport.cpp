@@ -20,12 +20,38 @@ CanvasViewport::CanvasViewport(QQuickItem* parent) : QQuickPaintedItem(parent)
     setOpaquePainting(true);
     setAntialiasing(false);
 }
+CanvasViewport::~CanvasViewport() { clearCache(); }
+void CanvasViewport::clearCache() noexcept
+{
+    m_cache.clear();
+    if (m_cacheBudget) m_cacheBudget->release(DocumentMemoryBudget::Category::CompositeCache, m_cacheBytes);
+    m_cacheBytes = 0;
+}
+void CanvasViewport::eraseCacheTile(TilePoint tile) noexcept
+{
+    auto it = m_cache.find(tile);
+    if (it == m_cache.end()) return;
+    const auto bytes = it->second.bytes;
+    m_cache.erase(it);
+    m_cacheBytes -= bytes;
+    if (m_cacheBudget) m_cacheBudget->release(DocumentMemoryBudget::Category::CompositeCache, bytes);
+}
 QObject* CanvasViewport::history() const { return m_history.data(); }
 void CanvasViewport::setHistory(QObject* object)
 {
     auto* next = qobject_cast<UndoStack*>(object);
     if (m_history == next) return;
-    cancelStroke(); m_history = next; emit historyChanged();
+    cancelStroke();
+    if (m_history) disconnect(m_history, nullptr, this, nullptr);
+    m_history = next;
+    if (m_history) connect(m_history, &UndoStack::strokeRolledBack, this, [this] {
+        if (!m_strokeLayer) return;
+        m_stroke.reset(); m_strokeLayer = nullptr;
+        if (m_document) m_document->setModified(m_modifiedBeforeStroke);
+        m_invalidation.reset(); clearCache();
+        invalidateAll();
+    });
+    emit historyChanged();
 }
 QObject* CanvasViewport::document() const { return m_document.data(); }
 void CanvasViewport::setDocument(QObject* object)
@@ -47,7 +73,8 @@ void CanvasViewport::setDocument(QObject* object)
     cancelStroke();
     m_document = doc;
     m_invalidation.reset();
-    m_cache.clear(); m_cacheBytes = 0;
+    clearCache();
+    m_cacheBudget = doc ? doc->layers()->documentBudget() : nullptr;
     m_originInitialized = false;
     qDebug() << "[CanvasViewport] setDocument: m_document updated to" << m_document.data()
              << "m_originInitialized reset to false";
@@ -58,9 +85,9 @@ void CanvasViewport::setDocument(QObject* object)
         connect(doc, &CanvasDocument::backgroundChanged, this, &CanvasViewport::invalidateAll);
         connect(doc, &CanvasDocument::sizeChanged, this, [this] {
             qDebug() << "[CanvasViewport] sizeChanged signal received";
-            m_invalidation.reset(); m_cache.clear(); m_cacheBytes = 0; invalidateAll();
+            m_invalidation.reset(); clearCache(); invalidateAll();
         });
-        connect(doc, &QObject::destroyed, this, [this] { m_document = nullptr; m_invalidation.reset(); invalidateAll(); });
+        connect(doc, &QObject::destroyed, this, [this] { m_document = nullptr; m_invalidation.reset(); clearCache(); m_cacheBudget.reset(); invalidateAll(); });
         auto* model = doc->layers();
         connect(model, &QAbstractItemModel::dataChanged, this, &CanvasViewport::invalidateAll);
         connect(model, &QAbstractItemModel::rowsInserted, this, [this] { reconnectLayers(); invalidateAll(); });
@@ -184,12 +211,20 @@ QImage CanvasViewport::composedTile(TilePoint tile, const std::vector<CompositeL
     const auto bytes = static_cast<std::size_t>(image.sizeInBytes());
     while (!m_cache.empty() && (bytes > CacheLimit || m_cacheBytes > CacheLimit - bytes)) {
         auto victim = std::min_element(m_cache.begin(), m_cache.end(), [](const auto& a, const auto& b) { return a.second.used < b.second.used; });
-        m_cacheBytes -= victim->second.bytes; m_cache.erase(victim);
+        eraseCacheTile(victim->first);
     }
-    if (bytes <= CacheLimit) { m_cache.emplace(tile, CacheEntry{image, bytes, ++m_clock}); m_cacheBytes += bytes; }
+    if (bytes <= CacheLimit && (!m_cacheBudget || m_cacheBudget->reserve(DocumentMemoryBudget::Category::CompositeCache, bytes))) {
+        try {
+            m_cache.emplace(tile, CacheEntry{image, bytes, ++m_clock});
+            m_cacheBytes += bytes;
+        } catch (...) {
+            if (m_cacheBudget) m_cacheBudget->release(DocumentMemoryBudget::Category::CompositeCache, bytes);
+            throw;
+        }
+    }
     return image;
 }
-void CanvasViewport::reportStrokeFailure(SparseTileStore::WriteResult reason, bool committed,
+void CanvasViewport::reportStrokeFailure(SparseTileStore::WriteResult reason, bool rolledBack,
                                          std::size_t tileBytes, std::size_t tileBudget)
 {
     using R = SparseTileStore::WriteResult;
@@ -213,9 +248,9 @@ void CanvasViewport::reportStrokeFailure(SparseTileStore::WriteResult reason, bo
     case R::OutOfBounds: detail = QStringLiteral("The canvas tile store is invalid or the paint position is out of bounds."); break;
     default: detail = QStringLiteral("The brush could not continue for an unknown reason."); break;
     }
-    detail += committed
-        ? QStringLiteral(" The stroke stopped. Any paint applied was retained in undo history.")
-        : QStringLiteral(" The stroke stopped, but its history could not be committed.");
+    detail += rolledBack
+        ? QStringLiteral(" The stroke was cancelled and its paint was rolled back.")
+        : QStringLiteral(" The stroke could not be rolled back; its history transaction remains active.");
     emit strokeError(detail);
 }
 
@@ -254,6 +289,7 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
         emit strokeError(QStringLiteral("Select a visible, unlocked layer to paint."));
         return false;
     }
+    m_modifiedBeforeStroke = m_document->isModified();
     if (!m_history->beginStroke(layer)) {
         emit strokeError(QStringLiteral("Could not start stroke history; no paint was applied."));
         return false;
@@ -273,9 +309,8 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
         const auto reason = m_stroke->failureReason();
         const auto tileBytes = layer->tiles().allocatedPixelBytes();
         const auto tileBudget = layer->tiles().pixelBudget();
-        m_stroke.reset(); m_strokeLayer = nullptr;
-        const bool committed = m_history->commitStroke();
-        reportStrokeFailure(reason, committed, tileBytes, tileBudget);
+        const bool rolledBack = m_history->cancelStroke();
+        reportStrokeFailure(reason, rolledBack, tileBytes, tileBudget);
         return false;
     }
     qDebug() << "[CanvasViewport] beginStroke: stroke started on layer" << layer->name();
@@ -299,9 +334,8 @@ void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
         const auto reason = m_stroke->failureReason();
         const auto tileBytes = m_strokeLayer->tiles().allocatedPixelBytes();
         const auto tileBudget = m_strokeLayer->tiles().pixelBudget();
-        m_stroke.reset(); m_strokeLayer = nullptr;
-        const bool committed = m_history && m_history->commitStroke();
-        reportStrokeFailure(reason, committed, tileBytes, tileBudget);
+        const bool rolledBack = m_history && m_history->cancelStroke();
+        reportStrokeFailure(reason, rolledBack, tileBytes, tileBudget);
     }
 }
 void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
@@ -319,15 +353,20 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
     const auto reason = m_stroke->failureReason();
     const auto tileBytes = m_strokeLayer->tiles().allocatedPixelBytes();
     const auto tileBudget = m_strokeLayer->tiles().pixelBudget();
+    if (!ok) {
+        const bool rolledBack = m_history && m_history->cancelStroke();
+        reportStrokeFailure(reason, rolledBack, tileBytes, tileBudget);
+        return;
+    }
     m_stroke.reset(); m_strokeLayer = nullptr;
-    const bool committed = m_history && m_history->commitStroke();
+    if (m_history && !m_history->commitStroke())
+        emit strokeError(QStringLiteral("Could not commit stroke history."));
     qDebug() << "[CanvasViewport] endStroke: stroke ended, ok=" << ok;
-    if (!ok) reportStrokeFailure(reason, committed, tileBytes, tileBudget);
 }
 void CanvasViewport::cancelStroke() {
     qDebug() << "[CanvasViewport] cancelStroke() called";
-    m_stroke.reset(); m_strokeLayer = nullptr;
     if (m_history && m_history->strokeActive()) m_history->cancelStroke();
+    m_stroke.reset(); m_strokeLayer = nullptr;
 }
 
 void CanvasViewport::paint(QPainter* painter)
@@ -383,14 +422,13 @@ void CanvasViewport::refreshNow()
             auto list = layers();
             const auto background = m_document->hasTransparentBackground() ? 0U : m_document->backgroundColor().rgba();
             auto plan = m_invalidation.prepare(list, background);
-            if (plan.invalidateAll) { m_cache.clear(); m_cacheBytes = 0; }
+            if (plan.invalidateAll) clearCache();
             if (!m_invalidation.accept(plan, list, background)) {
                 qDebug() << "[CanvasViewport] refreshNow: invalidation accept failed";
                 return;
             }
             for (const auto& tile : plan.tiles) {
-                auto it = m_cache.find(tile);
-                if (it != m_cache.end()) { m_cacheBytes -= it->second.bytes; m_cache.erase(it); }
+                eraseCacheTile(tile);
             }
             const qreal scale = m_zoom / 100;
             painter.save();
@@ -423,8 +461,7 @@ void CanvasViewport::refreshNow()
                             painter.drawImage(QPointF(bounds->left, bounds->top), image);
                             if (plan.tiles.find(tile) != plan.tiles.end() && !m_invalidation.acknowledge(plan, tile, list, background)) {
                                 qWarning("Canvas tile changed before acknowledgment");
-                                auto it = m_cache.find(tile);
-                                if (it != m_cache.end()) { m_cacheBytes -= it->second.bytes; m_cache.erase(it); }
+                                eraseCacheTile(tile);
                             }
                         }
                     }
