@@ -64,7 +64,7 @@ void TestProjectWorkflow::createAndPaint()
     QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
     QTest::keyClick(window, Qt::Key_Backspace);
     QTRY_VERIFY(!create->isEnabled());
-    for (const QChar ch : QStringLiteral("Workflow Test")) {
+    for (const QChar ch : QStringLiteral("workflow test")) {
         const auto key = ch == u' ' ? Qt::Key_Space : static_cast<Qt::Key>(ch.toUpper().unicode());
         QTest::keyClick(window, key, ch.isUpper() ? Qt::ShiftModifier : Qt::NoModifier);
     }
@@ -75,7 +75,7 @@ void TestProjectWorkflow::createAndPaint()
     QTRY_COMPARE(changed.size(), 1);
     QTRY_VERIFY(!dialog->property("visible").toBool());
     QVERIFY(workspace.document() != previous);
-    QCOMPARE(workspace.document()->title(), QStringLiteral("Workflow Test"));
+    QCOMPARE(workspace.document()->title(), QStringLiteral("workflow test"));
     QCOMPARE(workspace.document()->width(), 2550);
     QCOMPARE(workspace.document()->height(), 3300);
     QCOMPARE(canvas->document(), static_cast<QObject*>(workspace.document()));
