@@ -418,7 +418,14 @@ jobs:
               $p.Refresh()
               if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
               $diag = if (Test-Path $env:KOMAPAINT_SMOKE_LOG) { Get-Content $env:KOMAPAINT_SMOKE_LOG -Raw } else { 'no Qt startup log' }
-              if ($diag.Length -gt 2400) { $diag = $diag.Substring($diag.Length - 2400) }
+              # Keep the observation and initialization milestones in separate
+              # annotations: Fail-Smoke truncates long messages to 1500 chars.
+              $milestones = if (Test-Path $env:KOMAPAINT_SMOKE_LOG) {
+                (Get-Content $env:KOMAPAINT_SMOKE_LOG | Where-Object { $_ -match 'main\(\): entry|Constructing QApplication|QApplication constructed|calling m_engine.load|m_engine.load\(\) returned|main window created|entering app.exec' }) -join ' || '
+              } else { 'no Qt startup milestones' }
+              if ($milestones.Length -gt 1200) { $milestones = $milestones.Substring(0, 1200) }
+              Write-Host "::notice title=Smoke startup milestones::$milestones"
+              if ($diag.Length -gt 700) { $diag = $diag.Substring($diag.Length - 700) }
               Fail-Smoke "process had no native main-window handle at 5s (title: '$mainWindowTitle'); $observation; startup log tail: $diag"
             }
             if ($mainWindowTitle -notlike "KomaPaint *") {
