@@ -156,7 +156,11 @@ void TestCanvasViewport::strokeFailureDiagnostics()
     QSignalSpy errors(&view, &CanvasViewport::strokeError);
     const auto first = view.documentToViewport(100, 100);
     const auto second = view.documentToViewport(300, 100);
+    const auto originalFrame = view.frameSnapshot();
     QVERIFY(view.beginStroke(first.x(), first.y(), 1, &brush, Qt::red));
+    view.refreshNow(); // acknowledge dirties and populate cache during the stroke
+    QVERIFY(view.frameSnapshot().pixelColor(qRound(first.x()), qRound(first.y())) !=
+            originalFrame.pixelColor(qRound(first.x()), qRound(first.y())));
     view.continueStroke(second.x(), second.y(), 1);
     QCOMPARE(errors.size(), 1);
     const auto message = errors.takeFirst().at(0).toString();
@@ -169,6 +173,9 @@ void TestCanvasViewport::strokeFailureDiagnostics()
     QCOMPARE(store.pixel({300, 100}).value(), 0U);
     QCOMPARE(store.allocatedTiles(), std::size_t(0));
     QVERIFY(!doc.isModified());
+    view.refreshNow();
+    QCOMPARE(view.frameSnapshot().pixelColor(qRound(first.x()), qRound(first.y())),
+             originalFrame.pixelColor(qRound(first.x()), qRound(first.y())));
 }
 
 void TestCanvasViewport::compositeCacheAccounting()
