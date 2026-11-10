@@ -103,6 +103,25 @@ int main(int argc, char** argv)
         CHECK(layer.tiles().allocatedTiles() == 0);
     }
     CHECK(startFailures >= 2);
+    // Snapshot of a non-empty dirty map can fail at stroke start. No stroke
+    // or history is published and the original dirty/version are preserved.
+    int dirtyStartFailures = 0;
+    for (int n = 0; n < 8; ++n) {
+        Layer layer; UndoStack history;
+        auto& store = layer.tiles();
+        CHECK(store.setPixel({1, 1}, 0x80402010U) == R::Changed);
+        const auto dirty = store.dirtyRegions();
+        const auto version = store.dirtyVersion();
+        failAfter = n;
+        bool begun = history.beginStroke(&layer);
+        failAfter = -1;
+        if (!begun) ++dirtyStartFailures;
+        else CHECK(history.cancelStroke());
+        CHECK(store.dirtyRegions() == dirty && store.dirtyVersion() == version);
+        CHECK(store.pixel({1, 1}) == 0x80402010U);
+        CHECK(!history.canUndo() && !history.canRedo());
+    }
+    CHECK(dirtyStartFailures >= 3);
     int writeFailures = 0;
     for (int n = 0; n < 24; ++n) {
         Layer layer; UndoStack history;
@@ -110,6 +129,8 @@ int main(int argc, char** argv)
         auto& store = layer.tiles();
         CHECK(store.setDocumentBudget(budget));
         CHECK(store.setPixel({1, 1}, 0x80402010U) == R::Changed);
+        const auto initialDirty = store.dirtyRegions();
+        const auto initialVersion = store.dirtyVersion();
         CHECK(history.beginStroke(&layer));
         CHECK(store.setPixel({1, 1}, 0U) == R::Changed);
         // Already-erased first tile must survive failures in creation, history
@@ -125,6 +146,7 @@ int main(int argc, char** argv)
         CHECK(store.pixel({1, 1}) == 0x80402010U);
         CHECK(store.pixel({257, 1}) == 0U);
         CHECK(store.allocatedTiles() == 1);
+        CHECK(store.dirtyRegions() == initialDirty && store.dirtyVersion() == initialVersion);
         CHECK(budget->artworkBytes() == store.allocatedPixelBytes());
         CHECK(budget->historyBytes() == 0);
         CHECK(!history.canUndo() && !history.canRedo());

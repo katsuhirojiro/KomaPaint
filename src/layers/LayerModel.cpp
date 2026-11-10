@@ -92,6 +92,10 @@ void LayerModel::addLayer()
 void LayerModel::removeLayer(int row)
 {
     if (row < 0 || row >= m_layers.size() || m_layers.size() <= 1) return;
+    // A synchronous artwork callback runs inside the store or a brush dab.
+    // Deleting any layer there can invalidate an active operation's owner.
+    for (const auto* layer : m_layers)
+        if (layer->tiles().notifyingChange()) return;
     beginRemoveRows({}, row, row);
     delete m_layers.takeAt(row);
     endRemoveRows();

@@ -44,6 +44,7 @@ public:
     std::shared_ptr<DocumentMemoryBudget> documentBudget() const noexcept { return m_documentBudget; }
     using ChangeCallback = void (*)(void*, TilePoint) noexcept;
     void setChangeCallback(ChangeCallback callback, void* context) noexcept { m_callback = callback; m_callbackContext = context; }
+    bool notifyingChange() const noexcept { return m_notifying; }
     bool isValid() const { return m_geometry.isValid() && m_tileSizeValid; }
     const TileGeometry& geometry() const { return m_geometry; }
     const DirtyTileTracker::Regions& dirtyRegions() const { return m_dirty.regions(); }
@@ -68,6 +69,8 @@ private:
     WriteResult setPixelImpl(TilePoint point, std::uint32_t value);
     bool m_recordedStroke = false;
     bool m_recordedFailure = false;
+    // Captured before any stroke writes; restored by move without allocation.
+    std::optional<DirtyTileTracker> m_recordedDirty;
     struct Hash { std::size_t operator()(const TilePoint& p) const noexcept; };
     struct Tile { std::vector<std::uint32_t> pixels; std::size_t nonzero = 0; };
     unsigned m_batchDepth = 0;
@@ -75,6 +78,7 @@ private:
     TilePoint m_batchFirst{}, m_batchLast{};
     BeforeChange m_beforeChange = nullptr;
     void* m_beforeContext = nullptr;
+    bool m_notifying = false;
     ChangeCallback m_callback = nullptr;
     void* m_callbackContext = nullptr;
     TileGeometry m_geometry;

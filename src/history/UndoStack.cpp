@@ -1,7 +1,6 @@
 #include "UndoStack.h"
 #include "../layers/Layer.h"
 #include <algorithm>
-#include <QScopedValueRollback>
 #include <new>
 #include <stdexcept>
 
@@ -96,13 +95,13 @@ void UndoStack::finishCapture()
 }
 bool UndoStack::commitStroke()
 {
-    if (!m_current) return false;
+    if (!m_current || (m_current->layer && m_current->layer->tiles().notifyingChange())) return false;
     if (m_current->layer && m_current->layer->tiles().recordedStrokeFailed()) {
         cancelStroke();
         return false;
     }
     detachCapture();
-    if (!m_current->layer) { m_current.reset(); m_currentBytes = 0; clear(); fail(QStringLiteral("Layer was removed; history was cleared.")); return false; }
+    if (!m_current->layer) { m_current.reset(); m_currentBytes = 0; fail(QStringLiteral("The stroke layer was removed; earlier history was retained.")); return false; }
     finishCapture();
     m_current->layer->tiles().commitRecordedStroke();
     if (m_current->before.empty()) { m_current.reset(); m_currentBytes = 0; emit stackChanged(); return true; }
@@ -114,14 +113,17 @@ bool UndoStack::commitStroke()
 bool UndoStack::cancelStroke()
 {
     if (!m_current) return true;
+    if (m_current->layer && m_current->layer->tiles().notifyingChange()) return false;
     detachCapture();
-    if (!m_current->layer) { m_current.reset(); m_currentBytes = 0; clear(); fail(QStringLiteral("Layer was removed; history was cleared.")); return false; }
+    if (!m_current->layer) { m_current.reset(); m_currentBytes = 0; fail(QStringLiteral("The stroke layer was removed; earlier history was retained.")); return false; }
     if (!m_current->layer->tiles().rollbackRecordedStroke(m_current->before)) {
         fail(QStringLiteral("Could not roll back the stroke; the history transaction is still active."));
         return false;
     }
     m_current.reset(); m_currentBytes = 0;
+    QPointer<UndoStack> alive(this);
     emit strokeRolledBack();
+    if (!alive) return true;
     emit stackChanged();
     return true;
 }
@@ -135,7 +137,8 @@ void UndoStack::undo()
         // The store prepares every tile, dirty region and insertion capacity
         // before mutation. Prevent synchronous callbacks from re-entering
         // history while artwork and cursor are being published.
-        QScopedValueRollback<bool> guard(m_replaying, true);
+        m_replaying = true;
+        QPointer<UndoStack> alive(this);
         QPointer<Layer> layer = command->layer;
         result = layer->tiles().restoreTiles(command->before, false);
         if (result == SparseTileStore::WriteResult::Changed) {
@@ -145,8 +148,10 @@ void UndoStack::undo()
             for (const auto& snapshot : command->before) {
                 if (!layer) break;
                 emit layer->artworkChanged(snapshot.tile.x, snapshot.tile.y);
+                if (!alive) return;
             }
         }
+        m_replaying = false;
     }
     if (result != SparseTileStore::WriteResult::Changed) {
         fail(QStringLiteral("Undo could not be completed due to memory, tile or tracking limits. Artwork and history were not changed.")); return;
@@ -160,7 +165,8 @@ void UndoStack::redo()
     if (!command->layer) { fail(QStringLiteral("Cannot replay history because its layer was removed. History has been retained.")); return; }
     SparseTileStore::WriteResult result;
     {
-        QScopedValueRollback<bool> guard(m_replaying, true);
+        m_replaying = true;
+        QPointer<UndoStack> alive(this);
         QPointer<Layer> layer = command->layer;
         result = layer->tiles().restoreTiles(command->after, false);
         if (result == SparseTileStore::WriteResult::Changed) {
@@ -168,8 +174,10 @@ void UndoStack::redo()
             for (const auto& snapshot : command->after) {
                 if (!layer) break;
                 emit layer->artworkChanged(snapshot.tile.x, snapshot.tile.y);
+                if (!alive) return;
             }
         }
+        m_replaying = false;
     }
     if (result != SparseTileStore::WriteResult::Changed) {
         fail(QStringLiteral("Redo could not be completed due to memory, tile or tracking limits. Artwork and history were not changed.")); return;
@@ -179,7 +187,9 @@ void UndoStack::redo()
 void UndoStack::clear()
 {
     if (m_replaying) return;
+    QPointer<UndoStack> alive(this);
     if (m_current && !cancelStroke()) return;
+    if (!alive) return;
     m_commands.clear(); m_cursor = m_bytes = m_currentBytes = 0;
     emit stackChanged();
 }

@@ -142,7 +142,12 @@ SparseTileStore::WriteResult SparseTileStore::setPixelImpl(TilePoint point, std:
             m_batchFirst.x = std::min(m_batchFirst.x, a->tile.x); m_batchFirst.y = std::min(m_batchFirst.y, a->tile.y);
             m_batchLast.x = std::max(m_batchLast.x, a->tile.x); m_batchLast.y = std::max(m_batchLast.y, a->tile.y);
         }
-    } else if (m_callback) m_callback(m_callbackContext, a->tile);
+    } else if (m_callback) {
+        const bool wasNotifying = m_notifying;
+        m_notifying = true;
+        m_callback(m_callbackContext, a->tile);
+        m_notifying = wasNotifying;
+    }
     return WriteResult::Changed;
 }
 SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<TileSnapshot>& snapshots, bool notify)
@@ -218,6 +223,9 @@ SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<Til
 bool SparseTileStore::beginRecordedStroke() noexcept
 {
     if (m_recordedStroke || m_batchDepth || m_beforeChange) return false;
+    try { m_recordedDirty.emplace(m_dirty); }
+    catch (const std::bad_alloc&) { return false; }
+    catch (const std::length_error&) { return false; }
     m_recordedStroke = true;
     m_recordedFailure = false;
     return true;
@@ -231,12 +239,13 @@ void SparseTileStore::commitRecordedStroke() noexcept
             if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, m_tileBytes);
         } else ++it;
     }
+    m_recordedDirty.reset();
     m_recordedStroke = false;
     m_recordedFailure = false;
 }
 bool SparseTileStore::rollbackRecordedStroke(const std::vector<TileSnapshot>& before) noexcept
 {
-    if (!m_recordedStroke || m_batchDepth || m_beforeChange) return false;
+    if (!m_recordedStroke || !m_recordedDirty || m_batchDepth || m_beforeChange) return false;
     // Verify preconditions before touching anything. Existing tile nodes are
     // retained even when emptied, so restoring their pixels cannot allocate.
     for (const auto& snapshot : before) {
@@ -255,6 +264,8 @@ bool SparseTileStore::rollbackRecordedStroke(const std::vector<TileSnapshot>& be
             it->second.nonzero = static_cast<std::size_t>(std::count_if(snapshot.pixels.begin(), snapshot.pixels.end(), [](std::uint32_t p) { return p != 0; }));
         }
     }
+    m_dirty = std::move(*m_recordedDirty);
+    m_recordedDirty.reset();
     m_recordedStroke = false;
     m_recordedFailure = false;
     // The consumer must invalidate its composite cache on strokeRolledBack;
@@ -269,6 +280,8 @@ void SparseTileStore::endBatch() noexcept
     const auto first = m_batchFirst, last = m_batchLast;
     m_batchChanged = false;
     if (!m_callback) return;
+    const bool wasNotifying = m_notifying;
+    m_notifying = true;
     for (auto y = first.y;; ++y) {
         for (auto x = first.x;; ++x) {
             m_callback(m_callbackContext, {x, y});
@@ -276,6 +289,7 @@ void SparseTileStore::endBatch() noexcept
         }
         if (y == last.y) break;
     }
+    m_notifying = wasNotifying;
 }
 bool SparseTileStore::resizeEmpty(std::int64_t width, std::int64_t height)
 {

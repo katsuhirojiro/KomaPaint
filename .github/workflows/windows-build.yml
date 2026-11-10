@@ -281,12 +281,34 @@ jobs:
           Write-Host "--- Deployed files (top-level):"
           Get-ChildItem $bin -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
 
+      - name: Package into ZIP
+        shell: pwsh
+        run: |
+          # Ship the per-user .koma file-association helper next to the exe.
+          # It simply calls "komapaint.exe --associate" / "--unassociate";
+          # registration is per-user (HKCU) and needs no admin rights.
+          Copy-Item "${{ github.workspace }}\packaging\Register_koma_file_association.cmd" "${{ env.STAGE_DIR }}\Register_koma_file_association.cmd" -Force
+          $zip = "${{ github.workspace }}\KomaPaint-Windows-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          # Zip the staged folder so the archive contains a single top-level
+          # "KomaPaint" directory with the exe and its dependencies.
+          Compress-Archive -Path "${{ env.STAGE_DIR }}" -DestinationPath $zip -CompressionLevel Optimal
+          if (!(Test-Path $zip)) {
+            Write-Error "Packaging failed; zip not produced."
+            exit 1
+          }
+          Get-Item $zip | Format-List Name,Length
+
       - name: Smoke-test packaged executable launches
         shell: pwsh
         run: |
-          $bin = "${{ env.STAGE_DIR }}"
-          $qtBin = "${{ steps.qt.outputs.qtBin }}"
-          $env:PATH = "$bin;$qtBin;" + $env:PATH
+          # Smoke the actual extracted ZIP, isolated from the build and Qt SDK.
+          $extract = Join-Path $env:RUNNER_TEMP 'komapaint-zip-smoke'
+          if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+          Expand-Archive -Path "${{ github.workspace }}\KomaPaint-Windows-x64.zip" -DestinationPath $extract
+          $bin = Join-Path $extract 'KomaPaint'
+          $env:PATH = "$bin;$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
+          Remove-Item Env:QT_PLUGIN_PATH, Env:QT_QPA_PLATFORM_PLUGIN_PATH, Env:QML_IMPORT_PATH, Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
           # Use Qt's native Windows platform for the packaged-app smoke test.
           # The offscreen QPA has no native HWND for .NET's Process object to
           # find, so CloseMainWindow() can never deliver WM_CLOSE under it.
@@ -454,24 +476,6 @@ jobs:
           } else {
             Fail-Smoke "komapaint.exe exited prematurely with code $($p.ExitCode) (expected the event loop to run; check for a startup crash or a QML load failure)."
           }
-
-      - name: Package into ZIP
-        shell: pwsh
-        run: |
-          # Ship the per-user .koma file-association helper next to the exe.
-          # It simply calls "komapaint.exe --associate" / "--unassociate";
-          # registration is per-user (HKCU) and needs no admin rights.
-          Copy-Item "${{ github.workspace }}\packaging\Register_koma_file_association.cmd" "${{ env.STAGE_DIR }}\Register_koma_file_association.cmd" -Force
-          $zip = "${{ github.workspace }}\KomaPaint-Windows-x64.zip"
-          if (Test-Path $zip) { Remove-Item $zip -Force }
-          # Zip the staged folder so the archive contains a single top-level
-          # "KomaPaint" directory with the exe and its dependencies.
-          Compress-Archive -Path "${{ env.STAGE_DIR }}" -DestinationPath $zip -CompressionLevel Optimal
-          if (!(Test-Path $zip)) {
-            Write-Error "Packaging failed; zip not produced."
-            exit 1
-          }
-          Get-Item $zip | Format-List Name,Length
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

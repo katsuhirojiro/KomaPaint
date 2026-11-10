@@ -2,6 +2,7 @@
 #include "history/UndoStack.h"
 #include "layers/Layer.h"
 #include "layers/LayerModel.h"
+#include "canvas/CanvasDocument.h"
 #include "drawing/BrushEngine.h"
 using namespace komapaint;
 class TestUndoStack : public QObject {
@@ -13,7 +14,9 @@ private slots:
     void sharedHistoryBudget();
     void replayBudgetFailureAndRetry();
     void replayRejectsReentry();
+    void strokeRejectsNotificationReentry();
     void layerRemovedDuringReplay();
+    void ownerDestroyedDuringCallbacks();
     void accountingLifetimes();
     void unchangedTilesReleaseHistoryCharge();
 };
@@ -101,6 +104,8 @@ void TestUndoStack::failedStrokePreservesRedoAndTileState()
     history.undo();
     QVERIFY(history.canRedo());
     QVERIFY(snapshot(store, {0, 0}) == initial);
+    const auto dirtyBefore = store.dirtyRegions();
+    const auto versionBefore = store.dirtyVersion();
     QVERIFY(history.beginStroke(&layer));
     QCOMPARE(store.setPixel({1, 1}, 0U), SparseTileStore::WriteResult::Changed);
     QCOMPARE(store.setPixel({257, 1}, 0xff000000U), SparseTileStore::WriteResult::HistoryLimit);
@@ -108,6 +113,8 @@ void TestUndoStack::failedStrokePreservesRedoAndTileState()
     QVERIFY(snapshot(store, {0, 0}) == initial);
     QVERIFY(snapshot(store, {1, 0}).empty());
     QCOMPARE(store.allocatedTiles(), size_t(1));
+    QVERIFY(store.dirtyRegions() == dirtyBefore);
+    QCOMPARE(store.dirtyVersion(), versionBefore);
     QVERIFY(history.canRedo());
     history.redo();
     QVERIFY(snapshot(store, {0, 0}) == painted);
@@ -222,6 +229,26 @@ void TestUndoStack::replayRejectsReentry()
 }
 
 
+
+void TestUndoStack::strokeRejectsNotificationReentry()
+{
+    Layer layer; UndoStack history;
+    QVERIFY(history.beginStroke(&layer));
+    int calls = 0;
+    connect(&layer, &Layer::artworkChanged, &history, [&] {
+        ++calls;
+        QVERIFY(!history.cancelStroke());
+        QVERIFY(!history.commitStroke());
+        history.clear();
+        QVERIFY(history.strokeActive());
+    });
+    QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(calls, 1);
+    QVERIFY(history.strokeActive());
+    QVERIFY(history.commitStroke());
+    QVERIFY(history.canUndo());
+}
+
 void TestUndoStack::layerRemovedDuringReplay()
 {
     for (bool redo : {false, true}) {
@@ -259,6 +286,56 @@ void TestUndoStack::layerRemovedDuringReplay()
         if (redo) QVERIFY(history.canUndo()); else QVERIFY(history.canRedo());
         history.clear();
         QCOMPARE(budget->historyBytes(), size_t(0));
+    }
+}
+
+
+void TestUndoStack::ownerDestroyedDuringCallbacks()
+{
+    using R = SparseTileStore::WriteResult;
+    for (bool redo : {false, true}) {
+        Layer layer;
+        auto* history = new UndoStack;
+        QVERIFY(history->beginStroke(&layer));
+        QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80402010U), R::Changed);
+        QCOMPARE(layer.tiles().setPixel({257, 1}, 0xff123456U), R::Changed);
+        QVERIFY(history->commitStroke());
+        if (redo) history->undo();
+        QPointer<UndoStack> observed(history);
+        connect(&layer, &Layer::artworkChanged, &layer, [&] { delete history; });
+        if (redo) history->redo(); else history->undo();
+        QVERIFY(!observed);
+        QCOMPARE(layer.tiles().pixel({1, 1}).value(), redo ? 0x80402010U : 0U);
+        QCOMPARE(layer.tiles().pixel({257, 1}).value(), redo ? 0xff123456U : 0U);
+    }
+    {
+        auto* doc = new CanvasDocument;
+        Layer* layer = doc->layers()->layerAt(0);
+        UndoStack history;
+        QVERIFY(history.beginStroke(layer));
+        QCOMPARE(layer->tiles().setPixel({1, 1}, 0x80402010U), R::Changed);
+        QCOMPARE(layer->tiles().setPixel({257, 1}, 0xff123456U), R::Changed);
+        QVERIFY(history.commitStroke());
+        QPointer<CanvasDocument> observed(doc);
+        connect(layer, &Layer::artworkChanged, &history, [&] { delete doc; });
+        history.undo();
+        QVERIFY(!observed);
+        QVERIFY(history.canRedo());
+        QSignalSpy errors(&history, &UndoStack::errorOccurred);
+        history.redo();
+        QCOMPARE(errors.size(), 1);
+        QVERIFY(history.canRedo());
+    }
+    {
+        Layer layer;
+        auto* history = new UndoStack;
+        QVERIFY(history->beginStroke(&layer));
+        QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80402010U), R::Changed);
+        QPointer<UndoStack> observed(history);
+        connect(history, &UndoStack::strokeRolledBack, &layer, [history] { delete history; });
+        history->clear();
+        QVERIFY(!observed);
+        QCOMPARE(layer.tiles().pixel({1, 1}).value(), 0U);
     }
 }
 
