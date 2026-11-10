@@ -281,6 +281,35 @@ jobs:
           Write-Host "--- Deployed files (top-level):"
           Get-ChildItem $bin -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
 
+      - name: Diagnose packaged startup timing and renderer
+        shell: pwsh
+        run: |
+          $bin = "${{ env.STAGE_DIR }}"
+          $env:PATH = "$bin;${{ steps.qt.outputs.qtBin }};" + $env:PATH
+          $env:QT_QPA_PLATFORM = "windows"
+          foreach ($renderer in @("default", "software")) {
+            if ($renderer -eq "software") { $env:QT_QUICK_BACKEND = "software" }
+            else { Remove-Item Env:QT_QUICK_BACKEND -ErrorAction SilentlyContinue }
+            $env:KOMAPAINT_DIAGNOSTIC_LOG = Join-Path $env:RUNNER_TEMP "startup-$renderer.log"
+            Remove-Item $env:KOMAPAINT_DIAGNOSTIC_LOG -ErrorAction SilentlyContinue
+            $p = Start-Process -FilePath "$bin\komapaint.exe" -WorkingDirectory $bin -PassThru
+            $watch = [System.Diagnostics.Stopwatch]::StartNew()
+            $events = @()
+            foreach ($second in @(5, 15, 30, 60)) {
+              while ($watch.Elapsed.TotalSeconds -lt $second) { Start-Sleep -Milliseconds 250 }
+              $p.Refresh()
+              if ($p.HasExited) { $events += "$second s: exited $($p.ExitCode)"; break }
+              $events += "$second s: handle=$($p.MainWindowHandle), title='$($p.MainWindowTitle)'"
+              if ($p.MainWindowHandle -ne [IntPtr]::Zero) { break }
+            }
+            $p.Refresh()
+            if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
+            $diag = if (Test-Path $env:KOMAPAINT_DIAGNOSTIC_LOG) { Get-Content $env:KOMAPAINT_DIAGNOSTIC_LOG -Raw } else { "No startup log" }
+            $summary = (($events -join '; ') + ' || ' + $diag).Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' || ')
+            Write-Host "::notice title=Startup reproduction $renderer::$summary"
+          }
+          Remove-Item Env:QT_QUICK_BACKEND -ErrorAction SilentlyContinue
+
       - name: Smoke-test packaged executable launches
         shell: pwsh
         run: |
