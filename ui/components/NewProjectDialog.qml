@@ -18,18 +18,16 @@ Dialog {
     id: newProjectDialog
     title: qsTr("New Project")
     modal: true
-    // Custom OK/Cancel buttons are laid out inside contentItem so the OK
-    // button can be disabled when the project settings are invalid.
     standardButtons: Dialog.NoButton
 
-    // Minimal implicit size so the dialog is large enough for all fields
-    // at normal Windows DPI settings. Content that exceeds this is
-    // scrollable; the button row stays pinned at the bottom.
-    Layout.preferredWidth: 480
-    implicitHeight: 520
+    // Dialog sizes to contentItem's implicit size. All controls are laid out
+    // in a single ColumnLayout with no ScrollView, so nothing can collapse
+    // or be pushed off-screen by a fill-height child.
+    Layout.preferredWidth: 520
+    implicitHeight: 640
 
-    // Log file is written to Documents/KomaPaint/NewProjectDiagnostic.log
-    // by WorkspaceState::writeDiagnosticLog(). Open it with the button below.
+    // Diagnostic log path: Documents/KomaPaint/NewProjectDiagnostic.log
+    // Written by WorkspaceState::writeDiagnosticLog().
 
     onOpened: {
         Workspace.clearDiagnosticLog()
@@ -49,13 +47,13 @@ Dialog {
         NewProject.resetToDefaults()
         nameInput.text = NewProject.name
         unitCombo.currentIndex = NewProject.availableUnits().indexOf(NewProject.units)
-        widthInput.value  = NewProject.widthInUnit(NewProject.units)
+        widthInput.value = NewProject.widthInUnit(NewProject.units)
         heightInput.value = NewProject.heightInUnit(NewProject.units)
-        dpiInput.value    = NewProject.dpi
+        dpiInput.value = NewProject.dpi
         transparentInput.checked = NewProject.transparentBackground
-        summaryError.text = ""
         creationStatus.text = ""
         creationStatus.color = KP.textMuted
+        summaryError.text = ""
 
         Workspace.writeDiagnosticLog("=== After reset ===")
         Workspace.writeDiagnosticLog("name=" + NewProject.name)
@@ -66,24 +64,23 @@ Dialog {
         Workspace.writeDiagnosticLog("validationError=" + NewProject.validationError())
     }
 
+    // Confirm the workspace replaced the document and the viewport was notified.
     Connections {
         target: Workspace
         function onDocumentChanged() {
             Workspace.writeDiagnosticLog("Workspace.documentChanged signal received")
-            creationStatus.text = qsTr("Document replaced — notifying viewport.")
-            creationStatus.color = KP.text
+            creationStatus.text = qsTr("Document replaced — viewport notified.")
+            creationStatus.color = "#4caf50"
         }
     }
 
     contentItem: ColumnLayout {
         Layout.fillWidth: true
-        Layout.fillHeight: true
-        spacing: 0
+        spacing: KP.gapM
 
         // ------------------------------------------------------------- Modes
         Label { text: qsTr("Project type"); font.pixelSize: KP.fontS; color: KP.textMuted }
         RowLayout {
-            Layout.fillWidth: true
             spacing: KP.gapS
             Button {
                 id: modeIllustration
@@ -116,107 +113,111 @@ Dialog {
             }
         }
 
-        // ------------------------------------------------------------- Illustration settings (scrollable)
-        ScrollView {
+        // ------------------------------------------------------------- Illustration settings
+        Rectangle {
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            clip: true
+            color: KP.paneBgAlt
+            border.color: KP.border
+            radius: KP.radiusS
             ColumnLayout {
-                id: settingsColumn
-                width: parent.width
+                anchors.fill: parent
+                anchors.leftMargin: KP.gapM
+                anchors.rightMargin: KP.gapM
+                anchors.topMargin: KP.gapM
+                anchors.bottomMargin: KP.gapM
                 spacing: KP.gapM
 
-                Rectangle {
+                TextField {
+                    id: nameInput
+                    placeholderText: qsTr("Project name")
+                    text: NewProject.name
+                    onTextEdited: NewProject.setName(text)
                     Layout.fillWidth: true
-                    Layout.leftMargin: KP.gapM
-                    Layout.rightMargin: KP.gapM
-                    Layout.topMargin: KP.gapM
-                    Layout.bottomMargin: KP.gapM
-                    color: KP.paneBgAlt
-                    border.color: KP.border
-                    radius: KP.radiusS
-                    ColumnLayout {
-                        spacing: KP.gapM
+                }
 
-                        TextField {
-                            id: nameInput
-                            placeholderText: qsTr("Project name")
-                            text: NewProject.name
-                            onTextEdited: NewProject.setName(text)
-                            Layout.fillWidth: true
+                RowLayout {
+                    spacing: KP.gapS
+                    Label { text: qsTr("Width"); Layout.preferredWidth: 60 }
+                    SpinBox {
+                        id: widthInput
+                        from: 1
+                        to: NewProject.maxDimension()
+                        value: 1600
+                        editable: true
+                        Layout.fillWidth: true
+                        onValueModified: {
+                            NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value, heightInput.value)
+                            widthInput.value = NewProject.widthInUnit(NewProject.units)
+                            heightInput.value = NewProject.heightInUnit(NewProject.units)
                         }
+                    }
+                    ComboBox {
+                        id: unitCombo
+                        model: NewProject.availableUnits()
+                        currentIndex: NewProject.availableUnits().indexOf(NewProject.units)
+                        onActivated: {
+                            NewProject.setUnits(unitCombo.currentText)
+                            widthInput.value = NewProject.widthInUnit(NewProject.units)
+                            heightInput.value = NewProject.heightInUnit(NewProject.units)
+                        }
+                    }
+                }
 
-                        RowLayout {
-                            spacing: KP.gapS
-                            Label { text: qsTr("Width"); Layout.preferredWidth: 60 }
-                            SpinBox {
-                                id: widthInput
-                                from: 1; to: NewProject.maxDimension(); value: 1600; editable: true
-                                Layout.fillWidth: true
-                                onValueModified: {
-                                    NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value, heightInput.value)
-                                    widthInput.value  = NewProject.widthInUnit(NewProject.units)
-                                    heightInput.value = NewProject.heightInUnit(NewProject.units)
-                                }
-                            }
-                            ComboBox {
-                                id: unitCombo
-                                model: NewProject.availableUnits()
-                                currentIndex: NewProject.availableUnits().indexOf(NewProject.units)
-                                onActivated: {
-                                    NewProject.setUnits(unitCombo.currentText)
-                                    widthInput.value  = NewProject.widthInUnit(NewProject.units)
-                                    heightInput.value = NewProject.heightInUnit(NewProject.units)
-                                }
-                            }
+                RowLayout {
+                    spacing: KP.gapS
+                    Label { text: qsTr("Height"); Layout.preferredWidth: 60 }
+                    SpinBox {
+                        id: heightInput
+                        from: 1
+                        to: NewProject.maxDimension()
+                        value: 1200
+                        editable: true
+                        Layout.fillWidth: true
+                        onValueModified: {
+                            NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value, heightInput.value)
+                            widthInput.value = NewProject.widthInUnit(NewProject.units)
+                            heightInput.value = NewProject.heightInUnit(NewProject.units)
                         }
-                        RowLayout {
-                            spacing: KP.gapS
-                            Label { text: qsTr("Height"); Layout.preferredWidth: 60 }
-                            SpinBox {
-                                id: heightInput
-                                from: 1; to: NewProject.maxDimension(); value: 1200; editable: true
-                                Layout.fillWidth: true
-                                onValueModified: {
-                                    NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value, heightInput.value)
-                                    widthInput.value  = NewProject.widthInUnit(NewProject.units)
-                                    heightInput.value = NewProject.heightInUnit(NewProject.units)
-                                }
-                            }
-                        }
-                        RowLayout {
-                            spacing: KP.gapS
-                            Label { text: qsTr("Resolution"); Layout.preferredWidth: 60 }
-                            SpinBox {
-                                id: dpiInput
-                                from: 1; to: 1200; value: 300; editable: true
-                                Layout.fillWidth: true
-                                onValueModified: NewProject.setDpi(value)
-                            }
-                            Label { text: qsTr("dpi"); color: KP.textMuted; font.pixelSize: KP.fontS }
-                        }
-                        RowLayout {
-                            spacing: KP.gapS
-                            CheckBox {
-                                id: transparentInput
-                                text: qsTr("Transparent background")
-                                checked: NewProject.transparentBackground
-                                onCheckedChanged: NewProject.setTransparentBackground(checked)
-                            }
-                        }
-                        RowLayout {
-                            spacing: KP.gapS
-                            enabled: !transparentInput.checked
-                            Button {
-                                text: qsTr("Background colour…")
-                                onClicked: backgroundPicker.open()
-                            }
-                            Rectangle {
-                                width: 30; height: 30
-                                color: Qt.color(NewProject.backgroundColor)
-                                border.color: KP.border
-                            }
-                        }
+                    }
+                }
+
+                RowLayout {
+                    spacing: KP.gapS
+                    Label { text: qsTr("Resolution"); Layout.preferredWidth: 60 }
+                    SpinBox {
+                        id: dpiInput
+                        from: 1
+                        to: 1200
+                        value: 300
+                        editable: true
+                        Layout.fillWidth: true
+                        onValueModified: NewProject.setDpi(value)
+                    }
+                    Label { text: qsTr("dpi"); color: KP.textMuted; font.pixelSize: KP.fontS }
+                }
+
+                RowLayout {
+                    spacing: KP.gapS
+                    CheckBox {
+                        id: transparentInput
+                        text: qsTr("Transparent background")
+                        checked: NewProject.transparentBackground
+                        onCheckedChanged: NewProject.setTransparentBackground(checked)
+                    }
+                }
+
+                RowLayout {
+                    spacing: KP.gapS
+                    enabled: !transparentInput.checked
+                    Button {
+                        text: qsTr("Background colour…")
+                        onClicked: backgroundPicker.open()
+                    }
+                    Rectangle {
+                        width: 30
+                        height: 30
+                        color: Qt.color(NewProject.backgroundColor)
+                        border.color: KP.border
                     }
                 }
             }
@@ -224,11 +225,12 @@ Dialog {
 
         // ------------------------------------------------------------- Summary
         Rectangle {
+            Layout.fillWidth: true
             color: KP.inputBg
             border.color: KP.border
             radius: KP.radiusS
-            Layout.fillWidth: true
             ColumnLayout {
+                anchors.fill: parent
                 anchors.leftMargin: KP.gapM
                 anchors.rightMargin: KP.gapM
                 anchors.topMargin: KP.gapS
@@ -257,13 +259,15 @@ Dialog {
             }
         }
 
-        // ------------------------------------------------------------- Creation status (prominent)
+        // ------------------------------------------------------------- Creation status
+        // Always visible area that reports the result of clicking Create.
         Rectangle {
+            Layout.fillWidth: true
             color: "#2d2d2d"
             border.color: KP.border
             radius: KP.radiusS
-            Layout.fillWidth: true
             ColumnLayout {
+                anchors.fill: parent
                 anchors.leftMargin: KP.gapM
                 anchors.rightMargin: KP.gapM
                 anchors.topMargin: KP.gapS
@@ -271,14 +275,14 @@ Dialog {
                 spacing: KP.gapXS
                 Label {
                     id: creationStatus
-                    text: ""
+                    text: qsTr("Ready to create project.")
                     color: KP.textMuted
                     font.pixelSize: KP.fontS
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
                 Label {
-                    text: qsTr("Log file: Documents/KomaPaint/NewProjectDiagnostic.log")
+                    text: qsTr("Diagnostic log: Documents/KomaPaint/NewProjectDiagnostic.log")
                     color: KP.textMuted
                     font.pixelSize: KP.fontXS
                     wrapMode: Text.WordWrap
@@ -287,10 +291,10 @@ Dialog {
             }
         }
 
-        // ------------------------------------------------------------- Buttons (pinned at bottom)
+        // ------------------------------------------------------------- Buttons
         RowLayout {
             Layout.fillWidth: true
-            Layout.topMargin: KP.gapM
+            spacing: KP.gapS
             Item { Layout.fillWidth: true }
             Button {
                 text: qsTr("Cancel")
@@ -298,20 +302,20 @@ Dialog {
                 onClicked: newProjectDialog.reject()
             }
             Button {
-                text: qsTr("OK")
+                text: qsTr("Create")
                 enabled: NewProject.isValid()
                 onClicked: {
-                    Workspace.writeDiagnosticLog("=== OK button clicked ===")
-                    Workspace.writeDiagnosticLog("nameInput.text=" + nameInput.text.trimmed())
-                    Workspace.writeDiagnosticLog("NewProject.widthPixels=" + NewProject.widthPixels)
-                    Workspace.writeDiagnosticLog("NewProject.heightPixels=" + NewProject.heightPixels)
-                    Workspace.writeDiagnosticLog("NewProject.transparentBackground=" + NewProject.transparentBackground)
-                    Workspace.writeDiagnosticLog("NewProject.backgroundColor=" + NewProject.backgroundColor)
-                    Workspace.writeDiagnosticLog("NewProject.dpi=" + NewProject.dpi)
-                    Workspace.writeDiagnosticLog("NewProject.isValid=" + NewProject.isValid())
-                    Workspace.writeDiagnosticLog("NewProject.validationError=" + NewProject.validationError())
+                    Workspace.writeDiagnosticLog("=== Create button clicked ===")
+                    Workspace.writeDiagnosticLog("name=" + nameInput.text.trimmed())
+                    Workspace.writeDiagnosticLog("widthPixels=" + NewProject.widthPixels)
+                    Workspace.writeDiagnosticLog("heightPixels=" + NewProject.heightPixels)
+                    Workspace.writeDiagnosticLog("transparent=" + NewProject.transparentBackground)
+                    Workspace.writeDiagnosticLog("bgColor=" + NewProject.backgroundColor)
+                    Workspace.writeDiagnosticLog("dpi=" + NewProject.dpi)
+                    Workspace.writeDiagnosticLog("isValid=" + NewProject.isValid())
+                    Workspace.writeDiagnosticLog("validationError=" + NewProject.validationError())
 
-                    creationStatus.text = qsTr("Calling Workspace.newProject()...")
+                    creationStatus.text = qsTr("Creating project...")
                     creationStatus.color = KP.textMuted
 
                     const ok = Workspace.newProject(nameInput.text.trimmed(),
@@ -323,13 +327,13 @@ Dialog {
                     Workspace.writeDiagnosticLog("Workspace.newProject() returned: " + ok)
 
                     if (ok) {
-                        Workspace.writeDiagnosticLog("Creation succeeded, accepting dialog")
-                        creationStatus.text = qsTr("Project created successfully. Closing dialog.")
+                        Workspace.writeDiagnosticLog("Creation succeeded, closing dialog")
+                        creationStatus.text = qsTr("Project created successfully.")
                         creationStatus.color = "#4caf50"
                         newProjectDialog.accept()
                     } else {
-                        Workspace.writeDiagnosticLog("Creation FAILED — dialog will NOT close")
-                        creationStatus.text = qsTr("Project creation failed. Check diagnostic log.")
+                        Workspace.writeDiagnosticLog("Creation FAILED — dialog stays open")
+                        creationStatus.text = qsTr("Project creation failed. See diagnostic log.")
                         creationStatus.color = KP.error
                         summaryError.text = qsTr("Could not create the project.")
                     }
@@ -352,11 +356,11 @@ Dialog {
         title: qsTr("Background colour")
         selectedColor: Qt.color(NewProject.backgroundColor)
         onAccepted: {
-            var c = selectedColor;
+            var c = selectedColor
             NewProject.backgroundColor = "#" +
                 ("0" + c.red.toString(16)).slice(-2) +
                 ("0" + c.green.toString(16)).slice(-2) +
-                ("0" + c.blue.toString(16)).slice(-2);
+                ("0" + c.blue.toString(16)).slice(-2)
         }
     }
 }
