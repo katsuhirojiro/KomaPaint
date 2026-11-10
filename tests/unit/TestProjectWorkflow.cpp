@@ -64,7 +64,10 @@ void TestProjectWorkflow::createAndPaint()
     QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
     QTest::keyClick(window, Qt::Key_Backspace);
     QTRY_VERIFY(!create->isEnabled());
-    QTest::keyClicks(window, "Workflow Test");
+    for (const QChar ch : QStringLiteral("Workflow Test")) {
+        const auto key = ch == u' ' ? Qt::Key_Space : static_cast<Qt::Key>(ch.toUpper().unicode());
+        QTest::keyClick(window, key, ch.isUpper() ? Qt::ShiftModifier : Qt::NoModifier);
+    }
     QTRY_VERIFY(create->isEnabled());
     auto* previous = workspace.document();
     QSignalSpy changed(&workspace, &WorkspaceState::documentChanged);
