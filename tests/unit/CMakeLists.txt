@@ -97,3 +97,5 @@ add_executable(test_document_memory_budget TestDocumentMemoryBudget.cpp)
 target_link_libraries(test_document_memory_budget PRIVATE komapaint::tile_data)
 set_target_properties(test_document_memory_budget PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_document_memory_budget COMMAND test_document_memory_budget)
+
+komapaint_add_test(test_history_allocation_failure TestHistoryAllocationFailure.cpp)
