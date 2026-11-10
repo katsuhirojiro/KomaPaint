@@ -15,6 +15,7 @@ private slots:
     void replayRejectsReentry();
     void layerRemovedDuringReplay();
     void accountingLifetimes();
+    void unchangedTilesReleaseHistoryCharge();
 };
 static std::vector<std::uint32_t> snapshot(const SparseTileStore& s, TilePoint p) {
     auto pixels = s.tilePixels(p); return {pixels.begin(), pixels.end()};
@@ -287,6 +288,32 @@ void TestUndoStack::accountingLifetimes()
     }
     QCOMPARE(budget->usedBytes(), size_t(0));
     QVERIFY(budget->peakBytes() >= 2 * tile);
+}
+
+
+void TestUndoStack::unchangedTilesReleaseHistoryCharge()
+{
+    Layer layer; UndoStack history;
+    auto budget = std::make_shared<DocumentMemoryBudget>();
+    auto& store = layer.tiles();
+    QVERIFY(store.setDocumentBudget(budget));
+    const auto tile = store.tileBytes();
+    QCOMPARE(store.setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(store.setPixel({1, 1}, 0xff123456U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(store.setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(store.setPixel({257, 1}, 0x80800000U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(budget->historyBytes(), 3 * tile);
+    QVERIFY(history.commitStroke());
+    QCOMPARE(budget->historyBytes(), tile);
+    QCOMPARE(history.memoryBytes(), qulonglong(2 * tile + 512));
+    history.undo();
+    QCOMPARE(store.pixel({1, 1}).value(), 0x80402010U);
+    QCOMPARE(store.pixel({257, 1}).value(), 0U);
+    history.redo();
+    QCOMPARE(store.pixel({257, 1}).value(), 0x80800000U);
+    history.clear();
+    QCOMPARE(budget->historyBytes(), size_t(0));
 }
 
 QTEST_APPLESS_MAIN(TestUndoStack)

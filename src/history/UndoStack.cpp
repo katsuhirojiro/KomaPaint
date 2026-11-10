@@ -82,8 +82,15 @@ void UndoStack::finishCapture()
         if (pixels.empty()) after.clear();
         else std::copy(pixels.begin(), pixels.end(), after.begin());
         if (m_current->before[i].pixels == after) {
+            const auto tileBytes = store.tileBytes();
+            const auto tracked = tileBytes * (m_current->before[i].pixels.empty() ? 1 : 2);
             m_current->before.erase(m_current->before.begin() + static_cast<std::ptrdiff_t>(i));
             m_current->after.erase(m_current->after.begin() + static_cast<std::ptrdiff_t>(i));
+            // Both snapshot buffers have been destroyed. Keep the logical
+            // budget and history-limit charge in step with the retained tiles.
+            if (m_current->budget) m_current->budget->release(DocumentMemoryBudget::Category::History, tracked);
+            m_current->historyBytes -= tracked;
+            m_currentBytes -= 2 * tileBytes + 512;
         } else ++i;
     }
 }
