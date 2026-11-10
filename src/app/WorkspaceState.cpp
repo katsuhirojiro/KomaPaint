@@ -1,6 +1,7 @@
 #include "WorkspaceState.h"
 
 #include <QColor>
+#include <QDebug>
 
 #include "FileAssociation.h"
 #include "../core/Settings.h"
@@ -64,14 +65,19 @@ void WorkspaceState::associateWithKomaFiles()
 
 void WorkspaceState::replaceDocument(CanvasDocument* next)
 {
+    qDebug() << "[NewProject] replaceDocument() called:"
+             << "previous=" << m_document << "next=" << next;
+
     auto* previous = m_document;
     m_history->clear(); // history references tiles of the document being replaced
     m_document = next;
     connectLayerDeletion(m_document);
     m_currentFile.clear();
     emit currentFileChanged();
+    qDebug() << "[NewProject] replaceDocument: emitting documentChanged()";
     emit documentChanged();
     previous->deleteLater();
+    qDebug() << "[NewProject] replaceDocument: done";
 }
 
 bool WorkspaceState::newDocument(int width, int height, bool transparent, const QColor& background)
@@ -90,18 +96,48 @@ bool WorkspaceState::newDocument(int width, int height, bool transparent, const 
 bool WorkspaceState::newProject(const QString& name, int width, int height, bool transparent,
                                 const QString& backgroundColor, qreal dpi)
 {
-    if (m_history->strokeActive()) return false;
-    if (name.trimmed().isEmpty()) return false;
+    qDebug() << "[NewProject] WorkspaceState::newProject() called:"
+             << "name=" << name << "width=" << width << "height=" << height
+             << "transparent=" << transparent << "bgColor=" << backgroundColor << "dpi=" << dpi;
+
+    if (m_history->strokeActive()) {
+        qDebug() << "[NewProject] REJECTED: stroke active";
+        return false;
+    }
+    if (name.trimmed().isEmpty()) {
+        qDebug() << "[NewProject] REJECTED: empty name";
+        return false;
+    }
     QColor bgColor(backgroundColor);
-    if (!CanvasDocument::validSize(QSize(width, height)) || !bgColor.isValid()
-        || bgColor.alpha() != 255 || dpi <= 0) return false;
+    if (!CanvasDocument::validSize(QSize(width, height))) {
+        qDebug() << "[NewProject] REJECTED: invalid size" << width << "x" << height;
+        return false;
+    }
+    if (!bgColor.isValid()) {
+        qDebug() << "[NewProject] REJECTED: invalid background color";
+        return false;
+    }
+    if (bgColor.alpha() != 255) {
+        qDebug() << "[NewProject] REJECTED: background color alpha != 255";
+        return false;
+    }
+    if (dpi <= 0) {
+        qDebug() << "[NewProject] REJECTED: dpi <= 0";
+        return false;
+    }
+
     auto* next = new CanvasDocument(this);
     next->setTitle(name.trimmed());
     next->setSize(QSize(width, height));
     next->setDpi(dpi);
     next->setBackgroundColor(bgColor);
     next->setTransparentBackground(transparent);
+    qDebug() << "[NewProject] CanvasDocument created:" << next
+             << "size=" << next->width() << "x" << next->height()
+             << "dpi=" << next->dpi() << "transparent=" << next->hasTransparentBackground();
+
     replaceDocument(next);
+    qDebug() << "[NewProject] replaceDocument done, returning true";
     return true;
 }
 
