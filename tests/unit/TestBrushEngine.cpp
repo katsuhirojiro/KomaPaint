@@ -43,6 +43,7 @@ int main() {
     SparseTileStore limited(32, 32, 8, 8 * 8 * 4);
     BrushStroke failed(limited, brush);
     CHECK(!failed.begin({8, 8, 1})); CHECK(failed.failed());
+    CHECK(failed.failureReason() == W::MemoryLimit);
     CHECK(limited.allocatedTiles() <= 1);
     std::cout << "Brush engine tests passed\n";
 }

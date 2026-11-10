@@ -21,6 +21,7 @@ private slots:
     void navigationAndVisibleTiles();
     void dirtyAndLayers();
     void brushInputAndLayerRules();
+    void strokeFailureDiagnostics();
     void qmlMouseStroke();
     void actualWindowShortcuts();
 };
@@ -140,6 +141,36 @@ void TestCanvasViewport::brushInputAndLayerRules()
     view.cancelStroke();
     QCOMPARE(layer->tiles().pixel({325, 220}).value(), beforeCancel);
 }
+void TestCanvasViewport::strokeFailureDiagnostics()
+{
+    CanvasDocument doc;
+    doc.setSize(QSize(600, 400));
+    UndoStack history;
+    QVERIFY(history.setByteLimit(2 * doc.layers()->layerAt(0)->tiles().tileBytes() + 512));
+    CanvasViewport view;
+    view.setWidth(500); view.setHeight(300);
+    view.setHistory(&history); view.setDocument(&doc); view.refreshNow();
+    BrushSettings brush;
+    brush.setSize(8);
+    QSignalSpy errors(&view, &CanvasViewport::strokeError);
+    const auto first = view.documentToViewport(100, 100);
+    const auto second = view.documentToViewport(300, 100);
+    QVERIFY(view.beginStroke(first.x(), first.y(), 1, &brush, Qt::red));
+    view.continueStroke(second.x(), second.y(), 1);
+    QCOMPARE(errors.size(), 1);
+    const auto message = errors.takeFirst().at(0).toString();
+    QVERIFY2(message.contains(QStringLiteral("Undo history capacity")), qPrintable(message));
+    QVERIFY(message.contains(QStringLiteral("accounted")));
+    QVERIFY(history.canUndo());
+    auto& store = doc.layers()->layerAt(0)->tiles();
+    QVERIFY(store.pixel({100, 100}).value() != 0);
+    QCOMPARE(store.pixel({300, 100}).value(), 0U);
+    history.undo();
+    QCOMPARE(store.allocatedTiles(), std::size_t(0));
+    history.redo();
+    QVERIFY(store.pixel({100, 100}).value() != 0);
+}
+
 void TestCanvasViewport::qmlMouseStroke()
 {
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);

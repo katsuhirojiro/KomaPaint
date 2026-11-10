@@ -43,8 +43,8 @@ private:
         std::vector<SparseTileStore::TileSnapshot> before, after;
         std::size_t bytes = 0;
     };
-    static bool capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept;
-    bool captureTile(TilePoint tile, bool existed, std::span<const std::uint32_t> pixels);
+    static SparseTileStore::CaptureResult capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept;
+    SparseTileStore::CaptureResult captureTile(TilePoint tile, bool existed, std::span<const std::uint32_t> pixels);
     void finishCapture();
     void detachCapture() noexcept;
     void fail(const QString& message) { emit errorOccurred(message); }

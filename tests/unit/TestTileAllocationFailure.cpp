@@ -16,7 +16,8 @@ void operator delete(void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 #define CHECK(...) do { if (!(__VA_ARGS__)) { std::cerr << "FAIL line " << __LINE__ << '\n'; std::exit(1); } } while (false)
 using namespace komapaint;
-static bool rejectCapture(void*, TilePoint, bool, std::span<const std::uint32_t>) noexcept { return false; }
+static SparseTileStore::CaptureResult rejectCapture(void*, TilePoint, bool, std::span<const std::uint32_t>) noexcept { return SparseTileStore::CaptureResult::Limit; }
+static SparseTileStore::CaptureResult failCapture(void*, TilePoint, bool, std::span<const std::uint32_t>) noexcept { return SparseTileStore::CaptureResult::AllocationFailed; }
 int main() {
     int failures = 0;
     for (int n = 0; n < 8; ++n) {
@@ -48,6 +49,11 @@ int main() {
     CHECK(capture.setPixel({0, 0}, 0xff000000U) == SparseTileStore::WriteResult::HistoryLimit);
     CHECK(capture.pixel({0, 0}) == 0xff123456U);
     CHECK(capture.setPixel({4, 0}, 0xffffffffU) == SparseTileStore::WriteResult::HistoryLimit);
+    CHECK(capture.allocatedTiles() == 1);
+    capture.setBeforeChange(failCapture, nullptr);
+    CHECK(capture.setPixel({0, 0}, 0xff000000U) == SparseTileStore::WriteResult::HistoryAllocationFailed);
+    CHECK(capture.pixel({0, 0}) == 0xff123456U);
+    CHECK(capture.setPixel({4, 0}, 0xffffffffU) == SparseTileStore::WriteResult::HistoryAllocationFailed);
     CHECK(capture.allocatedTiles() == 1);
     int restoreFailures = 0;
     for (int n = 0; n < 16; ++n) {

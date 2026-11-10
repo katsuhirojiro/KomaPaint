@@ -26,19 +26,19 @@ bool UndoStack::beginStroke(Layer* layer)
     } catch (const std::bad_alloc&) { fail(QStringLiteral("Not enough memory to start undo history.")); return false; }
       catch (const std::length_error&) { fail(QStringLiteral("Undo history is full.")); return false; }
 }
-bool UndoStack::capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept
+SparseTileStore::CaptureResult UndoStack::capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept
 {
     try { return static_cast<UndoStack*>(context)->captureTile(tile, existed, pixels); }
-    catch (const std::bad_alloc&) { return false; }
-    catch (const std::length_error&) { return false; }
+    catch (const std::bad_alloc&) { return SparseTileStore::CaptureResult::AllocationFailed; }
+    catch (const std::length_error&) { return SparseTileStore::CaptureResult::AllocationFailed; }
 }
-bool UndoStack::captureTile(TilePoint tile, bool existed, std::span<const std::uint32_t> pixels)
+SparseTileStore::CaptureResult UndoStack::captureTile(TilePoint tile, bool existed, std::span<const std::uint32_t> pixels)
 {
-    if (!m_current || !m_current->layer) return false;
-    for (const auto& item : m_current->before) if (item.tile == tile) return true;
+    if (!m_current || !m_current->layer) return SparseTileStore::CaptureResult::AllocationFailed;
+    for (const auto& item : m_current->before) if (item.tile == tile) return SparseTileStore::CaptureResult::Ready;
     const auto tileBytes = m_current->layer->tiles().tileBytes();
     const std::size_t charge = 2 * tileBytes + 512; // conservative allowance for containers
-    if (charge > m_limit || m_bytes > m_limit - charge || m_currentBytes > m_limit - charge - m_bytes) return false;
+    if (charge > m_limit || m_bytes > m_limit - charge || m_currentBytes > m_limit - charge - m_bytes) return SparseTileStore::CaptureResult::Limit;
     SparseTileStore::TileSnapshot before{tile, {}}, after{tile, {}};
     if (existed) before.pixels.assign(pixels.begin(), pixels.end());
     after.pixels.resize(tileBytes / sizeof(std::uint32_t)); // reserve redo before painting
@@ -47,7 +47,7 @@ bool UndoStack::captureTile(TilePoint tile, bool existed, std::span<const std::u
     m_current->before.push_back(std::move(before));
     m_current->after.push_back(std::move(after));
     m_currentBytes += charge;
-    return true;
+    return SparseTileStore::CaptureResult::Ready;
 }
 void UndoStack::detachCapture() noexcept
 {

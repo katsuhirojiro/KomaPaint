@@ -189,6 +189,35 @@ QImage CanvasViewport::composedTile(TilePoint tile, const std::vector<CompositeL
     if (bytes <= CacheLimit) { m_cache.emplace(tile, CacheEntry{image, bytes, ++m_clock}); m_cacheBytes += bytes; }
     return image;
 }
+void CanvasViewport::reportStrokeFailure(SparseTileStore::WriteResult reason, bool committed,
+                                         std::size_t tileBytes, std::size_t tileBudget)
+{
+    using R = SparseTileStore::WriteResult;
+    QString detail;
+    switch (reason) {
+    case R::HistoryLimit:
+        detail = QStringLiteral("Undo history capacity reached (accounted %1 of %2 MiB).")
+            .arg(m_history ? m_history->memoryBytes() / (1024.0 * 1024.0) : 0.0, 0, 'f', 1)
+            .arg(m_history ? m_history->byteLimit() / (1024.0 * 1024.0) : 0.0, 0, 'f', 1);
+        break;
+    case R::HistoryAllocationFailed: detail = QStringLiteral("Memory allocation for undo history failed."); break;
+    case R::MemoryLimit:
+        detail = QStringLiteral("This layer's pixel storage limit was reached (%1 of %2 MiB).")
+            .arg(tileBytes / (1024.0 * 1024.0), 0, 'f', 1)
+            .arg(tileBudget / (1024.0 * 1024.0), 0, 'f', 1);
+        break;
+    case R::TrackingLimit: detail = QStringLiteral("Tile change tracking capacity was reached."); break;
+    case R::AllocationFailed: detail = QStringLiteral("Memory allocation for artwork or tile tracking failed."); break;
+    case R::InvalidPixel: detail = QStringLiteral("The brush received invalid settings or input."); break;
+    case R::OutOfBounds: detail = QStringLiteral("The canvas tile store is invalid or the paint position is out of bounds."); break;
+    default: detail = QStringLiteral("The brush could not continue for an unknown reason."); break;
+    }
+    detail += committed
+        ? QStringLiteral(" The stroke stopped. Any paint applied was retained in undo history.")
+        : QStringLiteral(" The stroke stopped, but its history could not be committed.");
+    emit strokeError(detail);
+}
+
 bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* settings, const QColor& color)
 {
     qDebug() << "[CanvasViewport] beginStroke() called:"
@@ -240,8 +269,13 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
     qDebug() << "[CanvasViewport] beginStroke: viewport(" << x << "," << y << ") -> document("
              << point.x() << "," << point.y() << ")";
     if (!m_stroke->begin({point.x(), point.y(), pressure})) {
-        m_stroke.reset(); m_strokeLayer = nullptr; m_history->commitStroke();
-        emit strokeError(QStringLiteral("Stroke stopped: history, memory or tile limit reached. Any paint applied can be undone.")); return false;
+        const auto reason = m_stroke->failureReason();
+        const auto tileBytes = layer->tiles().allocatedPixelBytes();
+        const auto tileBudget = layer->tiles().pixelBudget();
+        m_stroke.reset(); m_strokeLayer = nullptr;
+        const bool committed = m_history->commitStroke();
+        reportStrokeFailure(reason, committed, tileBytes, tileBudget);
+        return false;
     }
     qDebug() << "[CanvasViewport] beginStroke: stroke started on layer" << layer->name();
     return true;
@@ -261,8 +295,12 @@ void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
     qDebug() << "[CanvasViewport] continueStroke: viewport(" << x << "," << y << ") -> document("
              << point.x() << "," << point.y() << ")";
     if (!m_stroke->extend({point.x(), point.y(), pressure})) {
-        m_stroke.reset(); m_strokeLayer = nullptr; if (m_history) m_history->commitStroke();
-        emit strokeError(QStringLiteral("Stroke stopped: history, memory or tile limit reached. Any paint applied can be undone."));
+        const auto reason = m_stroke->failureReason();
+        const auto tileBytes = m_strokeLayer->tiles().allocatedPixelBytes();
+        const auto tileBudget = m_strokeLayer->tiles().pixelBudget();
+        m_stroke.reset(); m_strokeLayer = nullptr;
+        const bool committed = m_history && m_history->commitStroke();
+        reportStrokeFailure(reason, committed, tileBytes, tileBudget);
     }
 }
 void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
@@ -277,10 +315,13 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
         cancelStroke(); return; }
     auto point = viewportToDocument(x, y);
     const bool ok = m_stroke->end({point.x(), point.y(), pressure});
+    const auto reason = m_stroke->failureReason();
+    const auto tileBytes = m_strokeLayer->tiles().allocatedPixelBytes();
+    const auto tileBudget = m_strokeLayer->tiles().pixelBudget();
     m_stroke.reset(); m_strokeLayer = nullptr;
-    if (m_history) m_history->commitStroke();
+    const bool committed = m_history && m_history->commitStroke();
     qDebug() << "[CanvasViewport] endStroke: stroke ended, ok=" << ok;
-    if (!ok) emit strokeError(QStringLiteral("Stroke stopped: history, memory or tile limit reached. Any paint applied can be undone."));
+    if (!ok) reportStrokeFailure(reason, committed, tileBytes, tileBudget);
 }
 void CanvasViewport::cancelStroke() {
     qDebug() << "[CanvasViewport] cancelStroke() called";

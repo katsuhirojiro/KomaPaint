@@ -53,6 +53,7 @@ private:
     void reconnectLayers();
     void invalidateAll();
     void changedTile(qint64 x, qint64 y);
+    void reportStrokeFailure(SparseTileStore::WriteResult reason, bool committed, std::size_t tileBytes, std::size_t tileBudget);
     void schedule(const QRectF& region);
     std::vector<CompositeLayer> layers() const;
     QImage composedTile(TilePoint tile, const std::vector<CompositeLayer>& layers, std::uint32_t background);

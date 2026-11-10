@@ -67,23 +67,29 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
 BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush) : m_store(store), m_brush(brush) {
     if (std::isfinite(brush.size) && std::isfinite(brush.spacing) && brush.size >= 1 && brush.size <= 256 && brush.spacing >= 0.05 && brush.spacing <= 0.5)
         m_spacing = std::max(0.25, brush.size * brush.spacing);
-    else m_failed = true;
+    else { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; }
 }
 bool BrushStroke::stamp(InputSample p) {
     auto result = BrushRasterizer::dab(m_store, m_brush, p);
-    if (result != SparseTileStore::WriteResult::Changed && result != SparseTileStore::WriteResult::Unchanged) m_failed = true;
+    if (result != SparseTileStore::WriteResult::Changed && result != SparseTileStore::WriteResult::Unchanged) { m_failed = true; m_failureReason = result; }
     return !m_failed;
 }
 bool BrushStroke::begin(InputSample p) {
-    if (m_started || m_failed || !valid(p)) return false;
+    if (m_started || m_failed || !valid(p)) {
+        if (!m_failed) { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; }
+        return false;
+    }
     m_started = true; m_previous = p; m_remaining = m_spacing;
     return stamp(p);
 }
 bool BrushStroke::extend(InputSample p) {
-    if (!m_started || m_failed || !valid(p)) return false;
+    if (!m_started || m_failed || !valid(p)) {
+        if (!m_failed) { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; }
+        return false;
+    }
     const double dx = p.x - m_previous.x, dy = p.y - m_previous.y;
     const double distance = std::hypot(dx, dy);
-    if (!std::isfinite(distance)) { m_failed = true; return false; }
+    if (!std::isfinite(distance)) { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; return false; }
     if (distance == 0) { m_previous = p; return true; }
     double start = 0, end = 1;
     const double radius = m_brush.size / 2 + 1;

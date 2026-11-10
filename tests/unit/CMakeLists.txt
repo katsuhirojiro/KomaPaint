@@ -89,3 +89,6 @@ target_link_libraries(test_project_workflow PRIVATE komapaint::app Qt6::Widgets 
 # Non-production reproducible measurement of the existing history budget.
 komapaint_add_test(test_history_audit TestHistoryAudit.cpp)
 target_link_libraries(test_history_audit PRIVATE komapaint::drawing)
+if(WIN32)
+    target_link_libraries(test_history_audit PRIVATE Psapi)
+endif()

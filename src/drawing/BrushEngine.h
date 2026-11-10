@@ -33,6 +33,7 @@ public:
     bool extend(InputSample sample);
     bool end(InputSample sample);
     bool failed() const { return m_failed; }
+    SparseTileStore::WriteResult failureReason() const { return m_failureReason; }
 private:
     bool stamp(InputSample sample);
     SparseTileStore& m_store;
@@ -42,5 +43,6 @@ private:
     double m_spacing = 1;
     bool m_started = false;
     bool m_failed = false;
+    SparseTileStore::WriteResult m_failureReason = SparseTileStore::WriteResult::Unchanged;
 };
 } // namespace komapaint

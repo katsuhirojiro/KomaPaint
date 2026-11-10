@@ -68,10 +68,13 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
     auto index = static_cast<std::size_t>(a->local.y) * static_cast<std::size_t>(m_geometry.tileSize()) + static_cast<std::size_t>(a->local.x);
     auto& old = it->second.pixels[index];
     if (old == value) return WriteResult::Unchanged;
-    if (m_beforeChange && !m_beforeChange(m_beforeContext, a->tile, !created,
-                                           created ? std::span<const std::uint32_t>{} : std::span<const std::uint32_t>{it->second.pixels})) {
-        if (created) m_tiles.erase(it);
-        return WriteResult::HistoryLimit;
+    if (m_beforeChange) {
+        const auto capture = m_beforeChange(m_beforeContext, a->tile, !created,
+            created ? std::span<const std::uint32_t>{} : std::span<const std::uint32_t>{it->second.pixels});
+        if (capture != CaptureResult::Ready) {
+            if (created) m_tiles.erase(it);
+            return capture == CaptureResult::Limit ? WriteResult::HistoryLimit : WriteResult::HistoryAllocationFailed;
+        }
     }
     const auto dirty = m_dirty.mark({point.x, point.y, point.x + 1, point.y + 1});
     if (dirty != DirtyTileTracker::Result::Marked) {
