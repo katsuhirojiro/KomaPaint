@@ -371,6 +371,7 @@ Dialog {
 
     ColorDialog {
         id: backgroundPicker
+        objectName: "projectColorDialog"
         title: qsTr("Background colour")
         selectedColor: NewProject.backgroundColor
         onAccepted: {
