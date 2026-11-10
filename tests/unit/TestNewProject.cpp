@@ -106,10 +106,11 @@ void TestNewProject::validationRejectsInvalidInput()
     QCOMPARE(settings.widthInches(), 8.5);
     QCOMPARE(settings.widthPixels(), 2550);
 
-    // Negative DPI is invalid.
+    // Negative DPI is rejected without changing valid settings.
     settings.setSizeInUnit("px", 100, 100);
     settings.setDpi(-72.0);
-    QVERIFY(!settings.isValid());
+    QVERIFY(settings.isValid()); // invalid DPI is ignored, settings unchanged
+    QCOMPARE(settings.dpi(), 300.0);
 
     // Oversized dimensions are invalid.
     settings.setDpi(72.0);
