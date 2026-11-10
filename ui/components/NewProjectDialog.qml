@@ -19,6 +19,11 @@ Dialog {
     title: qsTr("New Project")
     modal: true
     standardButtons: Dialog.NoButton
+    readonly property int dimensionScale: unitCombo.currentText === "px" ? 1 : 100
+    function updateDimensionInputs() {
+        widthInput.value = Math.round(NewProject.widthInUnit(NewProject.units) * dimensionScale)
+        heightInput.value = Math.round(NewProject.heightInUnit(NewProject.units) * dimensionScale)
+    }
 
     // Dialog sizes itself from contentItem's implicit size. All children have
     // defined implicit sizes, so nothing can collapse or be pushed off-screen.
@@ -35,8 +40,7 @@ Dialog {
         NewProject.resetToDefaults()
         nameInput.text = NewProject.name
         unitCombo.currentIndex = NewProject.availableUnits().indexOf(NewProject.units)
-        widthInput.value = NewProject.widthInUnit(NewProject.units)
-        heightInput.value = NewProject.heightInUnit(NewProject.units)
+        updateDimensionInputs()
         dpiInput.value = NewProject.dpi
         transparentInput.checked = NewProject.transparentBackground
 
@@ -140,24 +144,29 @@ Dialog {
                         id: widthInput
                         objectName: "projectWidthInput"
                         from: 1
-                        to: NewProject.maxDimension()
+                        to: NewProject.maxDimension() * newProjectDialog.dimensionScale
+                        textFromValue: function(value, locale) {
+                            return Number(value / newProjectDialog.dimensionScale).toLocaleString(locale, "f", newProjectDialog.dimensionScale === 1 ? 0 : 2)
+                        }
+                        valueFromText: function(text, locale) {
+                            return Math.round(Number.fromLocaleString(locale, text) * newProjectDialog.dimensionScale)
+                        }
+                        validator: DoubleValidator { bottom: 1 / newProjectDialog.dimensionScale; top: NewProject.maxDimension(); decimals: newProjectDialog.dimensionScale === 1 ? 0 : 2 }
                         value: 1600
                         editable: true
                         Layout.fillWidth: true
                         onValueModified: {
-                            NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value, heightInput.value)
-                            widthInput.value = NewProject.widthInUnit(NewProject.units)
-                            heightInput.value = NewProject.heightInUnit(NewProject.units)
+                            NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value / newProjectDialog.dimensionScale, heightInput.value / newProjectDialog.dimensionScale)
                         }
                     }
                     ComboBox {
                         id: unitCombo
+                        objectName: "projectUnitInput"
                         model: NewProject.availableUnits()
                         currentIndex: NewProject.availableUnits().indexOf(NewProject.units)
                         onActivated: {
                             NewProject.units = unitCombo.currentText
-                            widthInput.value = NewProject.widthInUnit(NewProject.units)
-                            heightInput.value = NewProject.heightInUnit(NewProject.units)
+                            newProjectDialog.updateDimensionInputs()
                         }
                     }
                 }
@@ -167,15 +176,21 @@ Dialog {
                     Label { text: qsTr("Height"); Layout.preferredWidth: 60 }
                     SpinBox {
                         id: heightInput
+                        objectName: "projectHeightInput"
                         from: 1
-                        to: NewProject.maxDimension()
+                        to: NewProject.maxDimension() * newProjectDialog.dimensionScale
+                        textFromValue: function(value, locale) {
+                            return Number(value / newProjectDialog.dimensionScale).toLocaleString(locale, "f", newProjectDialog.dimensionScale === 1 ? 0 : 2)
+                        }
+                        valueFromText: function(text, locale) {
+                            return Math.round(Number.fromLocaleString(locale, text) * newProjectDialog.dimensionScale)
+                        }
+                        validator: DoubleValidator { bottom: 1 / newProjectDialog.dimensionScale; top: NewProject.maxDimension(); decimals: newProjectDialog.dimensionScale === 1 ? 0 : 2 }
                         value: 1200
                         editable: true
                         Layout.fillWidth: true
                         onValueModified: {
-                            NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value, heightInput.value)
-                            widthInput.value = NewProject.widthInUnit(NewProject.units)
-                            heightInput.value = NewProject.heightInUnit(NewProject.units)
+                            NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value / newProjectDialog.dimensionScale, heightInput.value / newProjectDialog.dimensionScale)
                         }
                     }
                 }
@@ -185,12 +200,13 @@ Dialog {
                     Label { text: qsTr("Resolution"); Layout.preferredWidth: 60 }
                     SpinBox {
                         id: dpiInput
+                        objectName: "projectDpiInput"
                         from: 1
                         to: 1200
                         value: 300
                         editable: true
                         Layout.fillWidth: true
-                        onValueModified: NewProject.dpi = value
+                        onValueModified: { NewProject.dpi = value; newProjectDialog.updateDimensionInputs() }
                     }
                     Label { text: qsTr("dpi"); color: KP.textMuted; font.pixelSize: KP.fontS }
                 }
@@ -199,6 +215,7 @@ Dialog {
                     spacing: KP.gapS
                     CheckBox {
                         id: transparentInput
+                        objectName: "projectTransparentInput"
                         text: qsTr("Transparent background")
                         checked: NewProject.transparentBackground
                         onCheckedChanged: NewProject.transparentBackground = checked
@@ -209,6 +226,7 @@ Dialog {
                     spacing: KP.gapS
                     enabled: !transparentInput.checked
                     Button {
+                        objectName: "projectBackgroundButton"
                         text: qsTr("Background colour…")
                         onClicked: backgroundPicker.open()
                     }
@@ -242,8 +260,8 @@ Dialog {
                     .arg(NewProject.widthPixels)
                     .arg(NewProject.heightPixels)
                     .arg(Math.round(NewProject.dpi))
-                    .arg(NewProject.widthInUnit("inches"), 0, 'f', 2)
-                    .arg(NewProject.heightInUnit("inches"), 0, 'f', 2)
+                    .arg(Number(NewProject.widthInUnit("inches")).toFixed(2))
+                    .arg(Number(NewProject.heightInUnit("inches")).toFixed(2))
                     color: KP.text
                     font.family: KP.fontMono
                     font.pixelSize: KP.fontS

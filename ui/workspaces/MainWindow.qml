@@ -506,6 +506,7 @@ ApplicationWindow {
     }
     Dialog {
         id: discardForNew
+        objectName: "discardForNewDialog"
         anchors.centerIn: parent
         modal: true
         title: qsTr("Discard unsaved changes?")
