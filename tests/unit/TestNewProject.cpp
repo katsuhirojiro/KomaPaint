@@ -98,10 +98,13 @@ void TestNewProject::validationRejectsInvalidInput()
     QVERIFY(!settings.isValid());
     QVERIFY(!settings.validationError().isEmpty());
 
-    // Zero dimensions are invalid.
+    // Zero dimensions are rejected without changing valid settings.
     settings.setName("Valid");
+    QVERIFY(settings.isValid());
     settings.setSizeInUnit("px", 0, 100);
-    QVERIFY(!settings.isValid());
+    QVERIFY(settings.isValid()); // invalid input is ignored, settings unchanged
+    QCOMPARE(settings.widthInches(), 8.5);
+    QCOMPARE(settings.widthPixels(), 2550);
 
     // Negative DPI is invalid.
     settings.setSizeInUnit("px", 100, 100);
