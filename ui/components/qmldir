@@ -6,3 +6,4 @@ ToolPalette 1.0 ToolPalette.qml
 PanelHeader 1.0 PanelHeader.qml
 CanvasWorkspace 1.0 CanvasWorkspace.qml
 StatusBar 1.0 StatusBar.qml
+NewProjectDialog 1.0 NewProjectDialog.qml

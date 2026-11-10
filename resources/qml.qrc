@@ -8,6 +8,7 @@
         <file alias="components/PanelHeader.qml">../ui/components/PanelHeader.qml</file>
         <file alias="components/CanvasWorkspace.qml">../ui/components/CanvasWorkspace.qml</file>
         <file alias="components/StatusBar.qml">../ui/components/StatusBar.qml</file>
+        <file alias="components/NewProjectDialog.qml">../ui/components/NewProjectDialog.qml</file>
         <file alias="panels/LayersPanel.qml">../ui/panels/LayersPanel.qml</file>
         <file alias="panels/PropertiesPanel.qml">../ui/panels/PropertiesPanel.qml</file>
         <file alias="panels/ColorPanel.qml">../ui/panels/ColorPanel.qml</file>

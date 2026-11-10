@@ -46,6 +46,17 @@ public:
     QString currentFile() const { return m_currentFile; }
 
     Q_INVOKABLE bool newDocument(int width, int height, bool transparent, const QColor& background);
+    // Creates a new illustration project from the New Project dialog: applies
+    // name, canvas dimensions, DPI and background, then replaces the current
+    // project cleanly (history cleared, previous document discarded). Returns
+    // false and leaves the current project untouched on invalid input.
+    Q_INVOKABLE bool newProject(const QString& name, int width, int height, bool transparent,
+                                const QString& backgroundColor, qreal dpi);
+    // Cleanly replaces the current document with another document: clears
+    // history, reconnects layer-deletion handling, clears the current file
+    // and emits documentChanged() / currentFileChanged(). The previous
+    // document is scheduled for deletion via deleteLater().
+    void replaceDocument(CanvasDocument* next);
     // Saves the current document. pathOrUrl may be a plain local path or a
     // file:// URL (as delivered by QML FileDialog). Empty path saves to the
     // current file when one is set. On failure the file on disk is untouched

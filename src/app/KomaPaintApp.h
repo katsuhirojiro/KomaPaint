@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/ApplicationConfig.h"
+#include "../core/NewProjectSettings.h"
 #include "../core/Settings.h"
 #include "PanelManager.h"
 #include "WorkspaceState.h"
@@ -40,6 +41,7 @@ private:
     QQmlApplicationEngine m_engine;
     ApplicationConfig     m_config;
     Settings              m_settings;
+    NewProjectSettings    m_newProject;
     PanelManager          m_panels;
     WorkspaceState        m_workspace;
     QQuickWindow*         m_window = nullptr;

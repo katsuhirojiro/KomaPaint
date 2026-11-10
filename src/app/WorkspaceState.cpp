@@ -1,5 +1,7 @@
 #include "WorkspaceState.h"
 
+#include <QColor>
+
 #include "FileAssociation.h"
 #include "../core/Settings.h"
 #include "../files/DocumentFile.h"
@@ -60,6 +62,18 @@ void WorkspaceState::associateWithKomaFiles()
 #endif
 }
 
+void WorkspaceState::replaceDocument(CanvasDocument* next)
+{
+    auto* previous = m_document;
+    m_history->clear(); // history references tiles of the document being replaced
+    m_document = next;
+    connectLayerDeletion(m_document);
+    m_currentFile.clear();
+    emit currentFileChanged();
+    emit documentChanged();
+    previous->deleteLater();
+}
+
 bool WorkspaceState::newDocument(int width, int height, bool transparent, const QColor& background)
 {
     if (m_history->strokeActive()) return false;
@@ -69,14 +83,25 @@ bool WorkspaceState::newDocument(int width, int height, bool transparent, const 
     next->setSize(QSize(width, height));
     next->setBackgroundColor(background);
     next->setTransparentBackground(transparent);
-    auto* previous = m_document;
-    m_history->clear();
-    m_document = next;
-    connectLayerDeletion(m_document);
-    m_currentFile.clear();
-    emit currentFileChanged();
-    emit documentChanged();
-    previous->deleteLater();
+    replaceDocument(next);
+    return true;
+}
+
+bool WorkspaceState::newProject(const QString& name, int width, int height, bool transparent,
+                                const QString& backgroundColor, qreal dpi)
+{
+    if (m_history->strokeActive()) return false;
+    if (name.trimmed().isEmpty()) return false;
+    QColor bgColor(backgroundColor);
+    if (!CanvasDocument::validSize(QSize(width, height)) || !bgColor.isValid()
+        || bgColor.alpha() != 255 || dpi <= 0) return false;
+    auto* next = new CanvasDocument(this);
+    next->setTitle(name.trimmed());
+    next->setSize(QSize(width, height));
+    next->setDpi(dpi);
+    next->setBackgroundColor(bgColor);
+    next->setTransparentBackground(transparent);
+    replaceDocument(next);
     return true;
 }
 
