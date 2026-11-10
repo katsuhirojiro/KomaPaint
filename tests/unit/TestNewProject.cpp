@@ -26,7 +26,7 @@ void TestNewProject::defaultPresetIsValid()
     QCOMPARE(settings.units(), QString("px"));
     QCOMPARE(settings.mode(), QString("Illustration"));
     QVERIFY(settings.transparentBackground());
-    QCOMPARE(settings.backgroundColor(), QString("white"));
+    QCOMPARE(settings.backgroundColor(), QString("#FFFFFF"));
 }
 
 void TestNewProject::unitConversionRoundTrip()
@@ -119,7 +119,7 @@ void TestNewProject::whiteAndTransparentBackgrounds()
     NewProjectSettings settings;
     settings.setTransparentBackground(true);
     QVERIFY(settings.transparentBackground());
-    QCOMPARE(settings.backgroundColor(), QString("white"));
+    QCOMPARE(settings.backgroundColor(), QString("#FFFFFF"));
 
     settings.setTransparentBackground(false);
     settings.setBackgroundColor("#123456");

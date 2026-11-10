@@ -229,7 +229,6 @@ Dialog {
             Button {
                 text: qsTr("OK")
                 enabled: NewProject.isValid()
-                default: true
                 onClicked: newProjectDialog.accept()
             }
         }
