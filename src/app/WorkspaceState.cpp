@@ -23,6 +23,7 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     m_timeline = new TimelineState(this);
     m_colors   = new ColorPalette(this);
     m_history  = new UndoStack(this);
+    m_creationService = new ProjectCreationService(this);
     connectLayerDeletion(m_document);
 }
 
@@ -104,43 +105,25 @@ bool WorkspaceState::newProject(const QString& name, int width, int height, bool
              << "name=" << name << "width=" << width << "height=" << height
              << "transparent=" << transparent << "bgColor=" << backgroundColor << "dpi=" << dpi;
 
-    if (m_history->strokeActive()) {
-        qDebug() << "[NewProject] REJECTED: stroke active";
-        return false;
-    }
-    if (name.trimmed().isEmpty()) {
-        qDebug() << "[NewProject] REJECTED: empty name";
-        return false;
-    }
-    QColor bgColor(backgroundColor);
-    if (!CanvasDocument::validSize(QSize(width, height))) {
-        qDebug() << "[NewProject] REJECTED: invalid size" << width << "x" << height;
-        return false;
-    }
-    if (!bgColor.isValid()) {
-        qDebug() << "[NewProject] REJECTED: invalid background color";
-        return false;
-    }
-    if (bgColor.alpha() != 255) {
-        qDebug() << "[NewProject] REJECTED: background color alpha != 255";
-        return false;
-    }
-    if (dpi <= 0) {
-        qDebug() << "[NewProject] REJECTED: dpi <= 0";
+    // Delegates validation and construction to the creation service so the
+    // current project is never left in a partially-constructed state.
+    auto* doc = m_creationService->createDocument(name, width, height, transparent,
+                                                  backgroundColor, dpi);
+    if (!doc) {
+        m_creationError = m_creationService->creationError();
+        qDebug() << "[NewProject] REJECTED:" << m_creationError;
+        emit creationErrorChanged();
         return false;
     }
 
-    auto* next = new CanvasDocument(this);
-    next->setTitle(name.trimmed());
-    next->setSize(QSize(width, height));
-    next->setDpi(dpi);
-    next->setBackgroundColor(bgColor);
-    next->setTransparentBackground(transparent);
-    qDebug() << "[NewProject] CanvasDocument created:" << next
-             << "size=" << next->width() << "x" << next->height()
-             << "dpi=" << next->dpi() << "transparent=" << next->hasTransparentBackground();
+    qDebug() << "[NewProject] CanvasDocument created:" << doc
+             << "size=" << doc->width() << "x" << doc->height()
+             << "dpi=" << doc->dpi() << "transparent=" << doc->hasTransparentBackground();
 
-    replaceDocument(next);
+    m_creationError = QString();
+    emit creationErrorChanged();
+
+    replaceDocument(doc);
     qDebug() << "[NewProject] replaceDocument done, returning true";
     return true;
 }

@@ -6,10 +6,9 @@ import "../themes"
 
 // New Project dialog — replaces the temporary "New Document" dialog.
 //
-// Presents the supported project creation modes (Illustration is the only
-// fully functional one; Comic Page / Multi-page Comic / Animation are
-// reserved and disabled) and collects the illustration settings: name,
-// canvas size in editable units, DPI and background.
+// Collects illustration creation settings (name, size, units, DPI, background)
+// and submits them to Workspace.newProject(). The dialog closes only after
+// successful project creation; failures are reported in the status banner.
 //
 // The canonical physical size lives in NewProject (inches), so switching
 // units never drifts; pixels are derived at the last moment via
@@ -20,29 +19,17 @@ Dialog {
     modal: true
     standardButtons: Dialog.NoButton
 
-    // Dialog sizes to contentItem's implicit size. All controls are laid out
-    // in a single ColumnLayout with no ScrollView, so nothing can collapse
-    // or be pushed off-screen by a fill-height child.
-    Layout.preferredWidth: 520
-    implicitHeight: 640
+    // Dialog sizes itself from contentItem's implicit size. All children have
+    // defined implicit sizes, so nothing can collapse or be pushed off-screen.
+    implicitWidth: 520
+    implicitHeight: 680
 
-    // Diagnostic log path: Documents/KomaPaint/NewProjectDiagnostic.log
+    // Diagnostic log: Documents/KomaPaint/NewProjectDiagnostic.log
     // Written by WorkspaceState::writeDiagnosticLog().
 
     onOpened: {
         Workspace.clearDiagnosticLog()
         Workspace.writeDiagnosticLog("=== New Project dialog opened ===")
-        Workspace.writeDiagnosticLog("name=" + NewProject.name)
-        Workspace.writeDiagnosticLog("units=" + NewProject.units)
-        Workspace.writeDiagnosticLog("widthInches=" + NewProject.widthInches)
-        Workspace.writeDiagnosticLog("heightInches=" + NewProject.heightInches)
-        Workspace.writeDiagnosticLog("widthPixels=" + NewProject.widthPixels)
-        Workspace.writeDiagnosticLog("heightPixels=" + NewProject.heightPixels)
-        Workspace.writeDiagnosticLog("dpi=" + NewProject.dpi)
-        Workspace.writeDiagnosticLog("transparent=" + NewProject.transparentBackground)
-        Workspace.writeDiagnosticLog("bgColor=" + NewProject.backgroundColor)
-        Workspace.writeDiagnosticLog("isValid=" + NewProject.isValid())
-        Workspace.writeDiagnosticLog("validationError=" + NewProject.validationError())
 
         NewProject.resetToDefaults()
         nameInput.text = NewProject.name
@@ -51,31 +38,38 @@ Dialog {
         heightInput.value = NewProject.heightInUnit(NewProject.units)
         dpiInput.value = NewProject.dpi
         transparentInput.checked = NewProject.transparentBackground
-        creationStatus.text = ""
+
+        creationStatus.text = qsTr("Ready to create project.")
         creationStatus.color = KP.textMuted
         summaryError.text = ""
 
-        Workspace.writeDiagnosticLog("=== After reset ===")
         Workspace.writeDiagnosticLog("name=" + NewProject.name)
+        Workspace.writeDiagnosticLog("units=" + NewProject.units)
         Workspace.writeDiagnosticLog("widthPixels=" + NewProject.widthPixels)
         Workspace.writeDiagnosticLog("heightPixels=" + NewProject.heightPixels)
         Workspace.writeDiagnosticLog("dpi=" + NewProject.dpi)
+        Workspace.writeDiagnosticLog("transparent=" + NewProject.transparentBackground)
+        Workspace.writeDiagnosticLog("bgColor=" + NewProject.backgroundColor)
         Workspace.writeDiagnosticLog("isValid=" + NewProject.isValid())
-        Workspace.writeDiagnosticLog("validationError=" + NewProject.validationError())
     }
 
-    // Confirm the workspace replaced the document and the viewport was notified.
+    // Reflect creation errors from the C++ service into the UI.
     Connections {
         target: Workspace
-        function onDocumentChanged() {
-            Workspace.writeDiagnosticLog("Workspace.documentChanged signal received")
-            creationStatus.text = qsTr("Document replaced — viewport notified.")
-            creationStatus.color = "#4caf50"
+        function onCreationErrorChanged() {
+            if (Workspace.creationError) {
+                creationStatus.text = qsTr("Creation failed: %1").arg(Workspace.creationError)
+                creationStatus.color = KP.error
+                summaryError.text = Workspace.creationError
+            } else {
+                creationStatus.text = qsTr("Ready to create project.")
+                creationStatus.color = KP.textMuted
+                summaryError.text = ""
+            }
         }
     }
 
     contentItem: ColumnLayout {
-        Layout.fillWidth: true
         spacing: KP.gapM
 
         // ------------------------------------------------------------- Modes
@@ -260,7 +254,6 @@ Dialog {
         }
 
         // ------------------------------------------------------------- Creation status
-        // Always visible area that reports the result of clicking Create.
         Rectangle {
             Layout.fillWidth: true
             color: "#2d2d2d"
@@ -293,7 +286,6 @@ Dialog {
 
         // ------------------------------------------------------------- Buttons
         RowLayout {
-            Layout.fillWidth: true
             spacing: KP.gapS
             Item { Layout.fillWidth: true }
             Button {
@@ -313,7 +305,6 @@ Dialog {
                     Workspace.writeDiagnosticLog("bgColor=" + NewProject.backgroundColor)
                     Workspace.writeDiagnosticLog("dpi=" + NewProject.dpi)
                     Workspace.writeDiagnosticLog("isValid=" + NewProject.isValid())
-                    Workspace.writeDiagnosticLog("validationError=" + NewProject.validationError())
 
                     creationStatus.text = qsTr("Creating project...")
                     creationStatus.color = KP.textMuted
@@ -333,9 +324,7 @@ Dialog {
                         newProjectDialog.accept()
                     } else {
                         Workspace.writeDiagnosticLog("Creation FAILED — dialog stays open")
-                        creationStatus.text = qsTr("Project creation failed. See diagnostic log.")
-                        creationStatus.color = KP.error
-                        summaryError.text = qsTr("Could not create the project.")
+                        // creationStatus is updated via onCreationErrorChanged
                     }
                 }
             }
@@ -345,7 +334,8 @@ Dialog {
                 onClicked: {
                     const path = Workspace.diagnosticLogPath()
                     Workspace.writeDiagnosticLog("Opening diagnostic log: " + path)
-                    Qt.openUrlExternally(path)
+                    const opened = Qt.openUrlExternally(path)
+                    Workspace.writeDiagnosticLog("Log opened: " + opened)
                 }
             }
         }

@@ -6,6 +6,7 @@
 #include "../color/ColorPalette.h"
 #include "../history/UndoStack.h"
 #include "../layers/LayerModel.h"
+#include "ProjectCreationService.h"
 
 #include <QObject>
 #include <QString>
@@ -49,9 +50,14 @@ public:
     // Creates a new illustration project from the New Project dialog: applies
     // name, canvas dimensions, DPI and background, then replaces the current
     // project cleanly (history cleared, previous document discarded). Returns
-    // false and leaves the current project untouched on invalid input.
+    // false and leaves the current project untouched on invalid input. The
+    // failure reason is available via creationError().
     Q_INVOKABLE bool newProject(const QString& name, int width, int height, bool transparent,
                                 const QString& backgroundColor, qreal dpi);
+    // Human-readable reason for the last failed project creation, empty on
+    // success. Notified via creationErrorChanged().
+    Q_PROPERTY(QString creationError READ creationError NOTIFY creationErrorChanged)
+    QString creationError() const { return m_creationError; }
     // Cleanly replaces the current document with another document: clears
     // history, reconnects layer-deletion handling, clears the current file
     // and emits documentChanged() / currentFileChanged(). The previous
@@ -90,6 +96,7 @@ signals:
     void activeToolChanged(const QString& tool);
     void zoomChanged(qreal zoom);
     void currentFileChanged();
+    void creationErrorChanged();
     void fileErrorOccurred(const QString& message);
     void fileAssociationCompleted(const QString& message, bool ok);
 
@@ -102,8 +109,10 @@ private:
     TimelineState*  m_timeline;
     ColorPalette*   m_colors;
     UndoStack*      m_history;
+    ProjectCreationService* m_creationService;
     QString         m_activeTool = QStringLiteral("brush");
     QString         m_currentFile;
+    QString         m_creationError;
     qreal           m_zoom       = 100.0;
 };
 
