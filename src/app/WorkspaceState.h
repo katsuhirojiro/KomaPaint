@@ -74,6 +74,12 @@ public:
     Q_INVOKABLE void zoomOut();
     Q_INVOKABLE void zoomFit();
     Q_INVOKABLE void resetZoom();
+    // Diagnostic logging for New Project troubleshooting. Appends a timestamped
+    // message to a log file in the user's Documents folder so it can be
+    // retrieved without a terminal. Returns the log file path.
+    Q_INVOKABLE QString diagnosticLogPath() const;
+    Q_INVOKABLE void writeDiagnosticLog(const QString& message);
+    Q_INVOKABLE void clearDiagnosticLog();
 
 public slots:
     void setActiveTool(const QString& tool);

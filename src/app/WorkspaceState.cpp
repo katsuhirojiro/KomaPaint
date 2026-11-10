@@ -2,6 +2,10 @@
 
 #include <QColor>
 #include <QDebug>
+#include <QDateTime>
+#include <QFile>
+#include <QStandardPaths>
+#include <QTextStream>
 
 #include "FileAssociation.h"
 #include "../core/Settings.h"
@@ -203,5 +207,28 @@ void WorkspaceState::zoomIn()  { setZoom(m_zoom * 1.25); }
 void WorkspaceState::zoomOut() { setZoom(m_zoom / 1.25); }
 void WorkspaceState::resetZoom() { setZoom(100.0); }
 void WorkspaceState::zoomFit()   { setZoom(100.0); /* will be screen-fit in later phase */ }
+
+QString WorkspaceState::diagnosticLogPath() const
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    return dir + QStringLiteral("/KomaPaint/NewProjectDiagnostic.log");
+}
+
+void WorkspaceState::writeDiagnosticLog(const QString& message)
+{
+    const QString path = diagnosticLogPath();
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Append)) return;
+    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd hh:mm:ss.zzz"));
+    QTextStream out(&file);
+    out << timestamp << QStringLiteral("  ") << message << Qt::endl;
+    file.close();
+}
+
+void WorkspaceState::clearDiagnosticLog()
+{
+    QFile file(diagnosticLogPath());
+    if (file.exists()) file.remove();
+}
 
 }  // namespace komapaint

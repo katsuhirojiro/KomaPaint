@@ -23,21 +23,30 @@ Dialog {
     standardButtons: Dialog.NoButton
 
     // Minimal implicit size so the dialog is large enough for all fields
-    // on typical Windows DPI settings. Content that exceeds this is
+    // at normal Windows DPI settings. Content that exceeds this is
     // scrollable; the button row stays pinned at the bottom.
     Layout.preferredWidth: 480
     implicitHeight: 520
 
-
+    // Log file is written to Documents/KomaPaint/NewProjectDiagnostic.log
+    // by WorkspaceState::writeDiagnosticLog(). Open it with the button below.
 
     onOpened: {
-        console.log("[NewProject] dialog opened")
+        Workspace.clearDiagnosticLog()
+        Workspace.writeDiagnosticLog("=== New Project dialog opened ===")
+        Workspace.writeDiagnosticLog("name=" + NewProject.name)
+        Workspace.writeDiagnosticLog("units=" + NewProject.units)
+        Workspace.writeDiagnosticLog("widthInches=" + NewProject.widthInches)
+        Workspace.writeDiagnosticLog("heightInches=" + NewProject.heightInches)
+        Workspace.writeDiagnosticLog("widthPixels=" + NewProject.widthPixels)
+        Workspace.writeDiagnosticLog("heightPixels=" + NewProject.heightPixels)
+        Workspace.writeDiagnosticLog("dpi=" + NewProject.dpi)
+        Workspace.writeDiagnosticLog("transparent=" + NewProject.transparentBackground)
+        Workspace.writeDiagnosticLog("bgColor=" + NewProject.backgroundColor)
+        Workspace.writeDiagnosticLog("isValid=" + NewProject.isValid())
+        Workspace.writeDiagnosticLog("validationError=" + NewProject.validationError())
+
         NewProject.resetToDefaults()
-        console.log("[NewProject] after reset: name=", NewProject.name, "units=", NewProject.units,
-                    "widthInches=", NewProject.widthInches, "heightInches=", NewProject.heightInches,
-                    "dpi=", NewProject.dpi, "transparent=", NewProject.transparentBackground,
-                    "bgColor=", NewProject.backgroundColor, "widthPixels=", NewProject.widthPixels,
-                    "heightPixels=", NewProject.heightPixels, "isValid=", NewProject.isValid())
         nameInput.text = NewProject.name
         unitCombo.currentIndex = NewProject.availableUnits().indexOf(NewProject.units)
         widthInput.value  = NewProject.widthInUnit(NewProject.units)
@@ -45,6 +54,25 @@ Dialog {
         dpiInput.value    = NewProject.dpi
         transparentInput.checked = NewProject.transparentBackground
         summaryError.text = ""
+        creationStatus.text = ""
+        creationStatus.color = KP.textMuted
+
+        Workspace.writeDiagnosticLog("=== After reset ===")
+        Workspace.writeDiagnosticLog("name=" + NewProject.name)
+        Workspace.writeDiagnosticLog("widthPixels=" + NewProject.widthPixels)
+        Workspace.writeDiagnosticLog("heightPixels=" + NewProject.heightPixels)
+        Workspace.writeDiagnosticLog("dpi=" + NewProject.dpi)
+        Workspace.writeDiagnosticLog("isValid=" + NewProject.isValid())
+        Workspace.writeDiagnosticLog("validationError=" + NewProject.validationError())
+    }
+
+    Connections {
+        target: Workspace
+        function onDocumentChanged() {
+            Workspace.writeDiagnosticLog("Workspace.documentChanged signal received")
+            creationStatus.text = qsTr("Document replaced — notifying viewport.")
+            creationStatus.color = KP.text
+        }
     }
 
     contentItem: ColumnLayout {
@@ -229,6 +257,36 @@ Dialog {
             }
         }
 
+        // ------------------------------------------------------------- Creation status (prominent)
+        Rectangle {
+            color: "#2d2d2d"
+            border.color: KP.border
+            radius: KP.radiusS
+            Layout.fillWidth: true
+            ColumnLayout {
+                anchors.leftMargin: KP.gapM
+                anchors.rightMargin: KP.gapM
+                anchors.topMargin: KP.gapS
+                anchors.bottomMargin: KP.gapS
+                spacing: KP.gapXS
+                Label {
+                    id: creationStatus
+                    text: ""
+                    color: KP.textMuted
+                    font.pixelSize: KP.fontS
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    text: qsTr("Log file: Documents/KomaPaint/NewProjectDiagnostic.log")
+                    color: KP.textMuted
+                    font.pixelSize: KP.fontXS
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+        }
+
         // ------------------------------------------------------------- Buttons (pinned at bottom)
         RowLayout {
             Layout.fillWidth: true
@@ -243,28 +301,47 @@ Dialog {
                 text: qsTr("OK")
                 enabled: NewProject.isValid()
                 onClicked: {
-                    console.log("[NewProject] OK clicked")
-                    console.log("[NewProject] name:", nameInput.text.trimmed())
-                    console.log("[NewProject] widthPixels:", NewProject.widthPixels)
-                    console.log("[NewProject] heightPixels:", NewProject.heightPixels)
-                    console.log("[NewProject] transparent:", NewProject.transparentBackground)
-                    console.log("[NewProject] backgroundColor:", NewProject.backgroundColor)
-                    console.log("[NewProject] dpi:", NewProject.dpi)
-                    console.log("[NewProject] isValid:", NewProject.isValid())
+                    Workspace.writeDiagnosticLog("=== OK button clicked ===")
+                    Workspace.writeDiagnosticLog("nameInput.text=" + nameInput.text.trimmed())
+                    Workspace.writeDiagnosticLog("NewProject.widthPixels=" + NewProject.widthPixels)
+                    Workspace.writeDiagnosticLog("NewProject.heightPixels=" + NewProject.heightPixels)
+                    Workspace.writeDiagnosticLog("NewProject.transparentBackground=" + NewProject.transparentBackground)
+                    Workspace.writeDiagnosticLog("NewProject.backgroundColor=" + NewProject.backgroundColor)
+                    Workspace.writeDiagnosticLog("NewProject.dpi=" + NewProject.dpi)
+                    Workspace.writeDiagnosticLog("NewProject.isValid=" + NewProject.isValid())
+                    Workspace.writeDiagnosticLog("NewProject.validationError=" + NewProject.validationError())
+
+                    creationStatus.text = qsTr("Calling Workspace.newProject()...")
+                    creationStatus.color = KP.textMuted
+
                     const ok = Workspace.newProject(nameInput.text.trimmed(),
                                                     NewProject.widthPixels,
                                                     NewProject.heightPixels,
                                                     NewProject.transparentBackground,
                                                     NewProject.backgroundColor,
                                                     NewProject.dpi)
-                    console.log("[NewProject] newProject returned:", ok)
+                    Workspace.writeDiagnosticLog("Workspace.newProject() returned: " + ok)
+
                     if (ok) {
-                        console.log("[NewProject] accepting dialog")
+                        Workspace.writeDiagnosticLog("Creation succeeded, accepting dialog")
+                        creationStatus.text = qsTr("Project created successfully. Closing dialog.")
+                        creationStatus.color = "#4caf50"
                         newProjectDialog.accept()
                     } else {
+                        Workspace.writeDiagnosticLog("Creation FAILED — dialog will NOT close")
+                        creationStatus.text = qsTr("Project creation failed. Check diagnostic log.")
+                        creationStatus.color = KP.error
                         summaryError.text = qsTr("Could not create the project.")
-                        console.log("[NewProject] creation failed, showing error")
                     }
+                }
+            }
+            Button {
+                text: qsTr("Open Diagnostic Log")
+                enabled: true
+                onClicked: {
+                    const path = Workspace.diagnosticLogPath()
+                    Workspace.writeDiagnosticLog("Opening diagnostic log: " + path)
+                    Qt.openUrlExternally(path)
                 }
             }
         }
