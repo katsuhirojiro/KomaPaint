@@ -293,6 +293,8 @@ jobs:
           # The windows QPA exercises the same window path as a real launch.
           $env:QT_QPA_PLATFORM = "windows"
           $exe = "$bin\komapaint.exe"
+          $env:KOMAPAINT_DIAGNOSTIC_LOG = Join-Path $env:RUNNER_TEMP "komapaint-startup.log"
+          Remove-Item $env:KOMAPAINT_DIAGNOSTIC_LOG -ErrorAction SilentlyContinue
 
           Write-Host "============================================"
           Write-Host "SMOKE TEST: launching komapaint.exe directly"
@@ -387,6 +389,16 @@ jobs:
               $exitedEarly = $true
               break
             }
+          }
+
+          if (Test-Path $env:KOMAPAINT_DIAGNOSTIC_LOG) {
+            Write-Host "--- Application startup diagnostics ---"
+            $diag = Get-Content $env:KOMAPAINT_DIAGNOSTIC_LOG -Raw
+            Write-Host $diag
+            $annot = $diag.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' || ')
+            Write-Host "::notice title=Packaged startup diagnostics::$annot"
+          } else {
+            Write-Host "::warning title=Packaged startup diagnostics::No application diagnostics were written."
           }
 
           if (-not $exitedEarly) {

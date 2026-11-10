@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QFile>
 #include <QMessageBox>
 #include <QQuickStyle>
 #include <QString>
@@ -59,6 +60,11 @@ void komaPaintMessageHandler(QtMsgType type, const QMessageLogContext& context,
     text += u'\n';
 
 #if defined(Q_OS_WIN)
+    const QString logPath = qEnvironmentVariable("KOMAPAINT_DIAGNOSTIC_LOG");
+    if (!logPath.isEmpty()) {
+        QFile log(logPath);
+        if (log.open(QIODevice::WriteOnly | QIODevice::Append)) log.write(text.toUtf8());
+    }
     OutputDebugStringW(text.toStdWString().c_str());
 #else
     const QByteArray utf8 = text.toLocal8Bit();
