@@ -89,6 +89,12 @@ int main() {
     for (int i = 0; i < 100; ++i) sum += encode(original, changed, n).payload.size();
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
     CHECK(sum == 1200);
+    t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < 100; ++i) {
+        auto replayed = apply(sample, original, true);
+        CHECK(replayed[3] == 0x80800000);
+    }
+    auto replayElapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0).count();
     const auto base = memory();
     std::vector<TileRecord> records; records.reserve(10000);
     for (int i = 0; i < 10000; ++i) records.push_back(sample);
@@ -97,7 +103,8 @@ int main() {
     auto afterMemory = memory();
     std::cout << "::notice title=Experimental compact codec::10000 copied one-pixel records payload capacity=" << payloadCapacity
               << " bytes; record vector capacity=" << records.capacity() * sizeof(TileRecord)
-              << " bytes; 100 encodes=" << elapsed << " us; process private before=" << base.privateBytes
+              << " bytes; 100 encodes=" << elapsed << " us; 100 forward decodes=" << replayElapsed
+              << " us; process private before=" << base.privateBytes
               << " after=" << afterMemory.privateBytes << "; working after=" << afterMemory.working
               << "; peak working=" << afterMemory.peak << "; prototype only, not UndoStack\n";
     std::cout << "Experimental tile codec tests passed\n";
