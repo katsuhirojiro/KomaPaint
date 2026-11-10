@@ -240,9 +240,10 @@ The application is an early alpha. The following are **not** implemented:
   reads and writes illustrations only.
 * Color picker HSB widget (the color panel is a placeholder).
 * Preferences dialog.
-* Welcome screen / new-document dialog (the New Document dialog is minimal:
-  size, background and transparent/white; the full New Project window with
-  units, DPI and comic/animation modes is not built yet).
+* Welcome screen / new-document dialog (*New Project* dialog is built:
+  project name, canvas size in px/mm/cm/inches, DPI, white or transparent
+  background, live summary; Comic Page, Multi-page Comic and Animation modes
+  are shown but disabled until implemented).
 * Cross-platform installer packaging, signed Windows binary, auto-update.
 * Physical tablet/stylus verification has not been done on real hardware.
 

@@ -42,6 +42,9 @@ komapaint_add_test(test_recent     TestRecentFiles.cpp)
 
 komapaint_add_test(test_document_creation TestDocumentCreation.cpp)
 target_link_libraries(test_document_creation PRIVATE komapaint::app)
+
+komapaint_add_test(test_new_project TestNewProject.cpp)
+target_link_libraries(test_new_project PRIVATE komapaint::app)
 komapaint_add_test(test_document_file TestDocumentFile.cpp)
 target_link_libraries(test_document_file PRIVATE komapaint::app komapaint::files Qt6::Widgets Qt6::Quick)
 komapaint_add_test(test_command_line TestCommandLine.cpp)
@@ -78,3 +81,7 @@ add_executable(test_brush_engine TestBrushEngine.cpp)
 target_link_libraries(test_brush_engine PRIVATE komapaint::drawing)
 set_target_properties(test_brush_engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_brush_engine COMMAND test_brush_engine)
+
+komapaint_add_test(test_project_workflow TestProjectWorkflow.cpp)
+target_sources(test_project_workflow PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_project_workflow PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)

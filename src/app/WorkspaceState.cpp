@@ -1,5 +1,12 @@
 #include "WorkspaceState.h"
 
+#include <QColor>
+#include <QDebug>
+#include <QDateTime>
+#include <QFile>
+#include <QStandardPaths>
+#include <QTextStream>
+
 #include "FileAssociation.h"
 #include "../core/Settings.h"
 #include "../files/DocumentFile.h"
@@ -16,6 +23,7 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     m_timeline = new TimelineState(this);
     m_colors   = new ColorPalette(this);
     m_history  = new UndoStack(this);
+    m_creationService = new ProjectCreationService(this);
     connectLayerDeletion(m_document);
 }
 
@@ -60,6 +68,23 @@ void WorkspaceState::associateWithKomaFiles()
 #endif
 }
 
+void WorkspaceState::replaceDocument(CanvasDocument* next)
+{
+    qDebug() << "[NewProject] replaceDocument() called:"
+             << "previous=" << m_document << "next=" << next;
+
+    auto* previous = m_document;
+    m_history->clear(); // history references tiles of the document being replaced
+    m_document = next;
+    connectLayerDeletion(m_document);
+    m_currentFile.clear();
+    emit currentFileChanged();
+    qDebug() << "[NewProject] replaceDocument: emitting documentChanged()";
+    emit documentChanged();
+    previous->deleteLater();
+    qDebug() << "[NewProject] replaceDocument: done";
+}
+
 bool WorkspaceState::newDocument(int width, int height, bool transparent, const QColor& background)
 {
     if (m_history->strokeActive()) return false;
@@ -69,14 +94,44 @@ bool WorkspaceState::newDocument(int width, int height, bool transparent, const 
     next->setSize(QSize(width, height));
     next->setBackgroundColor(background);
     next->setTransparentBackground(transparent);
-    auto* previous = m_document;
-    m_history->clear();
-    m_document = next;
-    connectLayerDeletion(m_document);
-    m_currentFile.clear();
-    emit currentFileChanged();
-    emit documentChanged();
-    previous->deleteLater();
+    replaceDocument(next);
+    return true;
+}
+
+bool WorkspaceState::newProject(const QString& name, int width, int height, bool transparent,
+                                const QString& backgroundColor, qreal dpi)
+{
+    qDebug() << "[NewProject] WorkspaceState::newProject() called:"
+             << "name=" << name << "width=" << width << "height=" << height
+             << "transparent=" << transparent << "bgColor=" << backgroundColor << "dpi=" << dpi;
+
+    if (m_history->strokeActive()) {
+        m_creationError = QStringLiteral("Finish or cancel the current stroke before creating a project.");
+        emit creationErrorChanged();
+        return false;
+    }
+
+    // Delegates validation and construction to the creation service so the
+    // current project is never left in a partially-constructed state.
+    auto* doc = m_creationService->createDocument(name, width, height, transparent,
+                                                  backgroundColor, dpi);
+    if (!doc) {
+        m_creationError = m_creationService->creationError();
+        qDebug() << "[NewProject] REJECTED:" << m_creationError;
+        emit creationErrorChanged();
+        return false;
+    }
+
+    qDebug() << "[NewProject] CanvasDocument created:" << doc
+             << "size=" << doc->width() << "x" << doc->height()
+             << "dpi=" << doc->dpi() << "transparent=" << doc->hasTransparentBackground();
+
+    m_creationError = QString();
+    emit creationErrorChanged();
+
+    doc->setParent(this);
+    replaceDocument(doc);
+    qDebug() << "[NewProject] replaceDocument done, returning true";
     return true;
 }
 
@@ -142,5 +197,28 @@ void WorkspaceState::zoomIn()  { setZoom(m_zoom * 1.25); }
 void WorkspaceState::zoomOut() { setZoom(m_zoom / 1.25); }
 void WorkspaceState::resetZoom() { setZoom(100.0); }
 void WorkspaceState::zoomFit()   { setZoom(100.0); /* will be screen-fit in later phase */ }
+
+QString WorkspaceState::diagnosticLogPath() const
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    return dir + QStringLiteral("/KomaPaint/NewProjectDiagnostic.log");
+}
+
+void WorkspaceState::writeDiagnosticLog(const QString& message)
+{
+    const QString path = diagnosticLogPath();
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Append)) return;
+    const QString timestamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd hh:mm:ss.zzz"));
+    QTextStream out(&file);
+    out << timestamp << QStringLiteral("  ") << message << Qt::endl;
+    file.close();
+}
+
+void WorkspaceState::clearDiagnosticLog()
+{
+    QFile file(diagnosticLogPath());
+    if (file.exists()) file.remove();
+}
 
 }  // namespace komapaint

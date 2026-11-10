@@ -7,6 +7,7 @@
 #include <QPainter>
 #include <QMutexLocker>
 #include <QTimer>
+#include <QDebug>
 #include <QtMath>
 #include <algorithm>
 #include <cmath>
@@ -29,8 +30,14 @@ void CanvasViewport::setHistory(QObject* object)
 QObject* CanvasViewport::document() const { return m_document.data(); }
 void CanvasViewport::setDocument(QObject* object)
 {
+    qDebug() << "[CanvasViewport] setDocument() called:"
+             << "object=" << object << "old m_document=" << m_document.data();
+
     auto* doc = qobject_cast<CanvasDocument*>(object);
-    if (m_document == doc) return;
+    if (m_document == doc) {
+        qDebug() << "[CanvasViewport] setDocument: same document, returning early";
+        return;
+    }
     if (m_document) {
         disconnect(m_document, nullptr, this, nullptr);
         disconnect(m_document->layers(), nullptr, this, nullptr);
@@ -42,9 +49,15 @@ void CanvasViewport::setDocument(QObject* object)
     m_invalidation.reset();
     m_cache.clear(); m_cacheBytes = 0;
     m_originInitialized = false;
+    qDebug() << "[CanvasViewport] setDocument: m_document updated to" << m_document.data()
+             << "m_originInitialized reset to false";
+
     if (doc) {
+        qDebug() << "[CanvasViewport] setDocument: connecting signals for new document"
+                 << "size=" << doc->width() << "x" << doc->height();
         connect(doc, &CanvasDocument::backgroundChanged, this, &CanvasViewport::invalidateAll);
         connect(doc, &CanvasDocument::sizeChanged, this, [this] {
+            qDebug() << "[CanvasViewport] sizeChanged signal received";
             m_invalidation.reset(); m_cache.clear(); m_cacheBytes = 0; invalidateAll();
         });
         connect(doc, &QObject::destroyed, this, [this] { m_document = nullptr; m_invalidation.reset(); invalidateAll(); });
@@ -56,8 +69,10 @@ void CanvasViewport::setDocument(QObject* object)
         connect(model, &QAbstractItemModel::modelReset, this, [this] { reconnectLayers(); invalidateAll(); });
         reconnectLayers();
     }
+    qDebug() << "[CanvasViewport] setDocument: emitting documentChanged(), calling invalidateAll()";
     emit documentChanged();
     invalidateAll();
+    qDebug() << "[CanvasViewport] setDocument: done";
 }
 void CanvasViewport::reconnectLayers()
 {
@@ -78,10 +93,12 @@ void CanvasViewport::schedule(const QRectF& region)
 }
 void CanvasViewport::changedTile(qint64 x, qint64 y)
 {
+    qDebug() << "[CanvasViewport] changedTile() tile=(" << x << "," << y << ")";
     if (!m_document) return;
     const qreal side = m_document->layers()->layerAt(0)->tiles().geometry().tileSize();
     const qreal scale = m_zoom / 100;
     QRectF rect(m_origin.x() + x * side * scale, m_origin.y() + y * side * scale, side * scale, side * scale);
+    qDebug() << "[CanvasViewport] changedTile: scheduling viewport rect" << rect;
     schedule(rect.adjusted(-2, -2, 2, 2));
 }
 void CanvasViewport::setZoom(qreal zoom)
@@ -115,11 +132,25 @@ QPointF CanvasViewport::viewportToDocument(qreal x, qreal y) const { return (QPo
 QPointF CanvasViewport::documentToViewport(qreal x, qreal y) const { return m_origin + QPointF(x, y) * (m_zoom / 100); }
 void CanvasViewport::fit()
 {
-    if (!m_document || width() <= 0 || height() <= 0) return;
+    qDebug() << "[CanvasViewport] fit() called:"
+             << "m_document=" << m_document.data() << "width=" << width() << "height=" << height();
+
+    if (!m_document) {
+        qDebug() << "[CanvasViewport] fit: no document, returning";
+        return;
+    }
+    if (width() <= 0 || height() <= 0) {
+        qDebug() << "[CanvasViewport] fit: viewport has zero size, returning";
+        return;
+    }
+
     m_zoom = qBound(6.25, 100 * std::min(width() / m_document->width(), height() / m_document->height()), 6400.0);
     m_origin = QPointF((width() - m_document->width() * m_zoom / 100) / 2, (height() - m_document->height() * m_zoom / 100) / 2);
     m_originInitialized = true;
+    qDebug() << "[CanvasViewport] fit: zoom=" << m_zoom << "origin=" << m_origin
+             << "docSize=" << m_document->width() << "x" << m_document->height();
     emit zoomChanged(); emit zoomRequested(m_zoom); invalidateAll();
+    qDebug() << "[CanvasViewport] fit: done";
 }
 void CanvasViewport::geometryChange(const QRectF& now, const QRectF& old)
 {
@@ -160,11 +191,35 @@ QImage CanvasViewport::composedTile(TilePoint tile, const std::vector<CompositeL
 }
 bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* settings, const QColor& color)
 {
+    qDebug() << "[CanvasViewport] beginStroke() called:"
+             << "viewport=(" << x << "," << y << ")" << "pressure=" << pressure
+             << "m_document=" << m_document.data();
+
     cancelStroke();
     auto* brush = qobject_cast<BrushSettings*>(settings);
-    if (!m_document || !m_history || !brush || !color.isValid()) return false;
+    if (!m_document) {
+        qDebug() << "[CanvasViewport] beginStroke: no document";
+        return false;
+    }
+    if (!m_history) {
+        qDebug() << "[CanvasViewport] beginStroke: no history";
+        return false;
+    }
+    if (!brush) {
+        qDebug() << "[CanvasViewport] beginStroke: no brush settings";
+        return false;
+    }
+    if (!color.isValid()) {
+        qDebug() << "[CanvasViewport] beginStroke: invalid color";
+        return false;
+    }
+
     auto* model = m_document->layers();
     auto* layer = model->layerAt(model->activeLayerIndex());
+    qDebug() << "[CanvasViewport] beginStroke: activeLayerIndex=" << model->activeLayerIndex()
+             << "layer=" << layer << "locked=" << (layer ? layer->isLocked() : true)
+             << "visible=" << (layer ? layer->isVisible() : true);
+
     if (!layer || layer->isLocked() || !layer->isVisible()) {
         emit strokeError(QStringLiteral("Select a visible, unlocked layer to paint."));
         return false;
@@ -182,18 +237,29 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
     catch (const std::bad_alloc&) { m_history->cancelStroke(); emit strokeError(QStringLiteral("Not enough memory to start a stroke.")); return false; }
     m_strokeLayer = layer;
     auto point = viewportToDocument(x, y);
+    qDebug() << "[CanvasViewport] beginStroke: viewport(" << x << "," << y << ") -> document("
+             << point.x() << "," << point.y() << ")";
     if (!m_stroke->begin({point.x(), point.y(), pressure})) {
         m_stroke.reset(); m_strokeLayer = nullptr; m_history->commitStroke();
         emit strokeError(QStringLiteral("Stroke stopped: history, memory or tile limit reached. Any paint applied can be undone.")); return false;
     }
+    qDebug() << "[CanvasViewport] beginStroke: stroke started on layer" << layer->name();
     return true;
 }
 void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
 {
-    if (!m_stroke || !m_strokeLayer || !m_document) { cancelStroke(); return; }
+    qDebug() << "[CanvasViewport] continueStroke() called:"
+             << "viewport=(" << x << "," << y << ")" << "pressure=" << pressure
+             << "m_stroke=" << (bool)m_stroke;
+
+    if (!m_stroke || !m_strokeLayer || !m_document) { qDebug() << "[CanvasViewport] continueStroke: no stroke/layer/document"; cancelStroke(); return; }
     if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
-        m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) { cancelStroke(); return; }
+        m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) {
+        qDebug() << "[CanvasViewport] continueStroke: layer changed or invalid";
+        cancelStroke(); return; }
     auto point = viewportToDocument(x, y);
+    qDebug() << "[CanvasViewport] continueStroke: viewport(" << x << "," << y << ") -> document("
+             << point.x() << "," << point.y() << ")";
     if (!m_stroke->extend({point.x(), point.y(), pressure})) {
         m_stroke.reset(); m_strokeLayer = nullptr; if (m_history) m_history->commitStroke();
         emit strokeError(QStringLiteral("Stroke stopped: history, memory or tile limit reached. Any paint applied can be undone."));
@@ -201,16 +267,23 @@ void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
 }
 void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
 {
-    if (!m_stroke || !m_strokeLayer || !m_document) { cancelStroke(); return; }
+    qDebug() << "[CanvasViewport] endStroke() called:"
+             << "viewport=(" << x << "," << y << ")" << "pressure=" << pressure;
+
+    if (!m_stroke || !m_strokeLayer || !m_document) { qDebug() << "[CanvasViewport] endStroke: no stroke/layer/document"; cancelStroke(); return; }
     if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
-        m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) { cancelStroke(); return; }
+        m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) {
+        qDebug() << "[CanvasViewport] endStroke: layer changed or invalid";
+        cancelStroke(); return; }
     auto point = viewportToDocument(x, y);
     const bool ok = m_stroke->end({point.x(), point.y(), pressure});
     m_stroke.reset(); m_strokeLayer = nullptr;
     if (m_history) m_history->commitStroke();
+    qDebug() << "[CanvasViewport] endStroke: stroke ended, ok=" << ok;
     if (!ok) emit strokeError(QStringLiteral("Stroke stopped: history, memory or tile limit reached. Any paint applied can be undone."));
 }
 void CanvasViewport::cancelStroke() {
+    qDebug() << "[CanvasViewport] cancelStroke() called";
     m_stroke.reset(); m_strokeLayer = nullptr;
     if (m_history && m_history->strokeActive()) m_history->cancelStroke();
 }
@@ -223,11 +296,20 @@ void CanvasViewport::paint(QPainter* painter)
 QImage CanvasViewport::frameSnapshot() const { QMutexLocker lock(&m_frameMutex); return m_frame; }
 void CanvasViewport::refreshNow()
 {
+    qDebug() << "[CanvasViewport] refreshNow() called:"
+             << "m_document=" << m_document.data()
+             << "m_originInitialized=" << m_originInitialized
+             << "zoom=" << m_zoom << "origin=" << m_origin
+             << "frameSize=" << m_frame.size();
+
     m_scheduled = false;
     QRectF dirty = m_pending;
     m_pending = {};
     const QSize frameSize(qCeil(width()), qCeil(height()));
-    if (frameSize.width() <= 0 || frameSize.height() <= 0) return;
+    if (frameSize.width() <= 0 || frameSize.height() <= 0) {
+        qDebug() << "[CanvasViewport] refreshNow: zero frame size, returning";
+        return;
+    }
     // Bound viewport memory independently of document size.
     if (static_cast<qint64>(frameSize.width()) * frameSize.height() > 32LL * 1024 * 1024) {
         qWarning("Canvas viewport too large to allocate safely"); return;
@@ -239,13 +321,18 @@ void CanvasViewport::refreshNow()
             if (next.isNull()) { qWarning("Canvas viewport allocation failed"); return; }
             m_frame = std::move(next);
             dirty = QRectF(QPointF(0, 0), QSizeF(frameSize));
+            qDebug() << "[CanvasViewport] refreshNow: reallocated frame to" << frameSize;
         }
-        if (dirty.isEmpty()) return;
+        if (dirty.isEmpty()) {
+            qDebug() << "[CanvasViewport] refreshNow: empty dirty region, returning";
+            return;
+        }
         if (m_document && !m_originInitialized) {
             m_origin = QPointF((width() - m_document->width() * m_zoom / 100) / 2,
                                (height() - m_document->height() * m_zoom / 100) / 2);
             m_originInitialized = true;
             dirty = QRectF(QPointF(0, 0), QSizeF(frameSize));
+            qDebug() << "[CanvasViewport] refreshNow: auto-centered origin=" << m_origin;
         }
         QPainter painter(&m_frame);
         painter.setClipRect(dirty);
@@ -255,7 +342,10 @@ void CanvasViewport::refreshNow()
             const auto background = m_document->hasTransparentBackground() ? 0U : m_document->backgroundColor().rgba();
             auto plan = m_invalidation.prepare(list, background);
             if (plan.invalidateAll) { m_cache.clear(); m_cacheBytes = 0; }
-            if (!m_invalidation.accept(plan, list, background)) return;
+            if (!m_invalidation.accept(plan, list, background)) {
+                qDebug() << "[CanvasViewport] refreshNow: invalidation accept failed";
+                return;
+            }
             for (const auto& tile : plan.tiles) {
                 auto it = m_cache.find(tile);
                 if (it != m_cache.end()) { m_cacheBytes -= it->second.bytes; m_cache.erase(it); }
@@ -280,6 +370,8 @@ void CanvasViewport::refreshNow()
                                    static_cast<std::int64_t>(std::ceil(qBound<qreal>(0, b.y(), m_document->height())))};
                 auto range = geometry.tilesForRect(requested);
                 if (range) {
+                    qDebug() << "[CanvasViewport] refreshNow: composing" << (range->last.y - range->first.y + 1)
+                             << "x" << (range->last.x - range->first.x + 1) << "tiles";
                     for (auto y = range->first.y; y <= range->last.y; ++y) {
                         for (auto x = range->first.x; x <= range->last.x; ++x) {
                             TilePoint tile{x, y};
@@ -301,5 +393,6 @@ void CanvasViewport::refreshNow()
         painter.end();
     } catch (const std::bad_alloc&) { qWarning("Canvas viewport allocation failed"); return; }
     update(dirty.toAlignedRect());
+    qDebug() << "[CanvasViewport] refreshNow: done, update scheduled for" << dirty.toAlignedRect();
 }
 } // namespace komapaint

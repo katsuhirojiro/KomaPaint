@@ -4,6 +4,7 @@
 #include "app/PanelManager.h"
 #include "core/ApplicationConfig.h"
 #include "core/Settings.h"
+#include "core/NewProjectSettings.h"
 #include <QQmlEngine>
 #include <QQmlContext>
 #include <QQmlComponent>
@@ -185,11 +186,13 @@ void TestCanvasViewport::actualWindowShortcuts()
     ApplicationConfig config;
     Settings settings(QStringLiteral("KomaPaintTests"), QStringLiteral("UndoWindow"));
     PanelManager panels;
+    NewProjectSettings newProject;
     QQmlEngine engine; engine.addImportPath(QStringLiteral("qrc:/"));
     engine.rootContext()->setContextProperty(QStringLiteral("Workspace"), &workspace);
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
     engine.rootContext()->setContextProperty(QStringLiteral("App"), &config);
     engine.rootContext()->setContextProperty(QStringLiteral("Panels"), &panels);
+    engine.rootContext()->setContextProperty(QStringLiteral("NewProject"), &newProject);
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/workspaces/MainWindow.qml")));
     QObject* object = component.create();
     QVERIFY2(object, qPrintable(component.errorString()));

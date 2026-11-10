@@ -6,6 +6,7 @@
 #include "../color/ColorPalette.h"
 #include "../history/UndoStack.h"
 #include "../layers/LayerModel.h"
+#include "ProjectCreationService.h"
 
 #include <QObject>
 #include <QString>
@@ -46,6 +47,22 @@ public:
     QString currentFile() const { return m_currentFile; }
 
     Q_INVOKABLE bool newDocument(int width, int height, bool transparent, const QColor& background);
+    // Creates a new illustration project from the New Project dialog: applies
+    // name, canvas dimensions, DPI and background, then replaces the current
+    // project cleanly (history cleared, previous document discarded). Returns
+    // false and leaves the current project untouched on invalid input. The
+    // failure reason is available via creationError().
+    Q_INVOKABLE bool newProject(const QString& name, int width, int height, bool transparent,
+                                const QString& backgroundColor, qreal dpi);
+    // Human-readable reason for the last failed project creation, empty on
+    // success. Notified via creationErrorChanged().
+    Q_PROPERTY(QString creationError READ creationError NOTIFY creationErrorChanged)
+    QString creationError() const { return m_creationError; }
+    // Cleanly replaces the current document with another document: clears
+    // history, reconnects layer-deletion handling, clears the current file
+    // and emits documentChanged() / currentFileChanged(). The previous
+    // document is scheduled for deletion via deleteLater().
+    void replaceDocument(CanvasDocument* next);
     // Saves the current document. pathOrUrl may be a plain local path or a
     // file:// URL (as delivered by QML FileDialog). Empty path saves to the
     // current file when one is set. On failure the file on disk is untouched
@@ -63,6 +80,12 @@ public:
     Q_INVOKABLE void zoomOut();
     Q_INVOKABLE void zoomFit();
     Q_INVOKABLE void resetZoom();
+    // Diagnostic logging for New Project troubleshooting. Appends a timestamped
+    // message to a log file in the user's Documents folder so it can be
+    // retrieved without a terminal. Returns the log file path.
+    Q_INVOKABLE QString diagnosticLogPath() const;
+    Q_INVOKABLE void writeDiagnosticLog(const QString& message);
+    Q_INVOKABLE void clearDiagnosticLog();
 
 public slots:
     void setActiveTool(const QString& tool);
@@ -73,6 +96,7 @@ signals:
     void activeToolChanged(const QString& tool);
     void zoomChanged(qreal zoom);
     void currentFileChanged();
+    void creationErrorChanged();
     void fileErrorOccurred(const QString& message);
     void fileAssociationCompleted(const QString& message, bool ok);
 
@@ -85,8 +109,10 @@ private:
     TimelineState*  m_timeline;
     ColorPalette*   m_colors;
     UndoStack*      m_history;
+    ProjectCreationService* m_creationService;
     QString         m_activeTool = QStringLiteral("brush");
     QString         m_currentFile;
+    QString         m_creationError;
     qreal           m_zoom       = 100.0;
 };
 

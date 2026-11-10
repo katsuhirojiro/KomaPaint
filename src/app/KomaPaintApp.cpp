@@ -39,10 +39,11 @@ void KomaPaintApp::loadStyles() {}
 void KomaPaintApp::loadUi()
 {
     auto* ctx = m_engine.rootContext();
-    ctx->setContextProperty(QStringLiteral("App"),       &m_config);
-    ctx->setContextProperty(QStringLiteral("Settings"),  &m_settings);
-    ctx->setContextProperty(QStringLiteral("Panels"),    &m_panels);
-    ctx->setContextProperty(QStringLiteral("Workspace"), &m_workspace);
+    ctx->setContextProperty("App",       &m_config);
+    ctx->setContextProperty("Settings",  &m_settings);
+    ctx->setContextProperty("Panels",    &m_panels);
+    ctx->setContextProperty("Workspace", &m_workspace);
+    ctx->setContextProperty("NewProject", &m_newProject);
 
     qInfo("[KomaPaint] loadUi(): setting up QML context properties");
 

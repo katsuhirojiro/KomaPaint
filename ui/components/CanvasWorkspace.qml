@@ -17,6 +17,15 @@ Rectangle {
         zoom: Workspace.zoom
         onZoomRequested: function(value) { Workspace.zoom = value }
         onStrokeError: function(message) { brushError.text = message; brushErrorDialog.open() }
+        // Fit each new document to the viewport immediately after setDocument()
+        // has updated m_document. Fitting here (not on Workspace.documentChanged)
+        // ensures fit() uses the new document's dimensions, not the old one.
+        Connections {
+            target: canvas
+            function onDocumentChanged() {
+                if (canvas.document) canvas.fit()
+            }
+        }
     }
     MouseArea {
         anchors.fill: parent

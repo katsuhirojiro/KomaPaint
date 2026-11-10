@@ -23,8 +23,9 @@ Item {
         spacing: 2
 
         ToolbarButton {
+            objectName: "newProjectToolbarButton"
             iconText: "N"
-            tooltip: "New document"
+            tooltip: "New project"
             onClicked: root.newDocumentRequested()
         }
         ToolbarButton {
