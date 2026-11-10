@@ -35,7 +35,7 @@ public:
     bool rollbackRecordedStroke(const std::vector<TileSnapshot>& before) noexcept;
     void commitRecordedStroke() noexcept;
     // All snapshots are applied atomically, or no pixels change.
-    WriteResult restoreTiles(const std::vector<TileSnapshot>& snapshots);
+    WriteResult restoreTiles(const std::vector<TileSnapshot>& snapshots, bool notify = true);
     std::size_t tileBytes() const { return m_tileBytes; }
     std::size_t pixelBudget() const { return m_pixelBudget; }
     // Attach only before artwork or a stroke exists. Standalone stores may

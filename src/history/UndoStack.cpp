@@ -122,15 +122,24 @@ void UndoStack::undo()
 {
     if (!canUndo()) return;
     auto& command = m_commands[m_cursor - 1];
-    if (!command->layer) { clear(); fail(QStringLiteral("A layer was removed; history was cleared.")); return; }
+    if (!command->layer) { fail(QStringLiteral("Cannot replay history because its layer was removed. History has been retained.")); return; }
     SparseTileStore::WriteResult result;
     {
         // The store prepares every tile, dirty region and insertion capacity
         // before mutation. Prevent synchronous callbacks from re-entering
         // history while artwork and cursor are being published.
         QScopedValueRollback<bool> guard(m_replaying, true);
-        result = command->layer->tiles().restoreTiles(command->before);
-        if (result == SparseTileStore::WriteResult::Changed) --m_cursor;
+        QPointer<Layer> layer = command->layer;
+        result = layer->tiles().restoreTiles(command->before, false);
+        if (result == SparseTileStore::WriteResult::Changed) {
+            --m_cursor;
+            // The store has returned before user callbacks can destroy its owner.
+            // Stop immediately if a synchronous listener removes the layer.
+            for (const auto& snapshot : command->before) {
+                if (!layer) break;
+                emit layer->artworkChanged(snapshot.tile.x, snapshot.tile.y);
+            }
+        }
     }
     if (result != SparseTileStore::WriteResult::Changed) {
         fail(QStringLiteral("Undo could not be completed due to memory, tile or tracking limits. Artwork and history were not changed.")); return;
@@ -141,12 +150,19 @@ void UndoStack::redo()
 {
     if (!canRedo()) return;
     auto& command = m_commands[m_cursor];
-    if (!command->layer) { clear(); fail(QStringLiteral("A layer was removed; history was cleared.")); return; }
+    if (!command->layer) { fail(QStringLiteral("Cannot replay history because its layer was removed. History has been retained.")); return; }
     SparseTileStore::WriteResult result;
     {
         QScopedValueRollback<bool> guard(m_replaying, true);
-        result = command->layer->tiles().restoreTiles(command->after);
-        if (result == SparseTileStore::WriteResult::Changed) ++m_cursor;
+        QPointer<Layer> layer = command->layer;
+        result = layer->tiles().restoreTiles(command->after, false);
+        if (result == SparseTileStore::WriteResult::Changed) {
+            ++m_cursor;
+            for (const auto& snapshot : command->after) {
+                if (!layer) break;
+                emit layer->artworkChanged(snapshot.tile.x, snapshot.tile.y);
+            }
+        }
     }
     if (result != SparseTileStore::WriteResult::Changed) {
         fail(QStringLiteral("Redo could not be completed due to memory, tile or tracking limits. Artwork and history were not changed.")); return;

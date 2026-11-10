@@ -145,7 +145,7 @@ SparseTileStore::WriteResult SparseTileStore::setPixelImpl(TilePoint point, std:
     } else if (m_callback) m_callback(m_callbackContext, a->tile);
     return WriteResult::Changed;
 }
-SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<TileSnapshot>& snapshots)
+SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<TileSnapshot>& snapshots, bool notify)
 {
     if (!isValid() || m_beforeChange || m_batchDepth || m_recordedStroke) return WriteResult::InvalidPixel;
     std::size_t stagedBytes = 0;
@@ -210,7 +210,7 @@ SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<Til
         }
         if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, replacedBytes);
         reservation.commitArtwork();
-        if (m_callback) for (const auto& snapshot : snapshots) m_callback(m_callbackContext, snapshot.tile);
+        if (notify && m_callback) for (const auto& snapshot : snapshots) m_callback(m_callbackContext, snapshot.tile);
         return WriteResult::Changed;
     } catch (const std::bad_alloc&) { return WriteResult::AllocationFailed; }
       catch (const std::length_error&) { return WriteResult::AllocationFailed; }

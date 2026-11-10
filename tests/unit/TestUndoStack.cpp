@@ -1,6 +1,7 @@
 #include <QtTest/QtTest>
 #include "history/UndoStack.h"
 #include "layers/Layer.h"
+#include "layers/LayerModel.h"
 #include "drawing/BrushEngine.h"
 using namespace komapaint;
 class TestUndoStack : public QObject {
@@ -12,6 +13,8 @@ private slots:
     void sharedHistoryBudget();
     void replayBudgetFailureAndRetry();
     void replayRejectsReentry();
+    void layerRemovedDuringReplay();
+    void accountingLifetimes();
 };
 static std::vector<std::uint32_t> snapshot(const SparseTileStore& s, TilePoint p) {
     auto pixels = s.tilePixels(p); return {pixels.begin(), pixels.end()};
@@ -215,6 +218,75 @@ void TestUndoStack::replayRejectsReentry()
     QCOMPARE(callbacks, 2);
     QVERIFY(history.canUndo()); QVERIFY(!history.canRedo());
     QCOMPARE(layer.tiles().pixel({1, 1}).value(), 0x80402010U);
+}
+
+
+void TestUndoStack::layerRemovedDuringReplay()
+{
+    for (bool redo : {false, true}) {
+        LayerModel model;
+        model.addLayer();
+        Layer* layer = model.layerAt(1);
+        Layer* other = model.layerAt(0);
+        auto budget = model.documentBudget();
+        UndoStack history;
+        QCOMPARE(other->tiles().setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+        QVERIFY(history.beginStroke(layer));
+        QCOMPARE(layer->tiles().setPixel({1, 1}, 0xff123456U), SparseTileStore::WriteResult::Changed);
+        QCOMPARE(layer->tiles().setPixel({257, 1}, 0x80800000U), SparseTileStore::WriteResult::Changed);
+        QVERIFY(history.commitStroke());
+        if (redo) history.undo();
+        QPointer<Layer> observed = layer;
+        int callbacks = 0;
+        connect(layer, &Layer::artworkChanged, &history, [&] {
+            ++callbacks;
+            model.removeLayer(1);
+        });
+        if (redo) history.redo(); else history.undo();
+        QVERIFY(!observed);
+        QCOMPARE(callbacks, 1); // do not access the deleted store for the next tile
+        QCOMPARE(model.rowCount(), 1);
+        QCOMPARE(other->tiles().pixel({1, 1}).value(), 0x80402010U);
+        QCOMPARE(budget->artworkBytes(), other->tiles().tileBytes());
+        QCOMPARE(budget->stagingBytes(), size_t(0));
+        const auto historyBytes = history.memoryBytes();
+        QSignalSpy errors(&history, &UndoStack::errorOccurred);
+        if (redo) { QVERIFY(history.canUndo()); history.undo(); }
+        else { QVERIFY(history.canRedo()); history.redo(); }
+        QCOMPARE(errors.size(), 1);
+        QCOMPARE(history.memoryBytes(), historyBytes); // missing target does not erase history
+        if (redo) QVERIFY(history.canUndo()); else QVERIFY(history.canRedo());
+        history.clear();
+        QCOMPARE(budget->historyBytes(), size_t(0));
+    }
+}
+
+void TestUndoStack::accountingLifetimes()
+{
+    auto budget = std::make_shared<DocumentMemoryBudget>();
+    const std::size_t tile = 256U * 256U * 4U;
+    {
+        Layer layer;
+        QVERIFY(layer.tiles().setDocumentBudget(budget));
+        {
+            UndoStack history;
+            QVERIFY(history.beginStroke(&layer));
+            QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+            QVERIFY(history.commitStroke());
+            QCOMPARE(budget->artworkBytes(), tile);
+            QCOMPARE(budget->historyBytes(), tile);
+            history.undo();
+            QCOMPARE(budget->artworkBytes(), size_t(0));
+            QCOMPARE(budget->historyBytes(), tile);
+            history.redo();
+            QCOMPARE(budget->artworkBytes(), tile);
+            QCOMPARE(budget->stagingBytes(), size_t(0));
+        }
+        QCOMPARE(budget->historyBytes(), size_t(0));
+        QCOMPARE(budget->artworkBytes(), tile);
+    }
+    QCOMPARE(budget->usedBytes(), size_t(0));
+    QVERIFY(budget->peakBytes() >= 2 * tile);
 }
 
 QTEST_APPLESS_MAIN(TestUndoStack)
