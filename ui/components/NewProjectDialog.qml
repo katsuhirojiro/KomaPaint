@@ -83,7 +83,7 @@ Dialog {
         }
 
         // ------------------------------------------------------------- Illustration settings (scrollable)
-            ScrollView {
+        ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -94,15 +94,14 @@ Dialog {
 
                 Rectangle {
                     Layout.fillWidth: true
+                    Layout.leftMargin: KP.gapM
+                    Layout.rightMargin: KP.gapM
+                    Layout.topMargin: KP.gapM
+                    Layout.bottomMargin: KP.gapM
                     color: KP.paneBgAlt
                     border.color: KP.border
                     radius: KP.radiusS
                     ColumnLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: KP.gapM
-                        anchors.rightMargin: KP.gapM
-                        anchors.topMargin: KP.gapM
-                        anchors.bottomMargin: KP.gapM
                         spacing: KP.gapM
 
                         TextField {
