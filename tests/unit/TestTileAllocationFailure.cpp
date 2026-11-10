@@ -22,6 +22,8 @@ int main() {
     int failures = 0;
     for (int n = 0; n < 8; ++n) {
         SparseTileStore store(8, 8, 4);
+        auto budget = std::make_shared<DocumentMemoryBudget>();
+        CHECK(store.setDocumentBudget(budget));
         failAfter = n;
         auto result = store.setPixel({0, 0}, 0xffffffffU);
         failAfter = -1;
@@ -31,6 +33,8 @@ int main() {
             CHECK(store.pixel({0, 0}) == 0U);
             CHECK(store.dirtyRegions().empty());
         } else CHECK(result == SparseTileStore::WriteResult::Changed);
+        CHECK(budget->artworkBytes() == store.allocatedPixelBytes());
+        CHECK(budget->stagingBytes() == 0);
     }
     CHECK(failures >= 3);
     SparseTileStore store(8, 8, 4);
@@ -44,20 +48,27 @@ int main() {
     CHECK(store.pixel({1, 0}) == 0U);
     CHECK(store.dirtyRegions().empty());
     SparseTileStore capture(8, 8, 4);
+    auto captureBudget = std::make_shared<DocumentMemoryBudget>();
+    CHECK(capture.setDocumentBudget(captureBudget));
     CHECK(capture.setPixel({0, 0}, 0xff123456U) == SparseTileStore::WriteResult::Changed);
     capture.setBeforeChange(rejectCapture, nullptr);
     CHECK(capture.setPixel({0, 0}, 0xff000000U) == SparseTileStore::WriteResult::HistoryLimit);
     CHECK(capture.pixel({0, 0}) == 0xff123456U);
     CHECK(capture.setPixel({4, 0}, 0xffffffffU) == SparseTileStore::WriteResult::HistoryLimit);
     CHECK(capture.allocatedTiles() == 1);
+    CHECK(captureBudget->artworkBytes() == capture.allocatedPixelBytes());
     capture.setBeforeChange(failCapture, nullptr);
     CHECK(capture.setPixel({0, 0}, 0xff000000U) == SparseTileStore::WriteResult::HistoryAllocationFailed);
     CHECK(capture.pixel({0, 0}) == 0xff123456U);
     CHECK(capture.setPixel({4, 0}, 0xffffffffU) == SparseTileStore::WriteResult::HistoryAllocationFailed);
     CHECK(capture.allocatedTiles() == 1);
+    CHECK(captureBudget->artworkBytes() == capture.allocatedPixelBytes());
+    CHECK(captureBudget->stagingBytes() == 0);
     int restoreFailures = 0;
     for (int n = 0; n < 16; ++n) {
         SparseTileStore s(8, 8, 4);
+        auto budget = std::make_shared<DocumentMemoryBudget>();
+        CHECK(s.setDocumentBudget(budget));
         CHECK(s.setPixel({0, 0}, 0xffffffffU) == SparseTileStore::WriteResult::Changed);
         CHECK(s.setPixel({4, 0}, 0xff112233U) == SparseTileStore::WriteResult::Changed);
         std::vector<SparseTileStore::TileSnapshot> snapshots{{{0, 0}, {}}, {{1, 0}, std::vector<std::uint32_t>(16, 0xff00ff00U)}};
@@ -72,6 +83,8 @@ int main() {
             CHECK(s.pixel({0, 0}) == 0U);
             CHECK(s.pixel({4, 0}) == 0xff00ff00U);
         }
+        CHECK(budget->artworkBytes() == s.allocatedPixelBytes());
+        CHECK(budget->stagingBytes() == 0);
     }
     CHECK(restoreFailures >= 3);
     std::cout << "Allocation failure tests passed\n";

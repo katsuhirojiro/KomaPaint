@@ -1,5 +1,5 @@
 # Low-level tile data is independent of layers, document and UI.
-add_library(komapaint_tile_data STATIC TileGeometry.h TileGeometry.cpp SparseTileStore.h SparseTileStore.cpp DirtyTileTracker.h DirtyTileTracker.cpp CpuTileCompositor.h CpuTileCompositor.cpp)
+add_library(komapaint_tile_data STATIC DocumentMemoryBudget.h TileGeometry.h TileGeometry.cpp SparseTileStore.h SparseTileStore.cpp DirtyTileTracker.h DirtyTileTracker.cpp CpuTileCompositor.h CpuTileCompositor.cpp)
 target_include_directories(komapaint_tile_data PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 add_library(komapaint::tile_data ALIAS komapaint_tile_data)
 

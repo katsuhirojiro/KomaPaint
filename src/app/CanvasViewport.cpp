@@ -206,6 +206,7 @@ void CanvasViewport::reportStrokeFailure(SparseTileStore::WriteResult reason, bo
             .arg(tileBytes / (1024.0 * 1024.0), 0, 'f', 1)
             .arg(tileBudget / (1024.0 * 1024.0), 0, 'f', 1);
         break;
+    case R::DocumentMemoryLimit: detail = QStringLiteral("Document pixel storage capacity was reached."); break;
     case R::TrackingLimit: detail = QStringLiteral("Tile change tracking capacity was reached."); break;
     case R::AllocationFailed: detail = QStringLiteral("Memory allocation for artwork or tile tracking failed."); break;
     case R::InvalidPixel: detail = QStringLiteral("The brush received invalid settings or input."); break;

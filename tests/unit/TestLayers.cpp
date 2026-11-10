@@ -13,6 +13,7 @@ private slots:
     void addLayer();
     void removeLayerPreservesOne();
     void activeLayerClamps();
+    void sharesDocumentBudget();
 };
 
 void TestLayers::startsWithOneLayer()
@@ -47,6 +48,24 @@ void TestLayers::activeLayerClamps()
     model.setActiveLayerIndex(2);
     model.removeLayer(2);
     QCOMPARE(model.activeLayerIndex(), 1);
+}
+
+void TestLayers::sharesDocumentBudget()
+{
+    LayerModel model;
+    model.addLayer();
+    auto budget = model.documentBudget();
+    const auto tile = model.layerAt(0)->tiles().tileBytes();
+    QVERIFY(budget->setLimit(2 * tile));
+    QVERIFY(model.layerAt(0)->tiles().documentBudget() == budget);
+    QVERIFY(model.layerAt(1)->tiles().documentBudget() == budget);
+    QCOMPARE(model.layerAt(0)->tiles().setPixel({0, 0}, 0xff123456U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(model.layerAt(1)->tiles().setPixel({0, 0}, 0xffabcdefU), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(budget->artworkBytes(), 2 * tile);
+    QCOMPARE(model.layerAt(1)->tiles().setPixel({256, 0}, 0xff000000U), SparseTileStore::WriteResult::DocumentMemoryLimit);
+    model.removeLayer(1);
+    QCOMPARE(budget->artworkBytes(), tile);
+    QCOMPARE(model.layerAt(0)->tiles().setPixel({256, 0}, 0xff000000U), SparseTileStore::WriteResult::Changed);
 }
 
 QTEST_APPLESS_MAIN(TestLayers)

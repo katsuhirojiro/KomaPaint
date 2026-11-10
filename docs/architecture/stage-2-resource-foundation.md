@@ -1,0 +1,15 @@
+# Stage 2: document pixel-budget foundation
+
+Status: **in progress; not the complete shared-memory manager or atomic-stroke implementation**. This increment introduces a per-document shared accounting object for layer tile pixel buffers and temporary `restoreTiles` copies. It does not change the `.koma` format, brush rasterization, history representation or public undo interface.
+
+## What is covered
+
+Each `LayerModel` owns a shared `DocumentMemoryBudget`; its initial and newly created layers attach the same object before allocation. Individual document instances do not share it. `SparseTileStore` reserves a tile's pixel bytes before allocating it, releases reservations on rejected capture, dirty-tracking or allocation failures, and releases them on tile reclamation and destruction. `restoreTiles` reserves all incoming pixel-copy staging before allocating, keeps original tiles charged until commit, converts the staging reservation to artwork after commit, and releases it on validation/allocation failures. Original artwork and accounting remain unchanged if staging fails. Deleted layers release their pixel charges. Budget changes below current use are rejected.
+
+The shared object exposes artwork, staging, current and high-water bytes to C++ callers. Standalone stores remain usable without a document budget. Both the object and stores are restricted to the document thread; they are not an allocator or process memory meter. Only tile pixel buffers are charged using the logical full-tile byte size. Container capacity, allocator/Qt overhead, viewport/composite caches, undo snapshots, temporary file buffers and other allocations are **not yet covered**. `restoreTiles` may reject an operation whose final pixel size fits when insufficient headroom exists to stage it; that is intentional for its atomic restore guarantee. Current undo/redo still allocates and can fail safely without changing its cursor.
+
+## Transition and limitations
+
+To avoid introducing an arbitrary new ceiling or breaking existing workflows before the complete accounting and settings exist, the document budget is initially **unlimited** (`size_t` maximum). Existing 256 MiB per-layer and 64 MiB history safeguards remain active. Tests explicitly configure small shared limits to exercise cross-layer enforcement. This does **not** enforce a comprehensive document-wide limit in the application and does not deliver effectively unrestricted history. A process-level coordinator, realistic OS-aware limits and preferences, history/cache/temporary accounting, and an emergency replay reserve are still required. The current stroke path may retain an undoable partial stroke when a failure occurs; do not claim atomic strokes until a no-allocation rollback transaction is designed, implemented and fault-injection tested.
+
+The new `DocumentMemoryLimit` failure distinguishes a shared pixel-budget refusal from a per-layer limit. Currently the user-facing message identifies the category; it does not claim total process memory is exhausted. Preservation of existing New Project, brush, undo and file workflows is a release gate for every increment.

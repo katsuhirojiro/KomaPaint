@@ -5,6 +5,7 @@ namespace komapaint {
 LayerModel::LayerModel(QObject* parent) : QAbstractListModel(parent)
 {
     auto* l = new Layer(QStringLiteral("Layer 1"), this);
+    l->tiles().setDocumentBudget(m_documentBudget);
     l->setIndex(0);
     m_layers.append(l);
     connect(l, &Layer::nameChanged,       this, [this,l]{ onLayerChanged(l, {NameRole}); });
@@ -77,6 +78,7 @@ void LayerModel::addLayer()
     const int row = m_layers.size();
     beginInsertRows({}, row, row);
     auto* l = new Layer(QString("Layer %1").arg(row + 1), this);
+    l->tiles().setDocumentBudget(m_documentBudget);
     l->tiles().resizeEmpty(m_canvasSize.width(), m_canvasSize.height());
     l->setIndex(row);
     connect(l, &Layer::nameChanged,       this, [this,l]{ onLayerChanged(l, {NameRole}); });

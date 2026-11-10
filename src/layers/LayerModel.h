@@ -28,6 +28,7 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     bool resizeEmptyLayers(const QSize& size);
+    std::shared_ptr<DocumentMemoryBudget> documentBudget() const noexcept { return m_documentBudget; }
     Q_INVOKABLE Layer* layerAt(int row) const;
     Q_INVOKABLE int    activeLayerIndex() const { return m_active; }
     Q_INVOKABLE void   setActiveLayerIndex(int row);
@@ -42,6 +43,7 @@ signals:
 private:
     void onLayerChanged(Layer* layer, const QList<int>& roles);
 
+    std::shared_ptr<DocumentMemoryBudget> m_documentBudget = std::make_shared<DocumentMemoryBudget>();
     QSize m_canvasSize{1600, 1200};
     QList<Layer*> m_layers;
     int           m_active = 0;

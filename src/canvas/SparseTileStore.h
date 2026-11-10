@@ -1,9 +1,11 @@
 #pragma once
 #include "TileGeometry.h"
 #include "DirtyTileTracker.h"
+#include "DocumentMemoryBudget.h"
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <memory>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -14,11 +16,12 @@ namespace komapaint {
 // This low-level store is not an editing transaction or undo mechanism.
 class SparseTileStore {
 public:
-    enum class WriteResult { Changed, Unchanged, OutOfBounds, InvalidPixel, MemoryLimit, TrackingLimit, HistoryLimit, HistoryAllocationFailed, AllocationFailed };
+    enum class WriteResult { Changed, Unchanged, OutOfBounds, InvalidPixel, MemoryLimit, DocumentMemoryLimit, TrackingLimit, HistoryLimit, HistoryAllocationFailed, AllocationFailed };
     static constexpr std::size_t DefaultPixelBudget = 256U * 1024U * 1024U;
     SparseTileStore(std::int64_t width, std::int64_t height,
                     int tileSize = TileGeometry::DefaultTileSize,
                     std::size_t pixelBudget = DefaultPixelBudget);
+    ~SparseTileStore();
     SparseTileStore(const SparseTileStore&) = delete;
     SparseTileStore& operator=(const SparseTileStore&) = delete;
     struct TileSnapshot { TilePoint tile; std::vector<std::uint32_t> pixels; }; // empty pixels = absent
@@ -29,6 +32,10 @@ public:
     WriteResult restoreTiles(const std::vector<TileSnapshot>& snapshots);
     std::size_t tileBytes() const { return m_tileBytes; }
     std::size_t pixelBudget() const { return m_pixelBudget; }
+    // Attach only before artwork or a stroke exists. Standalone stores may
+    // continue without a document budget.
+    bool setDocumentBudget(std::shared_ptr<DocumentMemoryBudget> budget) noexcept;
+    std::shared_ptr<DocumentMemoryBudget> documentBudget() const noexcept { return m_documentBudget; }
     using ChangeCallback = void (*)(void*, TilePoint) noexcept;
     void setChangeCallback(ChangeCallback callback, void* context) noexcept { m_callback = callback; m_callbackContext = context; }
     bool isValid() const { return m_geometry.isValid() && m_tileSizeValid; }
@@ -66,6 +73,7 @@ private:
     bool m_tileSizeValid;
     std::size_t m_tileBytes;
     std::size_t m_pixelBudget;
+    std::shared_ptr<DocumentMemoryBudget> m_documentBudget;
     std::unordered_map<TilePoint, Tile, Hash> m_tiles;
 };
 } // namespace komapaint
