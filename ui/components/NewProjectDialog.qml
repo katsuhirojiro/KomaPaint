@@ -83,13 +83,10 @@ Dialog {
         }
 
         // ------------------------------------------------------------- Illustration settings (scrollable)
-        ScrollView {
+            ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            flickableDirection: Flickable.VerticalFlick
-            contentWidth: width
-            contentHeight: settingsColumn.implicitHeight
             ColumnLayout {
                 id: settingsColumn
                 width: parent.width
