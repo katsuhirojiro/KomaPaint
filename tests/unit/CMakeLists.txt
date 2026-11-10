@@ -85,3 +85,7 @@ add_test(NAME test_brush_engine COMMAND test_brush_engine)
 komapaint_add_test(test_project_workflow TestProjectWorkflow.cpp)
 target_sources(test_project_workflow PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
 target_link_libraries(test_project_workflow PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
+
+# Non-production reproducible measurement of the existing history budget.
+komapaint_add_test(test_history_audit TestHistoryAudit.cpp)
+target_link_libraries(test_history_audit PRIVATE komapaint::drawing)
