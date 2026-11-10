@@ -31,7 +31,13 @@ Dialog {
 
 
     onOpened: {
+        console.log("[NewProject] dialog opened")
         NewProject.resetToDefaults()
+        console.log("[NewProject] after reset: name=", NewProject.name, "units=", NewProject.units,
+                    "widthInches=", NewProject.widthInches, "heightInches=", NewProject.heightInches,
+                    "dpi=", NewProject.dpi, "transparent=", NewProject.transparentBackground,
+                    "bgColor=", NewProject.backgroundColor, "widthPixels=", NewProject.widthPixels,
+                    "heightPixels=", NewProject.heightPixels, "isValid=", NewProject.isValid())
         nameInput.text = NewProject.name
         unitCombo.currentIndex = NewProject.availableUnits().indexOf(NewProject.units)
         widthInput.value  = NewProject.widthInUnit(NewProject.units)
@@ -237,16 +243,27 @@ Dialog {
                 text: qsTr("OK")
                 enabled: NewProject.isValid()
                 onClicked: {
+                    console.log("[NewProject] OK clicked")
+                    console.log("[NewProject] name:", nameInput.text.trimmed())
+                    console.log("[NewProject] widthPixels:", NewProject.widthPixels)
+                    console.log("[NewProject] heightPixels:", NewProject.heightPixels)
+                    console.log("[NewProject] transparent:", NewProject.transparentBackground)
+                    console.log("[NewProject] backgroundColor:", NewProject.backgroundColor)
+                    console.log("[NewProject] dpi:", NewProject.dpi)
+                    console.log("[NewProject] isValid:", NewProject.isValid())
                     const ok = Workspace.newProject(nameInput.text.trimmed(),
                                                     NewProject.widthPixels,
                                                     NewProject.heightPixels,
                                                     NewProject.transparentBackground,
                                                     NewProject.backgroundColor,
                                                     NewProject.dpi)
+                    console.log("[NewProject] newProject returned:", ok)
                     if (ok) {
+                        console.log("[NewProject] accepting dialog")
                         newProjectDialog.accept()
                     } else {
                         summaryError.text = qsTr("Could not create the project.")
+                        console.log("[NewProject] creation failed, showing error")
                     }
                 }
             }
