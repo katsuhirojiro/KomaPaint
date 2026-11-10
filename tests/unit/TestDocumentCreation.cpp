@@ -16,10 +16,14 @@ void TestDocumentCreation::createsIndependentDocument()
 {
     WorkspaceState workspace;
     auto* old = workspace.document();
+    auto oldBudget = old->layers()->documentBudget();
     workspace.layers()->addLayer();
     QVERIFY(workspace.history()->beginStroke(workspace.layers()->layerAt(0)));
     workspace.layers()->layerAt(0)->tiles().setPixel({0, 0}, 0xffffffffU);
     QVERIFY(workspace.history()->commitStroke());
+    const auto tileBytes = workspace.layers()->layerAt(0)->tiles().tileBytes();
+    QCOMPARE(oldBudget->artworkBytes(), tileBytes);
+    QCOMPARE(oldBudget->historyBytes(), tileBytes);
     QSignalSpy changed(&workspace, &WorkspaceState::documentChanged);
     QVERIFY(workspace.newDocument(321, 654, false, QColor("#123456")));
     QCOMPARE(changed.count(), 1);
@@ -30,6 +34,12 @@ void TestDocumentCreation::createsIndependentDocument()
     QCOMPARE(workspace.layers(), workspace.document()->layers());
     QCOMPARE(workspace.layers()->rowCount(), 1);
     QVERIFY(!workspace.history()->canUndo());
+    QCOMPARE(oldBudget->historyBytes(), size_t(0));
+    QCOMPARE(oldBudget->artworkBytes(), tileBytes); // old document awaits deletion
+    QVERIFY(workspace.layers()->documentBudget() != oldBudget);
+    // QTEST_APPLESS_MAIN has no event loop to deliver DeferredDelete.
+    delete old;
+    QCOMPARE(oldBudget->usedBytes(), size_t(0));
     QVERIFY(workspace.newDocument(1, CanvasDocument::MaxDimension, true, Qt::white));
     QVERIFY(workspace.document()->hasTransparentBackground());
 }
