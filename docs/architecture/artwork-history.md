@@ -11,10 +11,11 @@ Undo and redo stage all replacement tiles and dirty invalidations before
 committing any pixel changes. If staging, tracking or a layer pixel budget fails,
 artwork and the history cursor remain unchanged and the user is notified. Tile
 notifications invalidate the viewport after commit. A stroke may hit the
-history or tile limit after applying earlier pixels: those pixels remain as one
-undoable command and the user is notified. If cancellation cannot be staged,
-the partial stroke is likewise kept as an undoable command instead of silently
-losing its history. Painting is not atomic as a whole; undo/redo restoration is.
+history or tile limit after applying earlier pixels: the recorded stroke is
+rolled back and the user is notified. The tested rollback restores captured
+pixels, tile existence and dirty state without allocating; it is not a proof
+of safety for every callback or platform allocation failure. See
+`stage-2-resource-foundation.md` for current boundaries.
 
 ## Memory and lifecycle
 
@@ -41,3 +42,5 @@ untracked mutation of artwork can make older tile snapshots inappropriate.
 Artwork can be saved and reopened as a `.koma` illustration (see
 file-format.md); history is never serialized and always starts empty after
 opening. There is no crash-recovery journal.
+
+An independent compact-record prototype and the complete limit audit are described in `compact-history-experiment.md`; it is not yet used by the application.
