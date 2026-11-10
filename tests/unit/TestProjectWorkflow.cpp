@@ -194,10 +194,13 @@ void TestProjectWorkflow::replaceOpenedArtwork()
     QVERIFY(QMetaObject::invokeMethod(colorDialog, "accept"));
     QTRY_VERIFY(!colorDialog->property("visible").toBool());
     QCOMPARE(QColor(project.backgroundColor()), QColor(QStringLiteral("#22aa44")));
+    window->requestActivate();
+    QTRY_VERIFY(window->isActive());
     auto editSpin = [window, &click](QQuickItem* spin, const QString& value) {
         auto* input = qvariant_cast<QQuickItem*>(spin->property("contentItem"));
         if (!input) return false;
         click(input);
+        input->forceActiveFocus();
         QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
         for (QChar ch : value) QTest::keyClick(window, ch == u'.' ? Qt::Key_Period : static_cast<Qt::Key>(ch.unicode()));
         QTest::keyClick(window, Qt::Key_Return);
