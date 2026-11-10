@@ -10,6 +10,8 @@ private slots:
     void cancellationAndLimits();
     void failedStrokePreservesRedoAndTileState();
     void sharedHistoryBudget();
+    void replayBudgetFailureAndRetry();
+    void replayRejectsReentry();
 };
 static std::vector<std::uint32_t> snapshot(const SparseTileStore& s, TilePoint p) {
     auto pixels = s.tilePixels(p); return {pixels.begin(), pixels.end()};
@@ -132,6 +134,87 @@ void TestUndoStack::sharedHistoryBudget()
     history.clear();
     QCOMPARE(budget->historyBytes(), size_t(0));
     QCOMPARE(budget->artworkBytes(), tile);
+}
+
+void TestUndoStack::replayBudgetFailureAndRetry()
+{
+    UndoStack history;
+    Layer a, b;
+    auto budget = std::make_shared<DocumentMemoryBudget>();
+    auto& store = a.tiles();
+    QVERIFY(store.setDocumentBudget(budget));
+    QVERIFY(b.tiles().setDocumentBudget(budget));
+    QCOMPARE(store.setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(store.setPixel({257, 1}, 0xff123456U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(b.tiles().setPixel({1, 1}, 0xffabcdefU), SparseTileStore::WriteResult::Changed);
+    const auto initial0 = snapshot(store, {0, 0});
+    const auto initial1 = snapshot(store, {1, 0});
+    const auto other = snapshot(b.tiles(), {0, 0});
+    QVERIFY(history.beginStroke(&a));
+    QCOMPARE(store.setPixel({1, 1}, 0xff010203U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(store.setPixel({257, 1}, 0U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(store.setPixel({513, 1}, 0x80800000U), SparseTileStore::WriteResult::Changed);
+    QVERIFY(history.commitStroke());
+    const auto painted0 = snapshot(store, {0, 0});
+    const auto painted2 = snapshot(store, {2, 0});
+    const auto used = budget->usedBytes();
+    QVERIFY(budget->setLimit(used));
+    QSignalSpy errors(&history, &UndoStack::errorOccurred);
+    history.undo(); history.undo();
+    QCOMPARE(errors.size(), 2);
+    QVERIFY(history.canUndo()); QVERIFY(!history.canRedo());
+    QVERIFY(snapshot(store, {0, 0}) == painted0);
+    QVERIFY(snapshot(store, {1, 0}).empty());
+    QVERIFY(snapshot(store, {2, 0}) == painted2);
+    QVERIFY(snapshot(b.tiles(), {0, 0}) == other);
+    QCOMPARE(budget->usedBytes(), used); QCOMPARE(budget->stagingBytes(), size_t(0));
+    QVERIFY(budget->setLimit(used + 2 * store.tileBytes()));
+    history.undo();
+    QVERIFY(!history.canUndo()); QVERIFY(history.canRedo());
+    QVERIFY(snapshot(store, {0, 0}) == initial0);
+    QVERIFY(snapshot(store, {1, 0}) == initial1);
+    QVERIFY(snapshot(store, {2, 0}).empty());
+    QVERIFY(snapshot(b.tiles(), {0, 0}) == other);
+    const auto undoUsed = budget->usedBytes();
+    QVERIFY(budget->setLimit(undoUsed));
+    history.redo(); history.redo();
+    QCOMPARE(errors.size(), 4);
+    QVERIFY(!history.canUndo()); QVERIFY(history.canRedo());
+    QVERIFY(snapshot(store, {0, 0}) == initial0);
+    QVERIFY(snapshot(store, {1, 0}) == initial1);
+    QVERIFY(snapshot(store, {2, 0}).empty());
+    QCOMPARE(budget->usedBytes(), undoUsed); QCOMPARE(budget->stagingBytes(), size_t(0));
+    QVERIFY(budget->setLimit(undoUsed + 2 * store.tileBytes()));
+    history.redo();
+    QVERIFY(history.canUndo()); QVERIFY(!history.canRedo());
+    QVERIFY(snapshot(store, {0, 0}) == painted0);
+    QVERIFY(snapshot(store, {1, 0}).empty());
+    QVERIFY(snapshot(store, {2, 0}) == painted2);
+    QVERIFY(snapshot(b.tiles(), {0, 0}) == other);
+}
+void TestUndoStack::replayRejectsReentry()
+{
+    UndoStack history;
+    Layer layer;
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+    QVERIFY(history.commitStroke());
+    int callbacks = 0;
+    connect(&layer, &Layer::artworkChanged, &history, [&] {
+        ++callbacks;
+        history.undo();
+        history.redo();
+        history.clear();
+        QVERIFY(!history.beginStroke(&layer));
+    });
+    history.undo();
+    QCOMPARE(callbacks, 1);
+    QVERIFY(!history.canUndo()); QVERIFY(history.canRedo());
+    QCOMPARE(layer.tiles().pixel({1, 1}).value(), 0U);
+    history.redo();
+    QCOMPARE(callbacks, 2);
+    QVERIFY(history.canUndo()); QVERIFY(!history.canRedo());
+    QCOMPARE(layer.tiles().pixel({1, 1}).value(), 0x80402010U);
 }
 
 QTEST_APPLESS_MAIN(TestUndoStack)

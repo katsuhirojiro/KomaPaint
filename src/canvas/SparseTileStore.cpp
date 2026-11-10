@@ -188,7 +188,9 @@ SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<Til
             if (exists) replacedBytes += m_tileBytes;
             if (exists && tile.pixels.empty()) --count;
             if (!exists && !tile.pixels.empty()) ++count;
-            if (dirty.mark(*bounds) != DirtyTileTracker::Result::Marked) return WriteResult::TrackingLimit;
+            const auto mark = dirty.mark(*bounds);
+            if (mark != DirtyTileTracker::Result::Marked)
+                return mark == DirtyTileTracker::Result::AllocationFailed ? WriteResult::AllocationFailed : WriteResult::TrackingLimit;
             staged.emplace(snapshot.tile, std::move(tile));
         }
         if (count > m_pixelBudget / m_tileBytes) return WriteResult::MemoryLimit;

@@ -19,8 +19,8 @@ class UndoStack : public QObject {
 public:
     explicit UndoStack(QObject* parent = nullptr);
     ~UndoStack() override;
-    bool canUndo() const { return !m_current && m_cursor > 0; }
-    bool canRedo() const { return !m_current && m_cursor < m_commands.size(); }
+    bool canUndo() const { return !m_replaying && !m_current && m_cursor > 0; }
+    bool canRedo() const { return !m_replaying && !m_current && m_cursor < m_commands.size(); }
     QString undoText() const;
     QString redoText() const;
     qulonglong memoryBytes() const { return m_bytes + m_currentBytes; }
@@ -54,6 +54,7 @@ private:
     void fail(const QString& message) { emit errorOccurred(message); }
     std::vector<std::unique_ptr<StrokeCommand>> m_commands;
     std::unique_ptr<StrokeCommand> m_current;
+    bool m_replaying = false;
     std::size_t m_cursor = 0, m_bytes = 0, m_currentBytes = 0;
     std::size_t m_limit = 64U * 1024U * 1024U;
 };

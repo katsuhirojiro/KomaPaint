@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QFile>
 #include <QMessageBox>
 #include <QQuickStyle>
 #include <QString>
@@ -59,6 +60,16 @@ void komaPaintMessageHandler(QtMsgType type, const QMessageLogContext& context,
     text += u'\n';
 
 #if defined(Q_OS_WIN)
+    // Opt-in, CI-only startup diagnostics; normal GUI launches still use the
+    // debugger sink and do not create a log file.
+    const QString smokeLog = qEnvironmentVariable("KOMAPAINT_SMOKE_LOG");
+    if (!smokeLog.isEmpty()) {
+        QFile log(smokeLog);
+        if (log.open(QIODevice::WriteOnly | QIODevice::Append)) {
+            const QByteArray record = QByteArray::number(GetTickCount64()) + " " + text.toUtf8();
+            log.write(record);
+        }
+    }
     OutputDebugStringW(text.toStdWString().c_str());
 #else
     const QByteArray utf8 = text.toLocal8Bit();

@@ -1,6 +1,7 @@
 #include "UndoStack.h"
 #include "../layers/Layer.h"
 #include <algorithm>
+#include <QScopedValueRollback>
 #include <new>
 #include <stdexcept>
 
@@ -20,7 +21,7 @@ bool UndoStack::setByteLimit(std::size_t bytes) {
 }
 bool UndoStack::beginStroke(Layer* layer)
 {
-    if (!layer || m_current) return false;
+    if (!layer || m_current || m_replaying) return false;
     try {
         m_commands.reserve(m_commands.size() + 1); // commit must not allocate
         m_current = std::make_unique<StrokeCommand>();
@@ -122,23 +123,39 @@ void UndoStack::undo()
     if (!canUndo()) return;
     auto& command = m_commands[m_cursor - 1];
     if (!command->layer) { clear(); fail(QStringLiteral("A layer was removed; history was cleared.")); return; }
-    if (command->layer->tiles().restoreTiles(command->before) != SparseTileStore::WriteResult::Changed) {
-        fail(QStringLiteral("Undo could not be completed due to memory or tile limits. Artwork was not changed.")); return;
+    SparseTileStore::WriteResult result;
+    {
+        // The store prepares every tile, dirty region and insertion capacity
+        // before mutation. Prevent synchronous callbacks from re-entering
+        // history while artwork and cursor are being published.
+        QScopedValueRollback<bool> guard(m_replaying, true);
+        result = command->layer->tiles().restoreTiles(command->before);
+        if (result == SparseTileStore::WriteResult::Changed) --m_cursor;
     }
-    --m_cursor; emit stackChanged();
+    if (result != SparseTileStore::WriteResult::Changed) {
+        fail(QStringLiteral("Undo could not be completed due to memory, tile or tracking limits. Artwork and history were not changed.")); return;
+    }
+    emit stackChanged();
 }
 void UndoStack::redo()
 {
     if (!canRedo()) return;
     auto& command = m_commands[m_cursor];
     if (!command->layer) { clear(); fail(QStringLiteral("A layer was removed; history was cleared.")); return; }
-    if (command->layer->tiles().restoreTiles(command->after) != SparseTileStore::WriteResult::Changed) {
-        fail(QStringLiteral("Redo could not be completed due to memory or tile limits. Artwork was not changed.")); return;
+    SparseTileStore::WriteResult result;
+    {
+        QScopedValueRollback<bool> guard(m_replaying, true);
+        result = command->layer->tiles().restoreTiles(command->after);
+        if (result == SparseTileStore::WriteResult::Changed) ++m_cursor;
     }
-    ++m_cursor; emit stackChanged();
+    if (result != SparseTileStore::WriteResult::Changed) {
+        fail(QStringLiteral("Redo could not be completed due to memory, tile or tracking limits. Artwork and history were not changed.")); return;
+    }
+    emit stackChanged();
 }
 void UndoStack::clear()
 {
+    if (m_replaying) return;
     if (m_current && !cancelStroke()) return;
     m_commands.clear(); m_cursor = m_bytes = m_currentBytes = 0;
     emit stackChanged();
