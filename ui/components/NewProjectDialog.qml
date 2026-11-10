@@ -12,29 +12,23 @@ import "../themes"
 // canvas size in editable units, DPI and background.
 //
 // The canonical physical size lives in NewProject (inches), so switching
-// units never drifts; this dialog only edits and displays derived values.
+// units never drifts; pixels are derived at the last moment via
+// round(inches * dpi).
 Dialog {
     id: newProjectDialog
     title: qsTr("New Project")
     modal: true
-    anchors.centerIn: parent
     // Custom OK/Cancel buttons are laid out inside contentItem so the OK
     // button can be disabled when the project settings are invalid.
     standardButtons: Dialog.NoButton
 
-    onAccepted: {
-        if (!NewProject.isValid()) return
-        const ok = Workspace.newProject(nameInput.text.trimmed(),
-                                        NewProject.widthPixels,
-                                        NewProject.heightPixels,
-                                        NewProject.transparentBackground,
-                                        NewProject.backgroundColor,
-                                        NewProject.dpi)
-        if (!ok) {
-            summaryError.text = qsTr("Could not create the project.")
-            return
-        }
-    }
+    // Minimal implicit size so the dialog is large enough for all fields
+    // on typical Windows DPI settings. Content that exceeds this is
+    // scrollable; the button row stays pinned at the bottom.
+    Layout.preferredWidth: 480
+    implicitHeight: 520
+
+
 
     onOpened: {
         NewProject.resetToDefaults()
@@ -48,14 +42,16 @@ Dialog {
     }
 
     contentItem: ColumnLayout {
-        spacing: KP.gapM
-        width: 460
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        spacing: 0
 
         // ------------------------------------------------------------- Modes
         Label { text: qsTr("Project type"); font.pixelSize: KP.fontS; color: KP.textMuted }
         RowLayout {
+            Layout.fillWidth: true
             spacing: KP.gapS
-            ToolButton {
+            Button {
                 id: modeIllustration
                 text: qsTr("Illustration")
                 checkable: true
@@ -63,21 +59,21 @@ Dialog {
                 enabled: true
                 Layout.fillWidth: true
             }
-            ToolButton {
+            Button {
                 text: qsTr("Comic Page")
                 checkable: true
                 checked: false
                 enabled: false
                 Layout.fillWidth: true
             }
-            ToolButton {
+            Button {
                 text: qsTr("Multi-page Comic")
                 checkable: true
                 checked: false
                 enabled: false
                 Layout.fillWidth: true
             }
-            ToolButton {
+            Button {
                 text: qsTr("Animation")
                 checkable: true
                 checked: false
@@ -86,99 +82,111 @@ Dialog {
             }
         }
 
-        // ------------------------------------------------------------- Illustration settings
-        Rectangle {
-            visible: modeIllustration.checked
-            color: KP.paneBgAlt
-            border.color: KP.border
-            radius: KP.radiusS
+        // ------------------------------------------------------------- Illustration settings (scrollable)
+        ScrollView {
             Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            flickableDirection: Flickable.VerticalFlick
+            contentWidth: width
+            contentHeight: settingsColumn.implicitHeight
             ColumnLayout {
-                anchors.fill: parent
-                anchors.leftMargin: KP.gapM
-                anchors.rightMargin: KP.gapM
-                anchors.topMargin: KP.gapM
-                anchors.bottomMargin: KP.gapM
+                id: settingsColumn
+                width: parent.width
                 spacing: KP.gapM
 
-                TextField {
-                    id: nameInput
-                    placeholderText: qsTr("Project name")
-                    text: NewProject.name
-                    onTextEdited: NewProject.setName(text)
+                Rectangle {
                     Layout.fillWidth: true
-                }
+                    color: KP.paneBgAlt
+                    border.color: KP.border
+                    radius: KP.radiusS
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: KP.gapM
+                        anchors.rightMargin: KP.gapM
+                        anchors.topMargin: KP.gapM
+                        anchors.bottomMargin: KP.gapM
+                        spacing: KP.gapM
 
-                RowLayout {
-                    spacing: KP.gapS
-                    Label { text: qsTr("Width"); Layout.preferredWidth: 60 }
-                    SpinBox {
-                        id: widthInput
-                        from: 1; to: NewProject.maxDimension(); value: 1600; editable: true
-                        Layout.fillWidth: true
-                        onValueModified: {
-                            NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value, heightInput.value)
-                            widthInput.value  = NewProject.widthInUnit(NewProject.units)
-                            heightInput.value = NewProject.heightInUnit(NewProject.units)
+                        TextField {
+                            id: nameInput
+                            placeholderText: qsTr("Project name")
+                            text: NewProject.name
+                            onTextEdited: NewProject.setName(text)
+                            Layout.fillWidth: true
                         }
-                    }
-                    ComboBox {
-                        id: unitCombo
-                        model: NewProject.availableUnits()
-                        // currentText is read-only in Qt 6.8; set the index instead
-                        currentIndex: NewProject.availableUnits().indexOf(NewProject.units)
-                        onActivated: {
-                            NewProject.setUnits(unitCombo.currentText)
-                            widthInput.value  = NewProject.widthInUnit(NewProject.units)
-                            heightInput.value = NewProject.heightInUnit(NewProject.units)
+
+                        RowLayout {
+                            spacing: KP.gapS
+                            Label { text: qsTr("Width"); Layout.preferredWidth: 60 }
+                            SpinBox {
+                                id: widthInput
+                                from: 1; to: NewProject.maxDimension(); value: 1600; editable: true
+                                Layout.fillWidth: true
+                                onValueModified: {
+                                    NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value, heightInput.value)
+                                    widthInput.value  = NewProject.widthInUnit(NewProject.units)
+                                    heightInput.value = NewProject.heightInUnit(NewProject.units)
+                                }
+                            }
+                            ComboBox {
+                                id: unitCombo
+                                model: NewProject.availableUnits()
+                                currentIndex: NewProject.availableUnits().indexOf(NewProject.units)
+                                onActivated: {
+                                    NewProject.setUnits(unitCombo.currentText)
+                                    widthInput.value  = NewProject.widthInUnit(NewProject.units)
+                                    heightInput.value = NewProject.heightInUnit(NewProject.units)
+                                }
+                            }
                         }
-                    }
-                }
-                RowLayout {
-                    spacing: KP.gapS
-                    Label { text: qsTr("Height"); Layout.preferredWidth: 60 }
-                    SpinBox {
-                        id: heightInput
-                        from: 1; to: NewProject.maxDimension(); value: 1200; editable: true
-                        Layout.fillWidth: true
-                        onValueModified: {
-                            NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value, heightInput.value)
-                            widthInput.value  = NewProject.widthInUnit(NewProject.units)
-                            heightInput.value = NewProject.heightInUnit(NewProject.units)
+                        RowLayout {
+                            spacing: KP.gapS
+                            Label { text: qsTr("Height"); Layout.preferredWidth: 60 }
+                            SpinBox {
+                                id: heightInput
+                                from: 1; to: NewProject.maxDimension(); value: 1200; editable: true
+                                Layout.fillWidth: true
+                                onValueModified: {
+                                    NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value, heightInput.value)
+                                    widthInput.value  = NewProject.widthInUnit(NewProject.units)
+                                    heightInput.value = NewProject.heightInUnit(NewProject.units)
+                                }
+                            }
                         }
-                    }
-                }
-                RowLayout {
-                    spacing: KP.gapS
-                    Label { text: qsTr("Resolution"); Layout.preferredWidth: 60 }
-                    SpinBox {
-                        id: dpiInput
-                        from: 1; to: 1200; value: 300; editable: true
-                        Layout.fillWidth: true
-                        onValueModified: NewProject.setDpi(value)
-                    }
-                    Label { text: qsTr("dpi"); color: KP.textMuted; font.pixelSize: KP.fontS }
-                }
-                RowLayout {
-                    spacing: KP.gapS
-                    CheckBox {
-                        id: transparentInput
-                        text: qsTr("Transparent background")
-                        checked: NewProject.transparentBackground
-                        onCheckedChanged: NewProject.setTransparentBackground(checked)
-                    }
-                }
-                RowLayout {
-                    spacing: KP.gapS
-                    enabled: !transparentInput.checked
-                    Button {
-                        text: qsTr("Background colour…")
-                        onClicked: backgroundPicker.open()
-                    }
-                    Rectangle {
-                        width: 30; height: 30
-                        color: Qt.color(NewProject.backgroundColor)
-                        border.color: KP.border
+                        RowLayout {
+                            spacing: KP.gapS
+                            Label { text: qsTr("Resolution"); Layout.preferredWidth: 60 }
+                            SpinBox {
+                                id: dpiInput
+                                from: 1; to: 1200; value: 300; editable: true
+                                Layout.fillWidth: true
+                                onValueModified: NewProject.setDpi(value)
+                            }
+                            Label { text: qsTr("dpi"); color: KP.textMuted; font.pixelSize: KP.fontS }
+                        }
+                        RowLayout {
+                            spacing: KP.gapS
+                            CheckBox {
+                                id: transparentInput
+                                text: qsTr("Transparent background")
+                                checked: NewProject.transparentBackground
+                                onCheckedChanged: NewProject.setTransparentBackground(checked)
+                            }
+                        }
+                        RowLayout {
+                            spacing: KP.gapS
+                            enabled: !transparentInput.checked
+                            Button {
+                                text: qsTr("Background colour…")
+                                onClicked: backgroundPicker.open()
+                            }
+                            Rectangle {
+                                width: 30; height: 30
+                                color: Qt.color(NewProject.backgroundColor)
+                                border.color: KP.border
+                            }
+                        }
                     }
                 }
             }
@@ -191,7 +199,6 @@ Dialog {
             radius: KP.radiusS
             Layout.fillWidth: true
             ColumnLayout {
-                anchors.fill: parent
                 anchors.leftMargin: KP.gapM
                 anchors.rightMargin: KP.gapM
                 anchors.topMargin: KP.gapS
@@ -208,19 +215,22 @@ Dialog {
                     font.family: KP.fontMono
                     font.pixelSize: KP.fontS
                     wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
                 }
                 Label {
                     id: summaryError
                     color: KP.error
                     font.pixelSize: KP.fontXS
                     wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
                 }
             }
         }
 
-        // ------------------------------------------------------------- Buttons
+        // ------------------------------------------------------------- Buttons (pinned at bottom)
         RowLayout {
             Layout.fillWidth: true
+            Layout.topMargin: KP.gapM
             Item { Layout.fillWidth: true }
             Button {
                 text: qsTr("Cancel")
@@ -230,7 +240,19 @@ Dialog {
             Button {
                 text: qsTr("OK")
                 enabled: NewProject.isValid()
-                onClicked: newProjectDialog.accept()
+                onClicked: {
+                    const ok = Workspace.newProject(nameInput.text.trimmed(),
+                                                    NewProject.widthPixels,
+                                                    NewProject.heightPixels,
+                                                    NewProject.transparentBackground,
+                                                    NewProject.backgroundColor,
+                                                    NewProject.dpi)
+                    if (ok) {
+                        newProjectDialog.accept()
+                    } else {
+                        summaryError.text = qsTr("Could not create the project.")
+                    }
+                }
             }
         }
     }
