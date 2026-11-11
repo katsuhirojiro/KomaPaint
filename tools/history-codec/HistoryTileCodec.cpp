@@ -50,7 +50,8 @@ void readSnapshot(const TileRecord& r, bool present, std::size_t& pos, std::vect
 TileRecord encode(std::span<const std::uint32_t> before, std::span<const std::uint32_t> after, std::uint32_t count) {
     if (!count || (!before.empty() && before.size() != count) || (!after.empty() && after.size() != count))
         throw std::invalid_argument("invalid tile size");
-    if (count > std::numeric_limits<std::size_t>::max() / 12) throw std::length_error("tile too large");
+    // The worst candidate is two RLE runs per pixel, eight bytes each.
+    if (count > std::numeric_limits<std::size_t>::max() / 16) throw std::length_error("tile too large");
     std::size_t changes = 0;
     for (std::size_t i = 0; i < count; ++i)
         if ((before.empty() ? 0 : before[i]) != (after.empty() ? 0 : after[i])) ++changes;
