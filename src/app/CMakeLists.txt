@@ -5,6 +5,8 @@ add_library(komapaint_app STATIC
     CanvasViewport.h
     CommandLine.cpp
     CommandLine.h
+    DocumentRecovery.cpp
+    DocumentRecovery.h
     FileAssociation.cpp
     FileAssociation.h
     KomaPaintApp.cpp

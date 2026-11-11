@@ -4,6 +4,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QCryptographicHash>
+#include <functional>
+#include "app/DocumentRecovery.h"
 #include "app/WorkspaceState.h"
 #include "files/DocumentFile.h"
 #include "layers/Layer.h"
@@ -14,6 +17,9 @@ class TestWorkspaceRecovery : public QObject {
 private slots:
     void restartAndIsolation();
     void failureAndCorruption();
+    void documentTypesAndRegistry();
+    void unknownTypeIsRejectedAndRetained();
+    void cleanupOnlyAfterValidIndex();
 };
 
 static bool paint(WorkspaceState& ws, quint32 color)
@@ -97,5 +103,144 @@ void TestWorkspaceRecovery::failureAndCorruption()
         QFile index(recovery + "/workspace.json"); QVERIFY(index.open(QIODevice::ReadOnly)); QCOMPARE(index.readAll(), initial);
     }
 }
+namespace {
+// Deliberately a separate native type: a future animation/comic adapter can
+// register itself the same way without WorkspaceState knowing about it.
+class SecondTypeAdapter final : public DocumentRecoveryAdapter
+{
+public:
+    QString typeId() const override { return QStringLiteral("test-second-type"); }
+    QString displayName() const override { return QStringLiteral("Test second type"); }
+    bool supports(const CanvasDocument& document) const override
+    {
+        return document.documentType() == typeId();
+    }
+    bool save(const CanvasDocument& document, const QString& path, QString* error) const override
+    {
+        return DocumentFile::save(document, path, error);
+    }
+    CanvasDocument* open(const QString& path, QString* error) const override
+    {
+        auto* document = DocumentFile::open(path, error);
+        if (document) document->setDocumentType(typeId());
+        return document;
+    }
+};
+
+bool rewriteIndex(const QString& path, const std::function<void(QJsonObject&)>& edit)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return false;
+    auto root = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+    root.remove(QStringLiteral("sha256"));
+    edit(root);
+    root.insert(QStringLiteral("sha256"),
+                QString::fromLatin1(QCryptographicHash::hash(
+                    QJsonDocument(root).toJson(QJsonDocument::Compact),
+                    QCryptographicHash::Sha256).toHex()));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    return file.write(QJsonDocument(root).toJson(QJsonDocument::Compact)) > 0;
+}
+}  // namespace
+
+void TestWorkspaceRecovery::documentTypesAndRegistry()
+{
+    auto& registry = DocumentRecoveryRegistry::instance();
+    QVERIFY(registry.adapterForType(DocumentRecoveryRegistry::illustrationTypeId()));
+    QVERIFY(registry.typeIds().contains(QStringLiteral("illustration")));
+
+    CanvasDocument illustration;
+    QCOMPARE(illustration.documentType(), QStringLiteral("illustration"));
+    const auto* adapter = registry.adapterForDocument(illustration);
+    QVERIFY(adapter);
+    QCOMPARE(adapter->typeId(), registry.illustrationTypeId());
+
+    CanvasDocument unknown;
+    unknown.setDocumentType(QStringLiteral("not-a-real-type"));
+    QVERIFY(!registry.adapterForDocument(unknown));
+
+    auto second = std::make_unique<SecondTypeAdapter>();
+    QVERIFY(registry.registerAdapter(std::move(second)));
+    QVERIFY(!registry.registerAdapter(std::make_unique<SecondTypeAdapter>()));  // duplicate
+    CanvasDocument future;
+    future.setDocumentType(QStringLiteral("test-second-type"));
+    QVERIFY(registry.adapterForDocument(future));
+    QCOMPARE(registry.adapterForDocument(future)->displayName(), QStringLiteral("Test second type"));
+
+    // The adapter owns serialization; the shared layer only stores its id.
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    const auto path = dir.filePath("future-snapshot.koma");
+    QString error;
+    QVERIFY2(registry.adapterForType(QStringLiteral("test-second-type"))->save(future, path, &error), qPrintable(error));
+    std::unique_ptr<CanvasDocument> reopened(registry.adapterForType(QStringLiteral("test-second-type"))->open(path, &error));
+    QVERIFY2(reopened, qPrintable(error));
+    QCOMPARE(reopened->documentType(), QStringLiteral("test-second-type"));
+}
+
+void TestWorkspaceRecovery::unknownTypeIsRejectedAndRetained()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    const auto recovery = dir.filePath("recovery");
+    {
+        WorkspaceState ws; QVERIFY(ws.initializeRecovery(recovery));
+        QVERIFY(ws.newProject("Typed", 40, 40, true, "white", 72));
+        QVERIFY(paint(ws, 0xff112233U));
+        QVERIFY(ws.persistWorkspace());
+    }
+    const auto indexPath = recovery + "/workspace.json";
+    QFile index(indexPath); QVERIFY(index.open(QIODevice::ReadOnly));
+    const auto originalBytes = index.readAll(); index.close();
+    QFile snapshotFile(recovery + "/" + QJsonDocument::fromJson(originalBytes).object()
+        .value("projects").toArray().first().toObject().value("snapshot").toString());
+    QVERIFY(snapshotFile.exists());
+    QVERIFY(rewriteIndex(indexPath, [](QJsonObject& root) {
+        auto projects = root.value("projects").toArray();
+        auto first = projects.first().toObject();
+        first.insert("type", "unimplemented-animation-v9");
+        projects.replace(0, first);
+        root.insert("projects", projects);
+    }));
+    {
+        WorkspaceState ws; QVERIFY(ws.initializeRecovery(recovery));
+        auto* before = ws.document();
+        QSignalSpy error(&ws, &WorkspaceState::fileErrorOccurred);
+        QVERIFY(!ws.restoreWorkspace());
+        QCOMPARE(ws.document(), before);
+        QVERIFY(ws.recoveryAvailable());
+        QVERIFY(!error.isEmpty());
+        QVERIFY(snapshotFile.exists());  // never deleted because the type was unknown
+        QFile retained(indexPath); QVERIFY(retained.open(QIODevice::ReadOnly));
+        QVERIFY(retained.readAll() != originalBytes);  // the tampered index is retained, not replaced
+    }
+}
+
+void TestWorkspaceRecovery::cleanupOnlyAfterValidIndex()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    const auto recovery = dir.filePath("recovery");
+    {
+        WorkspaceState ws; QVERIFY(ws.initializeRecovery(recovery));
+        QVERIFY(ws.newProject("One", 40, 40, true, "white", 72));
+        QVERIFY(ws.persistWorkspace());
+        QVERIFY(ws.newProject("Two", 40, 40, true, "white", 72));
+        QVERIFY(ws.persistWorkspace());
+        QVERIFY(ws.persistWorkspace());
+        QDir recoveryDir(recovery);
+        QCOMPARE(recoveryDir.entryList({"*.koma"}, QDir::Files).size(), 2);
+        QCOMPARE(recoveryDir.entryList({"workspace.json"}, QDir::Files).size(), 1);
+    }
+    QDir recoveryDir(recovery);
+    QVERIFY(QFile::copy(recoveryDir.filePath("workspace.json"), recoveryDir.filePath("orphan.koma")));
+    {
+        WorkspaceState reopened; QVERIFY(reopened.initializeRecovery(recovery));
+        QCOMPARE(recoveryDir.entryList({"*.koma"}, QDir::Files).size(), 2);
+        QVERIFY(!QFile::exists(recoveryDir.filePath("orphan.koma")));
+        QVERIFY(reopened.restoreWorkspace());
+        QCOMPARE(reopened.projectTabs().size(), 2);
+        QCOMPARE(reopened.document()->documentType(), QStringLiteral("illustration"));
+    }
+}
+
 QTEST_APPLESS_MAIN(TestWorkspaceRecovery)
 #include "TestWorkspaceRecovery.moc"

@@ -146,6 +146,7 @@ void TestCanvasViewport::strokeFailureDiagnostics()
 {
     CanvasDocument doc;
     doc.setSize(QSize(600, 400));
+    doc.setModified(false); // setup is the saved baseline for rollback
     UndoStack history;
     CanvasViewport view;
     view.setWidth(500); view.setHeight(300);

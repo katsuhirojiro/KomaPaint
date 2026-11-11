@@ -34,10 +34,16 @@ void TestDocumentCreation::createsIndependentDocument()
     QCOMPARE(workspace.layers(), workspace.document()->layers());
     QCOMPARE(workspace.layers()->rowCount(), 1);
     QVERIFY(!workspace.history()->canUndo());
-    QCOMPARE(oldBudget->historyBytes(), size_t(0));
-    QCOMPARE(oldBudget->artworkBytes(), tileBytes); // old document awaits deletion
+    QVERIFY(oldBudget->historyBytes() > 0); // the other tab retains its history
+    QCOMPARE(oldBudget->artworkBytes(), tileBytes);
     QVERIFY(workspace.layers()->documentBudget() != oldBudget);
+    QVERIFY(workspace.activateTab(0));
+    QCOMPARE(workspace.document(), old);
+    QVERIFY(workspace.history()->canUndo());
+    auto* oldHistory = workspace.history();
+    QVERIFY(workspace.closeTab(0, true));
     // QTEST_APPLESS_MAIN has no event loop to deliver DeferredDelete.
+    delete oldHistory;
     delete old;
     QCOMPARE(oldBudget->usedBytes(), size_t(0));
     QVERIFY(workspace.newDocument(1, CanvasDocument::MaxDimension, true, Qt::white));

@@ -35,6 +35,12 @@ void Settings::setValue(const QString& key, const QVariant& value)
     emit valueChanged(key);
 }
 
+bool Settings::sync()
+{
+    d->sync();
+    return d->status() == QSettings::NoError;
+}
+
 QSize Settings::windowSize() const
 {
     return d->value(keys::kWindowSize, QSize(1440, 900)).toSize();

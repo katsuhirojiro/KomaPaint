@@ -30,6 +30,7 @@ public:
     Q_INVOKABLE QVariant value(const QString& key,
                                const QVariant& defaultValue = {}) const;
     Q_INVOKABLE void     setValue(const QString& key, const QVariant& value);
+    Q_INVOKABLE bool sync();
 
     // Convenience accessors for values used by the shell.
     QSize windowSize() const;

@@ -6,6 +6,7 @@
 #include "../color/ColorPalette.h"
 #include "../history/UndoStack.h"
 #include "../layers/LayerModel.h"
+#include "DocumentRecovery.h"
 #include "ProjectCreationService.h"
 
 #include <QObject>
@@ -65,14 +66,14 @@ public:
     bool recoveryReady() const { return bool(m_recoveryLock); }
     Q_INVOKABLE bool restoreWorkspace();
     Q_INVOKABLE bool discardRecovery();
-    Q_INVOKABLE bool persistWorkspace(const QStringList& discardIds = {});
+    Q_INVOKABLE bool persistWorkspace(const QStringList& discardIds = {}, const QStringList& excludeIds = {});
     Q_INVOKABLE void setRecoveryInterval(int minutes);
     void setRecoveryFailureForTests(int stage) { m_recoveryFailureForTests = stage; }
 
     Q_INVOKABLE bool newDocument(int width, int height, bool transparent, const QColor& background);
     // Creates a new illustration project from the New Project dialog: applies
-    // name, canvas dimensions, DPI and background, then replaces the current
-    // project cleanly (history cleared, previous document discarded). Returns
+    // name, canvas dimensions, DPI and background, then opens an independent
+    // project tab with its own session history. Returns
     // false and leaves the current project untouched on invalid input. The
     // failure reason is available via creationError().
     Q_INVOKABLE bool newProject(const QString& name, int width, int height, bool transparent,
@@ -81,10 +82,7 @@ public:
     // success. Notified via creationErrorChanged().
     Q_PROPERTY(QString creationError READ creationError NOTIFY creationErrorChanged)
     QString creationError() const { return m_creationError; }
-    // Cleanly replaces the current document with another document: clears
-    // history, reconnects layer-deletion handling, clears the current file
-    // and emits documentChanged() / currentFileChanged(). The previous
-    // document is scheduled for deletion via deleteLater().
+    // Opens a document in an independent tab (retains the previous tab).
     void replaceDocument(CanvasDocument* next);
     // Saves the current document. pathOrUrl may be a plain local path or a
     // file:// URL (as delivered by QML FileDialog). Empty path saves to the
@@ -92,7 +90,7 @@ public:
     // and fileErrorOccurred carries a user-facing message.
     Q_INVOKABLE bool saveToPath(const QString& pathOrUrl);
     // Loads the document at pathOrUrl, fully validates it, then atomically
-    // swaps it in as the current document. On any failure the current
+    // opens it in a new tab. On any failure the current
     // document is left completely unchanged and fileErrorOccurred fires.
     Q_INVOKABLE bool openFromPath(const QString& pathOrUrl);
     // Per-user Windows registration so double-clicking a .koma file opens it
@@ -130,7 +128,16 @@ private:
     // is not yet undoable. Connected to every document we own or swap in.
     void connectLayerDeletion(const CanvasDocument* document, UndoStack* history);
     void addDocument(CanvasDocument* document, const QString& path = {});
-    struct Tab { CanvasDocument* document; UndoStack* history; QString path; QUuid id; QByteArray savedHash; };
+    struct Tab {
+        CanvasDocument* document;
+        UndoStack* history;
+        QString path;
+        QUuid id;
+        QByteArray savedHash;
+        // Recovery type id recorded when the tab was created. The workspace
+        // never guesses a serializer at snapshot time.
+        QString typeId;
+    };
     std::vector<Tab> m_tabs;
     int m_activeTab = 0;
     bool m_initialPlaceholder = true;

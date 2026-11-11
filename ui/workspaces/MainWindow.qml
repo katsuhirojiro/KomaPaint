@@ -42,12 +42,18 @@ ApplicationWindow {
     property string closeAction: ""
     property int closeTabIndex: -1
     property var approvedCloseIds: []
+    property int activeTabAtClose: -1
     function requestTabClose(index) {
         if (!Workspace.activateTab(index)) return
-        if (!Workspace.document.modified) { Workspace.closeTab(index); return }
+        if (!Workspace.document.modified) { finishTabClose(index, false); return }
         closeAction = "tab"
         closeTabIndex = index
         saveChangesDialog.open()
+    }
+    function finishTabClose(index, discard) {
+        if (Workspace.recoveryReady && !Workspace.recoveryAvailable
+                && !Workspace.persistWorkspace([], [Workspace.projectTabs[index].id])) return
+        Workspace.closeTab(index, discard)
     }
     function continueApplicationClose() {
         const tabs = Workspace.projectTabs
@@ -60,7 +66,9 @@ ApplicationWindow {
                 return
             }
         }
-        if (Workspace.recoveryReady && !Workspace.persistWorkspace(approvedCloseIds)) {
+        if (activeTabAtClose >= 0 && activeTabAtClose < Workspace.projectTabs.length)
+            Workspace.activateTab(activeTabAtClose)
+        if (Workspace.recoveryReady && !Workspace.recoveryAvailable && !Workspace.persistWorkspace(approvedCloseIds)) {
             closeAction = ""
             approvedCloseIds = []
             return
@@ -71,7 +79,7 @@ ApplicationWindow {
     }
     function closeDecisionComplete(discard) {
         if (closeAction === "tab") {
-            Workspace.closeTab(closeTabIndex, discard)
+            finishTabClose(closeTabIndex, discard)
             closeAction = ""
         } else if (closeAction === "app") {
             if (discard) approvedCloseIds = approvedCloseIds.concat([Workspace.projectTabs[closeTabIndex].id])
@@ -86,6 +94,7 @@ ApplicationWindow {
     onClosing: function(event) {
         if (!allowCloseWithArtwork) {
             event.accepted = false
+            if (closeAction === "") activeTabAtClose = Workspace.activeTab
             approvedCloseIds = []
             continueApplicationClose()
         }
@@ -598,6 +607,11 @@ ApplicationWindow {
                 const minutes = [5, 10, 15, 30, 60, 0][recoveryInterval.currentIndex]
                 Settings.setValue("recovery/intervalMinutes", minutes)
                 Settings.setValue("recovery/configured", true)
+                if (!Settings.sync()) {
+                    fileErrorText.text = qsTr("Could not save the recovery preference. Please check your settings storage and try again.")
+                    fileErrorDialog.open()
+                    return
+                }
                 recoverySettingsDialog.close()
                 root.beginRecovery()
             } }
@@ -609,12 +623,13 @@ ApplicationWindow {
         modal: true
         closePolicy: Popup.NoAutoClose
         title: qsTr("Restore previous workspace?")
-        contentItem: Label { text: qsTr("Restore the last recovery snapshots and project tabs? Original files will not be overwritten. Undo history starts empty."); color: KP.text; wrapMode: Text.WordWrap; width: 380 }
+        contentItem: Label { text: qsTr("Restore the last recovery snapshots and project tabs? Original files will not be overwritten. Undo history starts empty. Choosing Not now keeps the old recovery data but creates no new snapshots this session."); color: KP.text; wrapMode: Text.WordWrap; width: 420 }
         footer: DialogButtonBox {
             Button { text: qsTr("Restore"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: {
                 if (Workspace.restoreWorkspace()) { recoveryChoiceDialog.close(); root.beginRecovery() }
             } }
             Button { text: qsTr("Discard recovery"); DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole; onClicked: recoveryDiscardConfirmation.open() }
+            Button { text: qsTr("Not now"); DialogButtonBox.buttonRole: DialogButtonBox.RejectRole; onClicked: recoveryChoiceDialog.close() }
         }
     }
     Dialog {
