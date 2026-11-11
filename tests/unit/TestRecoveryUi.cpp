@@ -43,9 +43,10 @@ struct WindowParts {
     PanelManager panels;
 };
 
-QObject* createMainWindow(QQmlEngine& engine, WindowParts& parts)
+QObject* createMainWindow(QQmlEngine& engine, WindowParts& parts, Settings& settings)
 {
     engine.addImportPath(QStringLiteral("qrc:/"));
+    engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
     engine.rootContext()->setContextProperty(QStringLiteral("Workspace"), &parts.workspace);
     engine.rootContext()->setContextProperty(QStringLiteral("NewProject"), &parts.project);
     engine.rootContext()->setContextProperty(QStringLiteral("App"), &parts.config);
@@ -70,7 +71,7 @@ void TestRecoveryUi::firstLaunchShowsSetupDefaultingToTenMinutes()
     WindowParts parts;
     QVERIFY(parts.workspace.initializeRecovery(dir.filePath(QStringLiteral("recovery"))));
     QQmlEngine engine;
-    QObject* root = createMainWindow(engine, parts);
+    QObject* root = createMainWindow(engine, parts, settings);
     QVERIFY(root);
     auto* window = qobject_cast<QQuickWindow*>(root);
     QVERIFY(window);
@@ -81,10 +82,8 @@ void TestRecoveryUi::firstLaunchShowsSetupDefaultingToTenMinutes()
     auto* dialog = root->findChild<QObject*>(QStringLiteral("recoverySettingsDialog"));
     auto* combo = root->findChild<QObject*>(QStringLiteral("recoveryIntervalCombo"));
     QVERIFY2(dialog && combo, "recovery setup widgets were not found in MainWindow.qml");
-    // Run the same setup decision the startup Component.onCompleted defers
-    // with Qt.callLater. This happens after the window and its popup overlay
-    // exist, which is the production ordering.
-    QVERIFY(QMetaObject::invokeMethod(root, "beginRecoverySetup"));
+    // Component.onCompleted defers beginRecoverySetup with Qt.callLater, so
+    // the event loop must deliver the dialog after the window is exposed.
     QTRY_VERIFY2(dialog->property("visible").toBool(),
                  qPrintable(QStringLiteral("setup dialog did not open (ready=%1 configured=%2)")
                      .arg(parts.workspace.recoveryReady())
@@ -121,7 +120,7 @@ void TestRecoveryUi::restoresPreviousWorkspaceThroughDialog()
     QVERIFY(parts.workspace.recoveryAvailable());
     QVERIFY(parts.workspace.recoveryReady());
     QQmlEngine engine;
-    QObject* root = createMainWindow(engine, parts);
+    QObject* root = createMainWindow(engine, parts, settings);
     QVERIFY(root);
     auto* window = qobject_cast<QQuickWindow*>(root);
     QVERIFY(window);
@@ -131,7 +130,6 @@ void TestRecoveryUi::restoresPreviousWorkspaceThroughDialog()
     auto* dialog = root->findChild<QObject*>(QStringLiteral("recoveryChoiceDialog"));
     auto* restore = root->findChild<QObject*>(QStringLiteral("restoreRecoveryButton"));
     QVERIFY2(dialog && restore, "recovery choice widgets were not found in MainWindow.qml");
-    QVERIFY(QMetaObject::invokeMethod(root, "beginRecoverySetup"));
     QTRY_VERIFY2(dialog->property("visible").toBool(),
                  qPrintable(QStringLiteral("recovery dialog did not open (ready=%1 available=%2 configured=%3)")
                      .arg(parts.workspace.recoveryReady())

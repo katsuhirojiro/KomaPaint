@@ -141,7 +141,9 @@ Automated tests cover restart isolation (saved and never-saved projects),
 active tab, layer order/visibility/opacity, tool/zoom state, empty undo
 history after restore, original-file isolation, injected snapshot and index
 write failures, index/snapshot corruption, unknown document types, type
-adapter registration, and orphan cleanup. They do **not** prove the packaged
+adapter registration, and orphan cleanup. A QML integration test loads the
+real MainWindow, checks that first-launch setup defaults to 10 minutes, and
+restores a tab through the Restore dialog. These tests do **not** prove the packaged
 Windows application's interactive behavior: save/discard/cancel prompts,
 actual process termination, timer-driven snapshots against real files, or
 power loss. Those require the manual packaged-application test listed in the
