@@ -81,15 +81,23 @@ void TestHistoryAudit::oneTileHistoryBudget()
     ProcessMemory after127{};
 #endif
     QElapsedTimer timer; timer.start();
+    qulonglong compactCharge127 = 0;
+    std::size_t compactTracked127 = 0;
+    qint64 compactPaint127 = 0;
     constexpr int count = 10000;
     for (int i = 0; i < count; ++i) {
         QVERIFY(history.beginStroke(&layer));
         const auto color = i % 2 ? 0x80402010U : 0xff123456U;
         QCOMPARE(layer.tiles().setPixel({64, 64}, color), SparseTileStore::WriteResult::Changed);
         QVERIFY(history.commitStroke());
+        if (i == 126) {
+            compactCharge127 = history.memoryBytes();
+            compactTracked127 = budget->historyBytes();
+            compactPaint127 = timer.elapsed();
 #if defined(Q_OS_WIN)
-        if (i == 126) after127 = processMemory();
+            after127 = processMemory();
 #endif
+        }
     }
     const auto paintMs = timer.elapsed();
     const auto historyCharge = history.memoryBytes();
@@ -111,6 +119,7 @@ void TestHistoryAudit::oneTileHistoryBudget()
     const auto redoMs = timer.elapsed();
     QVERIFY(!history.canRedo());
     QCOMPARE(layer.tiles().pixel({64, 64}).value(), painted);
+    std::printf("::notice title=Compact 127-stroke comparison::127 one-pixel strokes; charge=%llu bytes tracked=%zu bytes paint=%lld ms; same workload as full-snapshot reference\n", compactCharge127, compactTracked127, static_cast<long long>(compactPaint127));
     std::printf("::notice title=Production compact history::10000 one-pixel strokes; retained safeguard charge=%llu bytes; tracked compact capacity=%zu bytes; paint=%lld ms undo=%lld ms redo=%lld ms; full history retained\n",
                 historyCharge, tracked, static_cast<long long>(paintMs), static_cast<long long>(undoMs), static_cast<long long>(redoMs));
 #if defined(Q_OS_WIN)

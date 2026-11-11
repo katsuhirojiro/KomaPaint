@@ -19,13 +19,16 @@ of safety for every callback or platform allocation failure. See
 
 ## Memory and lifecycle
 
-The initial history budget is 64 MiB. It conservatively charges two full tile
-buffers plus 512 bytes per touched tile, even if a tile was initially absent.
-This bounds recorded data but not all allocator overhead or temporary buffers
-needed while staging undo/redo. The storage limit remains 256 MiB **per layer**,
-not a document-wide limit. Composite caches, the viewport, undo staging, other
-layers and Qt allocations are not accounted together. A shared document-wide
-budget remains required before production use. If the history is full, drawing
+The temporary history safeguard is 64 MiB. Before painting, each touched tile
+is conservatively charged two full tile buffers plus 512 bytes. At commit,
+when resource admission succeeds, lossless compact records replace snapshots
+and are charged by their retained capacity plus the metadata allowance. If
+compaction cannot be admitted or allocated, the already-reserved snapshots
+remain valid as a fallback. Compact replay allocates and reserves decoding
+workspace before restoring tiles; failure preserves the history cursor and
+artwork. This is not a complete process-memory bound. The 256 MiB per-layer
+pixel safeguard remains, while the shared document budget is unlimited by
+default and only partially accounts document resources. If the history is full, drawing
 stops rather than silently dropping undo; the Edit menu offers an explicit,
 confirmed clear-history action which preserves artwork. Redo entries continue
 to count until a new stroke commits or history is cleared.
@@ -43,4 +46,4 @@ Artwork can be saved and reopened as a `.koma` illustration (see
 file-format.md); history is never serialized and always starts empty after
 opening. There is no crash-recovery journal.
 
-An independent compact-record prototype and the complete limit audit are described in `compact-history-experiment.md`; it is not yet used by the application.
+The codec integration, limit audit, accounting caveats and remaining gates are described in `compact-history-experiment.md`.

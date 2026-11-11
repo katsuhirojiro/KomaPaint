@@ -14,6 +14,7 @@ private slots:
     void sharedHistoryBudget();
     void replayBudgetFailureAndRetry();
     void replayRejectsReentry();
+    void compactRejectsIncompatibleReplay();
     void strokeRejectsNotificationReentry();
     void layerRemovedDuringReplay();
     void ownerDestroyedDuringCallbacks();
@@ -229,6 +230,33 @@ void TestUndoStack::replayRejectsReentry()
 }
 
 
+
+
+void TestUndoStack::compactRejectsIncompatibleReplay()
+{
+    Layer layer; UndoStack history;
+    auto& store = layer.tiles();
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(store.setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+    QVERIFY(history.commitStroke());
+    QVERIFY(history.memoryBytes() < store.tileBytes()); // compact representation
+    QCOMPARE(store.setPixel({1, 1}, 0xff123456U), SparseTileStore::WriteResult::Changed);
+    const auto dirty = store.dirtyRegions();
+    const auto version = store.dirtyVersion();
+    const auto bytes = history.memoryBytes();
+    QSignalSpy errors(&history, &UndoStack::errorOccurred);
+    history.undo(); history.undo();
+    QCOMPARE(errors.size(), 2);
+    QCOMPARE(store.pixel({1, 1}).value(), 0xff123456U);
+    QCOMPARE(store.allocatedTiles(), size_t(1));
+    QVERIFY(store.dirtyRegions() == dirty); QCOMPARE(store.dirtyVersion(), version);
+    QVERIFY(history.canUndo()); QVERIFY(!history.canRedo());
+    QCOMPARE(history.memoryBytes(), bytes);
+    QCOMPARE(store.setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+    history.undo(); QVERIFY(history.canRedo());
+    QCOMPARE(store.allocatedTiles(), size_t(0));
+    history.redo(); QCOMPARE(store.pixel({1, 1}).value(), 0x80402010U);
+}
 
 void TestUndoStack::strokeRejectsNotificationReentry()
 {

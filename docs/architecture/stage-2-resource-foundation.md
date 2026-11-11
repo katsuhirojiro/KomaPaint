@@ -77,3 +77,8 @@ The Windows smoke now extracts and runs the actual ZIP with a system-only PATH p
 
 
 On Windows run 42882312081 attempt 1, the isolated-ZIP smoke failed at five seconds; its window appeared 5.6 seconds later. Timestamped milestones showed `m_engine.load()` took approximately 10 seconds before returning one root object and showing the window. This narrows the observed delay to QML engine loading in that attempt, but does not identify why it was slow or prove all historical failures share the cause. Attempt 2 passed the unchanged smoke test.
+
+
+## Production compact-history increment
+
+In-memory brush history now attempts compact encoding at commit while keeping a fully admitted snapshot fallback. Replay decodes before mutation. The 64 MiB safeguard and its full-tile in-flight admission remain: they have not been replaced by a complete resource manager. See `compact-history-experiment.md` for the integration, its accounting gaps and verification gates. Earlier sections describing exclusively raw retained records are historical.
