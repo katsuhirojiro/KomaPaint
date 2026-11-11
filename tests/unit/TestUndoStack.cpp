@@ -96,7 +96,7 @@ void TestUndoStack::failedStrokePreservesRedoAndTileState()
     QCOMPARE(store.setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
     const auto initial = snapshot(store, {0, 0});
     const auto charge = 2 * store.tileBytes() + 512;
-    QVERIFY(history.setByteLimit(charge * 2));
+    QVERIFY(history.setByteLimit(charge + 4096));
     QVERIFY(history.beginStroke(&layer));
     QCOMPARE(store.setPixel({1, 1}, 0xffaabbccU), SparseTileStore::WriteResult::Changed);
     QVERIFY(history.commitStroke());
@@ -179,7 +179,7 @@ void TestUndoStack::replayBudgetFailureAndRetry()
     QVERIFY(snapshot(store, {2, 0}) == painted2);
     QVERIFY(snapshot(b.tiles(), {0, 0}) == other);
     QCOMPARE(budget->usedBytes(), used); QCOMPARE(budget->stagingBytes(), size_t(0));
-    QVERIFY(budget->setLimit(used + 2 * store.tileBytes()));
+    QVERIFY(budget->setLimit(used + 8 * store.tileBytes()));
     history.undo();
     QVERIFY(!history.canUndo()); QVERIFY(history.canRedo());
     QVERIFY(snapshot(store, {0, 0}) == initial0);
@@ -195,7 +195,7 @@ void TestUndoStack::replayBudgetFailureAndRetry()
     QVERIFY(snapshot(store, {1, 0}) == initial1);
     QVERIFY(snapshot(store, {2, 0}).empty());
     QCOMPARE(budget->usedBytes(), undoUsed); QCOMPARE(budget->stagingBytes(), size_t(0));
-    QVERIFY(budget->setLimit(undoUsed + 2 * store.tileBytes()));
+    QVERIFY(budget->setLimit(undoUsed + 8 * store.tileBytes()));
     history.redo();
     QVERIFY(history.canUndo()); QVERIFY(!history.canRedo());
     QVERIFY(snapshot(store, {0, 0}) == painted0);
@@ -352,10 +352,11 @@ void TestUndoStack::accountingLifetimes()
             QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
             QVERIFY(history.commitStroke());
             QCOMPARE(budget->artworkBytes(), tile);
-            QCOMPARE(budget->historyBytes(), tile);
+            QVERIFY(budget->historyBytes() > 0 && budget->historyBytes() < tile);
+            const auto retained = budget->historyBytes();
             history.undo();
             QCOMPARE(budget->artworkBytes(), size_t(0));
-            QCOMPARE(budget->historyBytes(), tile);
+            QCOMPARE(budget->historyBytes(), retained);
             history.redo();
             QCOMPARE(budget->artworkBytes(), tile);
             QCOMPARE(budget->stagingBytes(), size_t(0));
@@ -382,8 +383,8 @@ void TestUndoStack::unchangedTilesReleaseHistoryCharge()
     QCOMPARE(store.setPixel({257, 1}, 0x80800000U), SparseTileStore::WriteResult::Changed);
     QCOMPARE(budget->historyBytes(), 3 * tile);
     QVERIFY(history.commitStroke());
-    QCOMPARE(budget->historyBytes(), tile);
-    QCOMPARE(history.memoryBytes(), qulonglong(2 * tile + 512));
+    QVERIFY(budget->historyBytes() > 0 && budget->historyBytes() < tile);
+    QVERIFY(history.memoryBytes() < qulonglong(2 * tile + 512));
     history.undo();
     QCOMPARE(store.pixel({1, 1}).value(), 0x80402010U);
     QCOMPARE(store.pixel({257, 1}).value(), 0U);

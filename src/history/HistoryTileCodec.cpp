@@ -3,7 +3,7 @@
 #include <limits>
 #include <stdexcept>
 
-namespace komapaint::history_experiment {
+namespace komapaint::history_codec {
 namespace {
 void put(std::vector<std::uint8_t>& out, std::uint32_t x) {
     for (unsigned shift = 0; shift != 32; shift += 8) out.push_back(static_cast<std::uint8_t>(x >> shift));

@@ -1,4 +1,4 @@
-#include "history-codec/HistoryTileCodec.h"
+#include "history/HistoryTileCodec.h"
 #include "drawing/BrushEngine.h"
 #include <algorithm>
 #include <chrono>
@@ -17,7 +17,7 @@
 #else
 #include <sys/resource.h>
 #endif
-using namespace komapaint::history_experiment;
+using namespace komapaint::history_codec;
 static int failAfter = -1;
 void* operator new(std::size_t n) {
     if (failAfter == 0) { failAfter = -1; throw std::bad_alloc(); }

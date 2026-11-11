@@ -1,5 +1,6 @@
 #pragma once
 #include "../canvas/SparseTileStore.h"
+#include "HistoryTileCodec.h"
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -39,9 +40,14 @@ signals:
     void errorOccurred(const QString& message);
     void strokeRolledBack();
 private:
+    struct CompactTile {
+        TilePoint tile;
+        history_codec::TileRecord record;
+    };
     struct StrokeCommand {
         QPointer<Layer> layer;
         std::vector<SparseTileStore::TileSnapshot> before, after;
+        std::vector<CompactTile> compact;
         std::size_t bytes = 0;
         std::shared_ptr<DocumentMemoryBudget> budget;
         std::size_t historyBytes = 0;
@@ -50,6 +56,8 @@ private:
     static SparseTileStore::CaptureResult capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept;
     SparseTileStore::CaptureResult captureTile(TilePoint tile, bool existed, std::span<const std::uint32_t> pixels);
     void finishCapture();
+    void tryCompact() noexcept;
+    void replay(bool forward);
     void detachCapture() noexcept;
     void fail(const QString& message) { emit errorOccurred(message); }
     std::vector<std::unique_ptr<StrokeCommand>> m_commands;

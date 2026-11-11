@@ -157,15 +157,37 @@ int main(int argc, char** argv)
         auto& store = layer.tiles();
         CHECK(history.beginStroke(&layer));
         CHECK(store.setPixel({1, 1}, 0x80402010U) == R::Changed);
-        // All command/vector storage was reserved before mutation.
+        // Optional compact encoding may allocate; a failure must retain the
+        // already-admitted full snapshots and still commit correctly.
         failAfter = 0;
         CHECK(history.commitStroke());
-        CHECK(failAfter == 0);
+        CHECK(failAfter == -1);
         failAfter = -1;
         CHECK(history.canUndo());
         history.undo(); CHECK(store.pixel({1, 1}) == 0U);
         history.redo(); CHECK(store.pixel({1, 1}) == 0x80402010U);
     }
+    // Fault each optional encoding allocation on a multi-tile commit. A
+    // complete raw fallback is already admitted, so commit remains usable.
+    int compactFallbacks = 0;
+    for (int n = 0; n < 8; ++n) {
+        Layer layer; UndoStack history;
+        auto budget = std::make_shared<DocumentMemoryBudget>();
+        auto& store = layer.tiles(); CHECK(store.setDocumentBudget(budget));
+        CHECK(store.setPixel({1, 1}, 0x80402010U) == R::Changed);
+        CHECK(history.beginStroke(&layer));
+        CHECK(store.setPixel({1, 1}, 0xff123456U) == R::Changed);
+        CHECK(store.setPixel({257, 1}, 0x80800000U) == R::Changed);
+        failAfter = n;
+        CHECK(history.commitStroke());
+        failAfter = -1;
+        if (history.memoryBytes() >= 2 * (2 * store.tileBytes() + 512)) ++compactFallbacks;
+        CHECK(history.canUndo());
+        history.undo(); CHECK(store.pixel({1, 1}) == 0x80402010U); CHECK(store.pixel({257, 1}) == 0U);
+        history.redo(); CHECK(store.pixel({1, 1}) == 0xff123456U); CHECK(store.pixel({257, 1}) == 0x80800000U);
+        history.clear(); CHECK(budget->historyBytes() == 0 && budget->stagingBytes() == 0);
+    }
+    CHECK(compactFallbacks >= 3);
     replayFailures(false);
     replayFailures(true);
     std::cout << "History allocation-failure tests passed\n";

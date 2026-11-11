@@ -5,9 +5,9 @@
 #include <span>
 #include <vector>
 
-// Experimental, in-memory tile-record prototype. Not yet used by UndoStack.
+// In-memory lossless tile-record codec. The format is not a disk format.
 // Empty input means an absent tile; a present tile has exactly pixelCount pixels.
-namespace komapaint::history_experiment {
+namespace komapaint::history_codec {
 struct TileRecord {
     enum class Encoding : std::uint8_t { Delta, RleSnapshots, RawSnapshots };
     Encoding encoding{};

@@ -100,10 +100,10 @@ add_test(NAME test_document_memory_budget COMMAND test_document_memory_budget)
 
 komapaint_add_test(test_history_allocation_failure TestHistoryAllocationFailure.cpp)
 
-# Independent first-step codec experiment: not wired into production history.
+# Isolated codec correctness and allocation-failure tests.
 add_executable(test_history_tile_codec TestHistoryTileCodec.cpp
-    ${CMAKE_SOURCE_DIR}/tools/history-codec/HistoryTileCodec.cpp)
-target_include_directories(test_history_tile_codec PRIVATE ${CMAKE_SOURCE_DIR}/tools)
+    ${CMAKE_SOURCE_DIR}/src/history/HistoryTileCodec.cpp)
+target_include_directories(test_history_tile_codec PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_history_tile_codec PRIVATE komapaint::drawing)
 set_target_properties(test_history_tile_codec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 if(WIN32)

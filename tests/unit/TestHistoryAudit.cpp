@@ -1,6 +1,7 @@
 #include <QtTest/QtTest>
 #include <QElapsedTimer>
 #include <cstdio>
+#include <limits>
 #if defined(Q_OS_WIN)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -27,64 +28,95 @@ static ProcessMemory processMemory()
 class TestHistoryAudit : public QObject {
     Q_OBJECT
 private slots:
+    void fullSnapshotReference();
     void oneTileHistoryBudget();
 };
 
-void TestHistoryAudit::oneTileHistoryBudget()
+// Force the old fully admitted snapshot fallback for an equivalent workload.
+void TestHistoryAudit::fullSnapshotReference()
 {
-    Layer layer;
-    QVERIFY(layer.tiles().resizeEmpty(3000, 2000));
-    UndoStack history;
-    QCOMPARE(layer.tiles().tileBytes(), std::size_t(262144));
+    Layer layer; UndoStack history;
+    auto budget = std::make_shared<DocumentMemoryBudget>();
+    QVERIFY(layer.tiles().setDocumentBudget(budget));
 #if defined(Q_OS_WIN)
     const auto baseline = processMemory();
-    ProcessMemory first{};
 #endif
-    QElapsedTimer timer;
-    timer.start();
-    int accepted = 0;
-    for (int i = 0; i < 128; ++i) {
+    QElapsedTimer timer; timer.start();
+    for (int i = 0; i < 127; ++i) {
         QVERIFY(history.beginStroke(&layer));
-        BrushDefinition def;
-        def.size = 4;
-        def.color = i % 2 ? 0xffff0000U : 0xff000000U;
-        BrushStroke stroke(layer.tiles(), def);
-        if (!stroke.begin({64, 64, 1})) {
-            QCOMPARE(i, 127);
-            QCOMPARE(layer.tiles().setPixel({64, 64}, 0xffff0000U), SparseTileStore::WriteResult::HistoryLimit);
-            QVERIFY(!history.commitStroke());
-            break;
-        }
-        QVERIFY(stroke.end({64, 64, 1}));
+        QCOMPARE(layer.tiles().setPixel({64, 64}, i % 2 ? 0x80402010U : 0xff123456U), SparseTileStore::WriteResult::Changed);
+        // No space to reserve a second representation: optional compaction
+        // must fall back to the already-admitted full snapshot.
+        QVERIFY(budget->setLimit(budget->usedBytes()));
         QVERIFY(history.commitStroke());
-        ++accepted;
-        if (i == 0) {
-            QCOMPARE(history.memoryBytes(), qulonglong(524800));
-#if defined(Q_OS_WIN)
-            first = processMemory();
-#endif
-        }
+        QVERIFY(budget->setLimit(std::numeric_limits<std::size_t>::max()));
     }
-    QCOMPARE(accepted, 127);
+    const auto paintMs = timer.elapsed();
     QCOMPARE(history.memoryBytes(), qulonglong(66649600));
-    QCOMPARE(layer.tiles().allocatedPixelBytes(), std::size_t(262144));
 #if defined(Q_OS_WIN)
     const auto filled = processMemory();
-    QVERIFY(baseline.privateBytes && first.privateBytes && filled.privateBytes);
 #endif
-    const auto finalPixel = layer.tiles().pixel({64, 64}).value();
-    for (int i = 0; i < accepted; ++i) { QVERIFY(history.canUndo()); history.undo(); }
+    timer.restart(); for (int i = 0; i < 127; ++i) history.undo();
+    const auto undoMs = timer.elapsed();
+    timer.restart(); for (int i = 0; i < 127; ++i) history.redo();
+    const auto redoMs = timer.elapsed();
+    QCOMPARE(layer.tiles().pixel({64, 64}).value(), 0xff123456U);
+    std::printf("::notice title=Full-snapshot reference::127 one-pixel strokes; charge=%llu bytes tracked=%zu bytes paint=%lld ms undo=%lld ms redo=%lld ms\n",
+                history.memoryBytes(), budget->historyBytes(), static_cast<long long>(paintMs), static_cast<long long>(undoMs), static_cast<long long>(redoMs));
+#if defined(Q_OS_WIN)
+    std::printf("::notice title=Full-snapshot process memory::private baseline=%llu after127=%llu peak working=%llu; same process is reused for compact test\n", baseline.privateBytes, filled.privateBytes, filled.peakWorkingBytes);
+#endif
+    std::fflush(stdout);
+}
+
+void TestHistoryAudit::oneTileHistoryBudget()
+{
+    Layer layer; UndoStack history;
+    auto budget = std::make_shared<DocumentMemoryBudget>();
+    QVERIFY(layer.tiles().setDocumentBudget(budget));
+    const auto tileBytes = layer.tiles().tileBytes();
+    QCOMPARE(tileBytes, std::size_t(262144));
+#if defined(Q_OS_WIN)
+    const auto baseline = processMemory();
+    ProcessMemory after127{};
+#endif
+    QElapsedTimer timer; timer.start();
+    constexpr int count = 10000;
+    for (int i = 0; i < count; ++i) {
+        QVERIFY(history.beginStroke(&layer));
+        const auto color = i % 2 ? 0x80402010U : 0xff123456U;
+        QCOMPARE(layer.tiles().setPixel({64, 64}, color), SparseTileStore::WriteResult::Changed);
+        QVERIFY(history.commitStroke());
+#if defined(Q_OS_WIN)
+        if (i == 126) after127 = processMemory();
+#endif
+    }
+    const auto paintMs = timer.elapsed();
+    const auto historyCharge = history.memoryBytes();
+    const auto tracked = budget->historyBytes();
+    QVERIFY(historyCharge < qulonglong(64U * 1024U * 1024U));
+    QVERIFY(tracked < std::size_t(count) * tileBytes);
+    const auto painted = layer.tiles().pixel({64, 64}).value();
+#if defined(Q_OS_WIN)
+    const auto filled = processMemory();
+    QVERIFY(baseline.privateBytes && after127.privateBytes && filled.privateBytes);
+#endif
+    timer.restart();
+    for (int i = 0; i < count; ++i) { QVERIFY(history.canUndo()); history.undo(); }
+    const auto undoMs = timer.elapsed();
     QVERIFY(!history.canUndo());
     QCOMPARE(layer.tiles().allocatedTiles(), std::size_t(0));
-    for (int i = 0; i < accepted; ++i) { QVERIFY(history.canRedo()); history.redo(); }
+    timer.restart();
+    for (int i = 0; i < count; ++i) { QVERIFY(history.canRedo()); history.redo(); }
+    const auto redoMs = timer.elapsed();
     QVERIFY(!history.canRedo());
-    QCOMPARE(layer.tiles().pixel({64, 64}).value(), finalPixel);
-    std::printf("::notice title=History audit::127 one-tile brush strokes accepted; stroke 128 returned HistoryLimit; charged history=66649600 bytes; artwork pixels=262144 bytes; 127 undo and redo operations succeeded; elapsed=%lld ms\n", static_cast<long long>(timer.elapsed()));
+    QCOMPARE(layer.tiles().pixel({64, 64}).value(), painted);
+    std::printf("::notice title=Production compact history::10000 one-pixel strokes; retained safeguard charge=%llu bytes; tracked compact capacity=%zu bytes; paint=%lld ms undo=%lld ms redo=%lld ms; full history retained\n",
+                historyCharge, tracked, static_cast<long long>(paintMs), static_cast<long long>(undoMs), static_cast<long long>(redoMs));
 #if defined(Q_OS_WIN)
     const auto replayed = processMemory();
-    std::printf("::notice title=History process memory::Windows private committed bytes baseline=%llu first=%llu after127=%llu afterUndoRedo=%llu; working set after127=%llu; peak working set afterUndoRedo=%llu; headless brush and history only, no viewport cache or file I/O\n",
-                baseline.privateBytes, first.privateBytes, filled.privateBytes, replayed.privateBytes,
-                filled.workingBytes, replayed.peakWorkingBytes);
+    std::printf("::notice title=Production compact process memory::Windows private baseline=%llu after127=%llu after10000=%llu afterReplay=%llu; peak working afterReplay=%llu; headless one-pixel strokes, no viewport cache or file I/O\n",
+                baseline.privateBytes, after127.privateBytes, filled.privateBytes, replayed.privateBytes, replayed.peakWorkingBytes);
 #endif
     std::fflush(stdout);
 }

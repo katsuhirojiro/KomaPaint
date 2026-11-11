@@ -23,7 +23,7 @@ void TestDocumentCreation::createsIndependentDocument()
     QVERIFY(workspace.history()->commitStroke());
     const auto tileBytes = workspace.layers()->layerAt(0)->tiles().tileBytes();
     QCOMPARE(oldBudget->artworkBytes(), tileBytes);
-    QCOMPARE(oldBudget->historyBytes(), tileBytes);
+    QVERIFY(oldBudget->historyBytes() > 0 && oldBudget->historyBytes() < tileBytes);
     QSignalSpy changed(&workspace, &WorkspaceState::documentChanged);
     QVERIFY(workspace.newDocument(321, 654, false, QColor("#123456")));
     QCOMPARE(changed.count(), 1);
