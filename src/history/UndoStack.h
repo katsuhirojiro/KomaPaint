@@ -48,6 +48,7 @@ private:
         std::size_t bytes = 0;
         std::shared_ptr<DocumentMemoryBudget> budget;
         std::size_t historyBytes = 0;
+        std::size_t compactBytes = 0;
         ~StrokeCommand() { if (budget) budget->release(DocumentMemoryBudget::Category::History, historyBytes); }
     };
     static SparseTileStore::CaptureResult capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept;

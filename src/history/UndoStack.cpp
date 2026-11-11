@@ -142,13 +142,15 @@ void UndoStack::tryCompact() noexcept
         if (n > (std::numeric_limits<std::size_t>::max() - actual) / 512) return;
         const auto charge = actual + 512 * n;
         if (charge >= m_currentBytes) return; // only retain a genuine saving
+        if (actual > std::numeric_limits<std::size_t>::max() - m_current->historyBytes ||
+            actual > std::numeric_limits<std::size_t>::max() - m_currentBytes) return;
         m_current->compact = std::move(compact);
-        std::vector<SparseTileStore::TileSnapshot>().swap(m_current->before);
-        std::vector<SparseTileStore::TileSnapshot>().swap(m_current->after);
-        if (budget) budget->release(DocumentMemoryBudget::Category::History, m_current->historyBytes);
-        m_current->historyBytes = actual;
+        // Keep the before-images alive until the stroke is actually committed.
+        // Future persistence failures must still be able to roll back.
+        m_current->compactBytes = actual;
+        m_current->historyBytes += actual;
+        m_currentBytes += actual;
         extra.bytes -= actual; // transfer the retained part of the reservation
-        m_currentBytes = charge;
     } catch (const std::bad_alloc&) {} catch (const std::length_error&) {} catch (const std::invalid_argument&) {}
 }
 bool UndoStack::commitStroke()
@@ -163,6 +165,14 @@ bool UndoStack::commitStroke()
     finishCapture();
     tryCompact();
     m_current->layer->tiles().commitRecordedStroke();
+    if (!m_current->compact.empty()) {
+        const auto rawBytes = m_current->historyBytes - m_current->compactBytes;
+        std::vector<SparseTileStore::TileSnapshot>().swap(m_current->before);
+        std::vector<SparseTileStore::TileSnapshot>().swap(m_current->after);
+        if (m_current->budget) m_current->budget->release(DocumentMemoryBudget::Category::History, rawBytes);
+        m_current->historyBytes = m_current->compactBytes;
+        m_currentBytes = m_current->compactBytes + 512 * m_current->compact.size();
+    }
     if (m_current->before.empty() && m_current->compact.empty()) { m_current.reset(); m_currentBytes = 0; emit stackChanged(); return true; }
     while (m_commands.size() > m_cursor) { m_bytes -= m_commands.back()->bytes; m_commands.pop_back(); }
     m_current->bytes = m_currentBytes; m_bytes += m_currentBytes; m_currentBytes = 0;
