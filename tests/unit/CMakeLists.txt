@@ -115,3 +115,7 @@ komapaint_add_test(test_history_journal TestHistoryJournal.cpp)
 
 komapaint_add_test(test_workspace_recovery TestWorkspaceRecovery.cpp)
 target_link_libraries(test_workspace_recovery PRIVATE komapaint::app)
+
+komapaint_add_test(test_recovery_ui TestRecoveryUi.cpp)
+target_sources(test_recovery_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_recovery_ui PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)

@@ -586,6 +586,7 @@ ApplicationWindow {
 
     Dialog {
         id: recoverySettingsDialog
+        objectName: "recoverySettingsDialog"
         anchors.centerIn: parent
         modal: true
         closePolicy: Popup.NoAutoClose
@@ -599,7 +600,7 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             width: 380
             Label { text: qsTr("Save separate recovery snapshots:"); color: KP.text; wrapMode: Text.WordWrap; Layout.fillWidth: true }
-            ComboBox { id: recoveryInterval; Layout.fillWidth: true; model: [qsTr("Every 5 minutes"), qsTr("Every 10 minutes"), qsTr("Every 15 minutes"), qsTr("Every 30 minutes"), qsTr("Every 60 minutes"), qsTr("Never")] }
+            ComboBox { id: recoveryInterval; objectName: "recoveryIntervalCombo"; Layout.fillWidth: true; model: [qsTr("Every 5 minutes"), qsTr("Every 10 minutes"), qsTr("Every 15 minutes"), qsTr("Every 30 minutes"), qsTr("Every 60 minutes"), qsTr("Never")] }
             Label { text: qsTr("Never disables periodic crash protection for unsaved work. Recovery snapshots do not overwrite your project files."); color: KP.textMuted; wrapMode: Text.WordWrap; Layout.fillWidth: true }
         }
         footer: DialogButtonBox {
@@ -619,17 +620,18 @@ ApplicationWindow {
     }
     Dialog {
         id: recoveryChoiceDialog
+        objectName: "recoveryChoiceDialog"
         anchors.centerIn: parent
         modal: true
         closePolicy: Popup.NoAutoClose
         title: qsTr("Restore previous workspace?")
         contentItem: Label { text: qsTr("Restore the last recovery snapshots and project tabs? Original files will not be overwritten. Undo history starts empty. Choosing Not now keeps the old recovery data but creates no new snapshots this session."); color: KP.text; wrapMode: Text.WordWrap; width: 420 }
         footer: DialogButtonBox {
-            Button { text: qsTr("Restore"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: {
+            Button { objectName: "restoreRecoveryButton"; text: qsTr("Restore"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: {
                 if (Workspace.restoreWorkspace()) { recoveryChoiceDialog.close(); root.beginRecovery() }
             } }
             Button { text: qsTr("Discard recovery"); DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole; onClicked: recoveryDiscardConfirmation.open() }
-            Button { text: qsTr("Not now"); DialogButtonBox.buttonRole: DialogButtonBox.RejectRole; onClicked: recoveryChoiceDialog.close() }
+            Button { objectName: "notNowRecoveryButton"; text: qsTr("Not now"); DialogButtonBox.buttonRole: DialogButtonBox.RejectRole; onClicked: recoveryChoiceDialog.close() }
         }
     }
     Dialog {
