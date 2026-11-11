@@ -28,6 +28,7 @@ bool same(const QByteArray& bytes, const char* expected, qsizetype size) {
 bool HistoryJournal::writeAll(const char* data, qint64 size, QString* error)
 {
     while (size > 0) {
+        if (inject(IoOperation::Write)) { setError(error, QStringLiteral("History disk write failed (injected).")); return false; }
         const auto written = m_file.write(data, size);
         if (written <= 0) { setError(error, QStringLiteral("History disk write failed: ") + m_file.errorString()); return false; }
         data += written; size -= written;
@@ -36,7 +37,9 @@ bool HistoryJournal::writeAll(const char* data, qint64 size, QString* error)
 }
 bool HistoryJournal::durableFlush(QString* error)
 {
+    if (inject(IoOperation::Flush)) { setError(error, QStringLiteral("History disk flush failed (injected).")); return false; }
     if (!m_file.flush()) { setError(error, QStringLiteral("History disk flush failed: ") + m_file.errorString()); return false; }
+    if (inject(IoOperation::Sync)) { setError(error, QStringLiteral("History disk synchronization failed (injected).")); return false; }
 #ifdef Q_OS_WIN
     if (_commit(m_file.handle()) != 0) {
 #else
@@ -116,6 +119,7 @@ bool HistoryJournal::append(const QByteArray& payload, qint64* offset, QString* 
 }
 bool HistoryJournal::read(qint64 offset, QByteArray* payload, QString* error)
 {
+    if (inject(IoOperation::Read)) { setError(error, QStringLiteral("History disk read failed (injected).")); return false; }
     const auto fileSize = m_file.size();
     if (!m_file.isOpen() || !payload || offset < fileHeader || offset > fileSize || fileSize - offset < frameHeader + frameFooter || !m_file.seek(offset)) {
         setError(error, QStringLiteral("History record is missing or incomplete.")); return false;

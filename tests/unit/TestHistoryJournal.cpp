@@ -13,6 +13,7 @@ private slots:
     void rejectedOperationsPreserveOutputs();
     void corruptRecord();
     void invalidPathAndExistingFile();
+    void injectedIoFailuresAndRetry();
 };
 void TestHistoryJournal::roundTripAndIdentity()
 {
@@ -135,5 +136,52 @@ void TestHistoryJournal::invalidPathAndExistingFile()
     QVERIFY(!duplicate.create(path, id, &error));
     QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), QByteArray("keep"));
 }
+
+namespace {
+struct FaultPlan {
+    HistoryJournal::IoOperation operation = HistoryJournal::IoOperation::Write;
+    int remaining = -1;
+};
+bool failIo(void* context, HistoryJournal::IoOperation operation) noexcept
+{
+    auto& plan = *static_cast<FaultPlan*>(context);
+    if (plan.operation != operation || plan.remaining < 0) return false;
+    if (plan.remaining-- == 0) { plan.remaining = -1; return true; }
+    return false;
+}
+}
+void TestHistoryJournal::injectedIoFailuresAndRetry()
+{
+    using Op = HistoryJournal::IoOperation;
+    // The five write calls cover frame header, length, digest, payload and
+    // footer. Also inject flush, synchronization and readback failures.
+    for (int point = 0; point < 8; ++point) {
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        const auto path = dir.filePath(QStringLiteral("history.bin"));
+        const auto id = QUuid::createUuid(); QString error;
+        FaultPlan plan;
+        HistoryJournal journal(&failIo, &plan);
+        QVERIFY2(journal.create(path, id, &error), qPrintable(error));
+        qint64 first = -1, second = 123;
+        QVERIFY2(journal.append(QByteArray("existing"), &first, &error), qPrintable(error));
+        const qint64 originalSize = QFile(path).size();
+        plan.operation = point < 5 ? Op::Write : point == 5 ? Op::Flush : point == 6 ? Op::Sync : Op::Read;
+        plan.remaining = point < 5 ? point : 0;
+        QVERIFY(!journal.append(QByteArray("next record"), &second, &error));
+        QCOMPARE(second, qint64(123));
+        QVERIFY2(error.contains(QStringLiteral("failed")), qPrintable(error));
+        QCOMPARE(QFile(path).size(), originalSize);
+        QByteArray data;
+        QVERIFY2(journal.read(first, &data, &error), qPrintable(error));
+        QCOMPARE(data, QByteArray("existing"));
+        std::vector<qint64> offsets;
+        QVERIFY2(journal.verify(&offsets, &error), qPrintable(error));
+        QCOMPARE(offsets.size(), size_t(1)); QCOMPARE(offsets[0], first);
+        QVERIFY2(journal.append(QByteArray("next record"), &second, &error), qPrintable(error));
+        QVERIFY(journal.read(second, &data, &error));
+        QCOMPARE(data, QByteArray("next record"));
+    }
+}
+
 QTEST_APPLESS_MAIN(TestHistoryJournal)
 #include "TestHistoryJournal.moc"

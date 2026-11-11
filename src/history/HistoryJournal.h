@@ -10,6 +10,11 @@ namespace komapaint {
 // layer identities, or a complete project. It is not yet connected to UndoStack.
 class HistoryJournal {
 public:
+    // Narrow I/O fault seam for deterministic tests; normal callers omit it.
+    enum class IoOperation { Write, Flush, Sync, Read };
+    using IoFault = bool (*)(void*, IoOperation) noexcept;
+    explicit HistoryJournal(IoFault fault = nullptr, void* context = nullptr) noexcept
+        : m_fault(fault), m_faultContext(context) {}
     bool create(const QString& path, const QUuid& documentId, QString* error);
     bool open(const QString& path, const QUuid& documentId, QString* error);
     bool append(const QByteArray& payload, qint64* offset, QString* error);
@@ -21,6 +26,9 @@ private:
     bool writeAll(const char* data, qint64 size, QString* error);
     bool durableFlush(QString* error);
     bool rollbackAppend(qint64 start) noexcept;
+    bool inject(IoOperation operation) const noexcept { return m_fault && m_fault(m_faultContext, operation); }
+    IoFault m_fault;
+    void* m_faultContext;
     QFile m_file;
     QUuid m_documentId;
     qint64 m_end = 0;
