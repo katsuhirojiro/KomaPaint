@@ -19,16 +19,17 @@ of safety for every callback or platform allocation failure. See
 
 ## Memory and lifecycle
 
-The temporary history safeguard is 64 MiB. Before painting, each touched tile
-is conservatively charged two full tile buffers plus 512 bytes. At commit,
-when resource admission succeeds, lossless compact records replace snapshots
-and are charged by their retained capacity plus the metadata allowance. If
-compaction cannot be admitted or allocated, the already-reserved snapshots
-remain valid as a fallback. Compact replay allocates and reserves decoding
-workspace before restoring tiles; failure preserves the history cursor and
-artwork. This is not a complete process-memory bound. The 256 MiB per-layer
-pixel safeguard remains, while the shared document budget is unlimited by
-default and only partially accounts document resources. If the history is full, drawing
+There is no fixed history byte or step limit. Before painting, the recorder
+reserves the touched tile's rollback and redo pixel buffers. At commit it tries
+compact lossless records; if optional encoding cannot be admitted or allocated,
+the already-reserved snapshots remain valid as a fallback. Major reservations
+consult current system memory availability and the existing shared document
+budget. A failed admission or allocation cancels the affected stroke rather
+than dropping retained history. On Windows the check uses available physical
+and commit memory and the OS low-memory signal; Linux uses available memory and,
+when visible, the cgroup-v2 root limit. This check is advisory, not a guarantee
+that an allocation will succeed, and cannot account for all memory. The existing
+256 MiB per-layer pixel safeguard remains. If resources are exhausted, drawing
 stops rather than silently dropping undo; the Edit menu offers an explicit,
 confirmed clear-history action which preserves artwork. Redo entries continue
 to count until a new stroke commits or history is cleared.

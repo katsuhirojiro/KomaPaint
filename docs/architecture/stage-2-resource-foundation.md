@@ -82,3 +82,8 @@ On Windows run 42882312081 attempt 1, the isolated-ZIP smoke failed at five seco
 ## Production compact-history increment
 
 In-memory brush history now attempts compact encoding at commit while keeping a fully admitted snapshot fallback. Replay decodes before mutation. The 64 MiB safeguard and its full-tile in-flight admission remain: they have not been replaced by a complete resource manager. See `compact-history-experiment.md` for the integration, its accounting gaps and verification gates. Earlier sections describing exclusively raw retained records are historical.
+
+
+## Practical admission update
+
+The former 64 MiB history cap has been removed after compact and raw-fallback verification. Major reservations now consult an advisory OS memory-availability check in addition to the optional document budget; see `compact-history-experiment.md` for scope and limitations. Earlier mentions of an active 64 MiB cap are historical. The existing per-layer safeguard, rollback and explicit failure handling remain. No disk-backed history or unlimited-storage guarantee exists.

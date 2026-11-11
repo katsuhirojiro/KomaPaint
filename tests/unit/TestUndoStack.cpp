@@ -4,7 +4,10 @@
 #include "layers/LayerModel.h"
 #include "canvas/CanvasDocument.h"
 #include "drawing/BrushEngine.h"
+#include <limits>
 using namespace komapaint;
+static bool simulatedPressure = false;
+static bool testMemoryCheck(std::size_t) noexcept { return !simulatedPressure; }
 class TestUndoStack : public QObject {
     Q_OBJECT
 private slots:
@@ -15,6 +18,7 @@ private slots:
     void replayBudgetFailureAndRetry();
     void replayRejectsReentry();
     void compactRejectsIncompatibleReplay();
+    void pressureFailureAndRecovery();
     void strokeRejectsNotificationReentry();
     void layerRemovedDuringReplay();
     void ownerDestroyedDuringCallbacks();
@@ -62,6 +66,8 @@ void TestUndoStack::exactStrokesAndLayers() {
 }
 void TestUndoStack::cancellationAndLimits() {
     UndoStack history; Layer layer;
+    auto budget = std::make_shared<DocumentMemoryBudget>();
+    QVERIFY(layer.tiles().setDocumentBudget(budget));
     QVERIFY(history.beginStroke(&layer));
     QVERIFY(history.commitStroke()); QVERIFY(!history.canUndo());
     QVERIFY(history.beginStroke(&layer));
@@ -70,19 +76,20 @@ void TestUndoStack::cancellationAndLimits() {
     QCOMPARE(layer.tiles().pixel({0, 0}).value(), 0U);
     QCOMPARE(layer.tiles().allocatedTiles(), size_t(0));
     QVERIFY(!history.canUndo());
-    QVERIFY(history.setByteLimit(1));
+    QVERIFY(budget->setLimit(1));
     QVERIFY(history.beginStroke(&layer));
-    QCOMPARE(layer.tiles().setPixel({1, 1}, 0xffffffffU), SparseTileStore::WriteResult::HistoryLimit);
+    QCOMPARE(layer.tiles().setPixel({1, 1}, 0xffffffffU), SparseTileStore::WriteResult::DocumentMemoryLimit);
     QCOMPARE(layer.tiles().allocatedTiles(), size_t(0));
     QVERIFY(!history.commitStroke()); QVERIFY(!history.canUndo());
     QCOMPARE(history.memoryBytes(), qulonglong(0));
-    QVERIFY(history.setByteLimit(2 * layer.tiles().tileBytes() + 512));
+    QVERIFY(budget->setLimit(2 * layer.tiles().tileBytes()));
     QVERIFY(history.beginStroke(&layer));
     QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80800000U), SparseTileStore::WriteResult::Changed);
-    QCOMPARE(layer.tiles().setPixel({257, 1}, 0xffffffffU), SparseTileStore::WriteResult::HistoryLimit);
+    QCOMPARE(layer.tiles().setPixel({257, 1}, 0xffffffffU), SparseTileStore::WriteResult::DocumentMemoryLimit);
     QVERIFY(!history.commitStroke()); QVERIFY(!history.canUndo());
     QCOMPARE(layer.tiles().pixel({1, 1}).value(), 0U);
     QCOMPARE(layer.tiles().allocatedTiles(), size_t(0));
+    QVERIFY(budget->setLimit(std::numeric_limits<std::size_t>::max()));
     QVERIFY(history.beginStroke(&layer));
     QCOMPARE(layer.tiles().setPixel({1, 1}, 0x80800000U), SparseTileStore::WriteResult::Changed);
     QVERIFY(history.commitStroke()); QVERIFY(history.canUndo());
@@ -94,10 +101,10 @@ void TestUndoStack::failedStrokePreservesRedoAndTileState()
     UndoStack history;
     Layer layer;
     auto& store = layer.tiles();
+    auto budget = std::make_shared<DocumentMemoryBudget>();
+    QVERIFY(store.setDocumentBudget(budget));
     QCOMPARE(store.setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
     const auto initial = snapshot(store, {0, 0});
-    const auto charge = 2 * store.tileBytes() + 512;
-    QVERIFY(history.setByteLimit(charge + 4096));
     QVERIFY(history.beginStroke(&layer));
     QCOMPARE(store.setPixel({1, 1}, 0xffaabbccU), SparseTileStore::WriteResult::Changed);
     QVERIFY(history.commitStroke());
@@ -107,9 +114,10 @@ void TestUndoStack::failedStrokePreservesRedoAndTileState()
     QVERIFY(snapshot(store, {0, 0}) == initial);
     const auto dirtyBefore = store.dirtyRegions();
     const auto versionBefore = store.dirtyVersion();
+    QVERIFY(budget->setLimit(budget->usedBytes() + 2 * store.tileBytes()));
     QVERIFY(history.beginStroke(&layer));
     QCOMPARE(store.setPixel({1, 1}, 0U), SparseTileStore::WriteResult::Changed);
-    QCOMPARE(store.setPixel({257, 1}, 0xff000000U), SparseTileStore::WriteResult::HistoryLimit);
+    QCOMPARE(store.setPixel({257, 1}, 0xff000000U), SparseTileStore::WriteResult::DocumentMemoryLimit);
     QVERIFY(!history.commitStroke());
     QVERIFY(snapshot(store, {0, 0}) == initial);
     QVERIFY(snapshot(store, {1, 0}).empty());
@@ -117,6 +125,7 @@ void TestUndoStack::failedStrokePreservesRedoAndTileState()
     QVERIFY(store.dirtyRegions() == dirtyBefore);
     QCOMPARE(store.dirtyVersion(), versionBefore);
     QVERIFY(history.canRedo());
+    QVERIFY(budget->setLimit(std::numeric_limits<std::size_t>::max()));
     history.redo();
     QVERIFY(snapshot(store, {0, 0}) == painted);
     history.undo();
@@ -231,6 +240,45 @@ void TestUndoStack::replayRejectsReentry()
 
 
 
+
+
+void TestUndoStack::pressureFailureAndRecovery()
+{
+    auto budget = std::make_shared<DocumentMemoryBudget>(std::numeric_limits<std::size_t>::max(), testMemoryCheck);
+    Layer layer; UndoStack history;
+    auto& store = layer.tiles();
+    QVERIFY(store.setDocumentBudget(budget));
+    QCOMPARE(store.setPixel({1, 1}, 0x80402010U), SparseTileStore::WriteResult::Changed);
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(store.setPixel({1, 1}, 0xff123456U), SparseTileStore::WriteResult::Changed);
+    QVERIFY(history.commitStroke());
+    history.undo();
+    QVERIFY(history.canRedo());
+    const auto dirty = store.dirtyRegions();
+    const auto version = store.dirtyVersion();
+    const auto used = budget->usedBytes();
+    for (int i = 0; i < 2; ++i) {
+        QVERIFY(history.beginStroke(&layer));
+        QCOMPARE(store.setPixel({1, 1}, 0U), SparseTileStore::WriteResult::Changed);
+        simulatedPressure = true;
+        const auto result = store.setPixel({257, 1}, 0xffabcdefU);
+        simulatedPressure = false;
+        QCOMPARE(result, SparseTileStore::WriteResult::DocumentMemoryLimit);
+        QVERIFY(!history.commitStroke());
+        QCOMPARE(store.pixel({1, 1}).value(), 0x80402010U);
+        QCOMPARE(store.allocatedTiles(), size_t(1));
+        QVERIFY(store.dirtyRegions() == dirty); QCOMPARE(store.dirtyVersion(), version);
+        QCOMPARE(budget->usedBytes(), used); QVERIFY(history.canRedo());
+    }
+    simulatedPressure = true;
+    history.redo();
+    simulatedPressure = false;
+    QVERIFY(history.canRedo()); QCOMPARE(store.pixel({1, 1}).value(), 0x80402010U);
+    QCOMPARE(budget->usedBytes(), used); QCOMPARE(budget->stagingBytes(), size_t(0));
+    history.redo();
+    QVERIFY(history.canUndo()); QVERIFY(!history.canRedo());
+    QCOMPARE(store.pixel({1, 1}).value(), 0xff123456U);
+}
 
 void TestUndoStack::compactRejectsIncompatibleReplay()
 {

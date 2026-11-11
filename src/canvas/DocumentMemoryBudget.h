@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstddef>
 #include <limits>
+#include "MemoryAvailability.h"
 
 namespace komapaint {
 // First-stage accounting for layer pixel buffers and restore staging only.
@@ -10,7 +11,12 @@ namespace komapaint {
 class DocumentMemoryBudget {
 public:
     enum class Category { Artwork, RestoreStaging, History, CompositeCache };
-    explicit DocumentMemoryBudget(std::size_t limit = std::numeric_limits<std::size_t>::max()) : m_limit(limit) {}
+    using MemoryCheck = bool (*)(std::size_t) noexcept;
+    // Optional explicit limit and injectable pressure check are for callers
+    // and tests; normal documents have no fixed document or history quota.
+    explicit DocumentMemoryBudget(std::size_t limit = std::numeric_limits<std::size_t>::max(),
+                                  MemoryCheck check = systemMemoryAvailable)
+        : m_check(check), m_limit(limit) {}
     std::size_t limit() const noexcept { return m_limit; }
     std::size_t artworkBytes() const noexcept { return m_artwork; }
     std::size_t stagingBytes() const noexcept { return m_staging; }
@@ -24,6 +30,7 @@ public:
     }
     bool reserve(Category category, std::size_t bytes) noexcept {
         if (bytes > m_limit || usedBytes() > m_limit - bytes) return false;
+        if (bytes && m_check && !m_check(bytes)) return false;
         counter(category) += bytes;
         if (usedBytes() > m_peak) m_peak = usedBytes();
         return true;
@@ -46,6 +53,7 @@ private:
         case Category::CompositeCache: return m_cache;
         }
         return m_cache; }
+    MemoryCheck m_check;
     std::size_t m_limit, m_artwork = 0, m_staging = 0, m_history = 0, m_cache = 0, m_peak = 0;
 };
 } // namespace komapaint

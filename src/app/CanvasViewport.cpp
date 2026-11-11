@@ -230,18 +230,14 @@ void CanvasViewport::reportStrokeFailure(SparseTileStore::WriteResult reason, bo
     using R = SparseTileStore::WriteResult;
     QString detail;
     switch (reason) {
-    case R::HistoryLimit:
-        detail = QStringLiteral("Undo history capacity reached (accounted %1 of %2 MiB).")
-            .arg(m_history ? m_history->memoryBytes() / (1024.0 * 1024.0) : 0.0, 0, 'f', 1)
-            .arg(m_history ? m_history->byteLimit() / (1024.0 * 1024.0) : 0.0, 0, 'f', 1);
-        break;
+    case R::HistoryLimit: detail = QStringLiteral("Undo history could not record this stroke."); break;
     case R::HistoryAllocationFailed: detail = QStringLiteral("Memory allocation for undo history failed."); break;
     case R::MemoryLimit:
         detail = QStringLiteral("This layer's pixel storage limit was reached (%1 of %2 MiB).")
             .arg(tileBytes / (1024.0 * 1024.0), 0, 'f', 1)
             .arg(tileBudget / (1024.0 * 1024.0), 0, 'f', 1);
         break;
-    case R::DocumentMemoryLimit: detail = QStringLiteral("Document pixel storage capacity was reached."); break;
+    case R::DocumentMemoryLimit: detail = QStringLiteral("Not enough available memory for the document or undo history. Free memory and try again."); break;
     case R::TrackingLimit: detail = QStringLiteral("Tile change tracking capacity was reached."); break;
     case R::AllocationFailed: detail = QStringLiteral("Memory allocation for artwork or tile tracking failed."); break;
     case R::InvalidPixel: detail = QStringLiteral("The brush received invalid settings or input."); break;

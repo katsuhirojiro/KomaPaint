@@ -147,7 +147,6 @@ void TestCanvasViewport::strokeFailureDiagnostics()
     CanvasDocument doc;
     doc.setSize(QSize(600, 400));
     UndoStack history;
-    QVERIFY(history.setByteLimit(2 * doc.layers()->layerAt(0)->tiles().tileBytes() + 512));
     CanvasViewport view;
     view.setWidth(500); view.setHeight(300);
     view.setHistory(&history); view.setDocument(&doc); view.refreshNow();
@@ -157,6 +156,8 @@ void TestCanvasViewport::strokeFailureDiagnostics()
     const auto first = view.documentToViewport(100, 100);
     const auto second = view.documentToViewport(300, 100);
     const auto originalFrame = view.frameSnapshot();
+    auto budget = doc.layers()->documentBudget();
+    QVERIFY(budget->setLimit(budget->usedBytes() + 2 * doc.layers()->layerAt(0)->tiles().tileBytes()));
     QVERIFY(view.beginStroke(first.x(), first.y(), 1, &brush, Qt::red));
     view.refreshNow(); // acknowledge dirties and populate cache during the stroke
     QVERIFY(view.frameSnapshot().pixelColor(qRound(first.x()), qRound(first.y())) !=
@@ -164,8 +165,7 @@ void TestCanvasViewport::strokeFailureDiagnostics()
     view.continueStroke(second.x(), second.y(), 1);
     QCOMPARE(errors.size(), 1);
     const auto message = errors.takeFirst().at(0).toString();
-    QVERIFY2(message.contains(QStringLiteral("Undo history capacity")), qPrintable(message));
-    QVERIFY(message.contains(QStringLiteral("accounted")));
+    QVERIFY2(message.contains(QStringLiteral("available memory")), qPrintable(message));
     QVERIFY(!history.canUndo());
     QVERIFY(message.contains(QStringLiteral("rolled back")));
     auto& store = doc.layers()->layerAt(0)->tiles();

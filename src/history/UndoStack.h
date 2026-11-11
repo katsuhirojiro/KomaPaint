@@ -25,9 +25,6 @@ public:
     QString undoText() const;
     QString redoText() const;
     qulonglong memoryBytes() const { return m_bytes + m_currentBytes; }
-    std::size_t byteLimit() const { return m_limit; }
-    // Set only while history is empty, for predictable accounting and tests.
-    bool setByteLimit(std::size_t bytes);
     bool beginStroke(Layer* layer);
     bool commitStroke();
     bool cancelStroke();
@@ -64,6 +61,5 @@ private:
     std::unique_ptr<StrokeCommand> m_current;
     bool m_replaying = false;
     std::size_t m_cursor = 0, m_bytes = 0, m_currentBytes = 0;
-    std::size_t m_limit = 64U * 1024U * 1024U;
 };
 } // namespace komapaint

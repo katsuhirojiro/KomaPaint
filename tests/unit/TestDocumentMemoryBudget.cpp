@@ -3,6 +3,8 @@
 #include <iostream>
 #include <memory>
 using namespace komapaint;
+static bool pressure = false;
+static bool fakeMemoryCheck(std::size_t) noexcept { return !pressure; }
 #define CHECK(...) do { if (!(__VA_ARGS__)) { std::cerr << "FAIL line " << __LINE__ << ": " << #__VA_ARGS__ << '\n'; std::exit(1); } } while (false)
 int main()
 {
@@ -44,5 +46,19 @@ int main()
         CHECK(budget->usedBytes() == tile * 2);
     }
     CHECK(budget->usedBytes() == 0); // layer/store destruction releases reservations
+    {
+        DocumentMemoryBudget underPressure(std::numeric_limits<std::size_t>::max(), fakeMemoryCheck);
+        CHECK(underPressure.reserve(DocumentMemoryBudget::Category::Artwork, 64));
+        pressure = true;
+        CHECK(!underPressure.reserve(DocumentMemoryBudget::Category::History, 1));
+        CHECK(!underPressure.reserve(DocumentMemoryBudget::Category::RestoreStaging, 1));
+        CHECK(underPressure.reserve(DocumentMemoryBudget::Category::History, 0));
+        CHECK(underPressure.usedBytes() == 64);
+        pressure = false;
+        CHECK(underPressure.reserve(DocumentMemoryBudget::Category::History, 1));
+        underPressure.release(DocumentMemoryBudget::Category::History, 1);
+        underPressure.release(DocumentMemoryBudget::Category::Artwork, 64);
+        CHECK(underPressure.usedBytes() == 0);
+    }
     std::cout << "Document pixel budget tests passed\n";
 }

@@ -15,10 +15,6 @@ UndoStack::~UndoStack() {
 }
 QString UndoStack::undoText() const { return canUndo() ? QStringLiteral("Brush stroke") : QString(); }
 QString UndoStack::redoText() const { return canRedo() ? QStringLiteral("Brush stroke") : QString(); }
-bool UndoStack::setByteLimit(std::size_t bytes) {
-    if (m_current || !m_commands.empty()) return false;
-    m_limit = bytes; return true;
-}
 bool UndoStack::beginStroke(Layer* layer)
 {
     if (!layer || m_current || m_replaying) return false;
@@ -27,7 +23,21 @@ bool UndoStack::beginStroke(Layer* layer)
             const auto max = m_commands.max_size();
             if (m_commands.size() == max) throw std::length_error("history full");
             const auto growth = std::max<std::size_t>(m_commands.size(), 1);
-            m_commands.reserve(m_commands.size() + std::min(growth, max - m_commands.size()));
+            const auto capacity = m_commands.size() + std::min(growth, max - m_commands.size());
+            if (capacity > std::numeric_limits<std::size_t>::max() / sizeof(m_commands[0]))
+                throw std::length_error("history index too large");
+            const auto bytes = capacity * sizeof(m_commands[0]);
+            auto budget = layer->tiles().documentBudget();
+            if (budget && !budget->reserve(DocumentMemoryBudget::Category::History, bytes)) {
+                fail(QStringLiteral("Not enough available memory to grow undo history. Free memory and try again."));
+                return false;
+            }
+            struct Reservation {
+                std::shared_ptr<DocumentMemoryBudget> budget;
+                std::size_t bytes;
+                ~Reservation() { if (budget) budget->release(DocumentMemoryBudget::Category::History, bytes); }
+            } reservation{std::move(budget), bytes};
+            m_commands.reserve(capacity);
         } // commit must not allocate
         m_current = std::make_unique<StrokeCommand>();
         m_current->layer = layer;
@@ -51,7 +61,9 @@ SparseTileStore::CaptureResult UndoStack::captureTile(TilePoint tile, bool exist
     for (const auto& item : m_current->before) if (item.tile == tile) return SparseTileStore::CaptureResult::Ready;
     const auto tileBytes = m_current->layer->tiles().tileBytes();
     const std::size_t charge = 2 * tileBytes + 512; // conservative allowance for containers
-    if (charge > m_limit || m_bytes > m_limit - charge || m_currentBytes > m_limit - charge - m_bytes) return SparseTileStore::CaptureResult::Limit;
+    const auto max = std::numeric_limits<std::size_t>::max();
+    if (charge > max - m_bytes || m_currentBytes > max - m_bytes - charge)
+        return SparseTileStore::CaptureResult::AllocationFailed;
     const std::size_t tracked = tileBytes * (existed ? 2 : 1);
     struct Reservation {
         DocumentMemoryBudget* budget;
@@ -126,7 +138,7 @@ void UndoStack::tryCompact() noexcept
             actual += record.payload.capacity();
             compact.push_back({m_current->before[i].tile, std::move(record)});
         }
-        // Keep the legacy per-tile metadata allowance in the 64 MiB safeguard.
+        // Keep the conservative per-tile metadata allowance in reporting.
         if (n > (std::numeric_limits<std::size_t>::max() - actual) / 512) return;
         const auto charge = actual + 512 * n;
         if (charge >= m_currentBytes) return; // only retain a genuine saving
