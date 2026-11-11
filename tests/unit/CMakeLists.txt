@@ -104,6 +104,7 @@ komapaint_add_test(test_history_allocation_failure TestHistoryAllocationFailure.
 add_executable(test_history_tile_codec TestHistoryTileCodec.cpp
     ${CMAKE_SOURCE_DIR}/tools/history-codec/HistoryTileCodec.cpp)
 target_include_directories(test_history_tile_codec PRIVATE ${CMAKE_SOURCE_DIR}/tools)
+target_link_libraries(test_history_tile_codec PRIVATE komapaint::drawing)
 set_target_properties(test_history_tile_codec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 if(WIN32)
     target_link_libraries(test_history_tile_codec PRIVATE Psapi)

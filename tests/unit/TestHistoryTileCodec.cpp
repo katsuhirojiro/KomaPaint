@@ -1,4 +1,5 @@
 #include "history-codec/HistoryTileCodec.h"
+#include "drawing/BrushEngine.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -43,7 +44,54 @@ static Memory memory() {
 struct Memory { unsigned long long privateBytes, working, peak; };
 static Memory memory() { struct rusage r{}; getrusage(RUSAGE_SELF, &r); return {0, 0, static_cast<unsigned long long>(r.ru_maxrss) * 1024}; }
 #endif
+// Differential replay against actual sparse-store tiles from a brush stroke.
+static void realBrushRoundTrip() {
+    using namespace komapaint;
+    using R = SparseTileStore::WriteResult;
+    SparseTileStore layer(768, 128), other(768, 128);
+    CHECK(layer.setPixel({10, 20}, 0x80402010U) == R::Changed);
+    CHECK(other.setPixel({10, 20}, 0xff123456U) == R::Changed);
+    std::vector<std::vector<std::uint32_t>> before;
+    for (int x = 0; x < 3; ++x) {
+        auto pixels = layer.tilePixels({x, 0}); before.emplace_back(pixels.begin(), pixels.end());
+    }
+    BrushDefinition brush; brush.size = 16; brush.opacity = 0.5; brush.flow = 0.8;
+    brush.color = 0xffd04580U; brush.tip = BrushTip::Textured;
+    BrushStroke stroke(layer, brush);
+    CHECK(stroke.begin({10, 20, 0.7})); CHECK(stroke.end({530, 20, 0.7}));
+    std::vector<std::vector<std::uint32_t>> after;
+    std::vector<TileRecord> records;
+    std::size_t encoded = 0;
+    for (int x = 0; x < 3; ++x) {
+        auto pixels = layer.tilePixels({x, 0}); after.emplace_back(pixels.begin(), pixels.end());
+        records.push_back(encode(before[x], after[x], 256 * 256));
+        encoded += records.back().payload.size();
+        CHECK(apply(records.back(), before[x], true) == after[x]);
+        CHECK(apply(records.back(), after[x], false) == before[x]);
+    }
+    CHECK(encoded < 3 * 2 * 256 * 256 * sizeof(std::uint32_t));
+    std::vector<SparseTileStore::TileSnapshot> undo;
+    for (int x = 0; x < 3; ++x) undo.push_back({{x, 0}, apply(records[x], after[x], false)});
+    CHECK(layer.restoreTiles(undo) == R::Changed);
+    CHECK(layer.allocatedTiles() == 1);
+    for (int x = 0; x < 3; ++x) {
+        auto pixels = layer.tilePixels({x, 0});
+        CHECK(std::equal(pixels.begin(), pixels.end(), before[x].begin(), before[x].end()));
+    }
+    CHECK(other.pixel({10, 20}) == 0xff123456U);
+    std::vector<SparseTileStore::TileSnapshot> redo;
+    for (int x = 0; x < 3; ++x) redo.push_back({{x, 0}, apply(records[x], before[x], true)});
+    CHECK(layer.restoreTiles(redo) == R::Changed);
+    CHECK(layer.allocatedTiles() == 3);
+    for (int x = 0; x < 3; ++x) {
+        auto pixels = layer.tilePixels({x, 0});
+        CHECK(std::equal(pixels.begin(), pixels.end(), after[x].begin(), after[x].end()));
+    }
+    CHECK(other.pixel({10, 20}) == 0xff123456U);
+    std::cout << "Real brush across three tiles, experimental encoded payload=" << encoded << " bytes\n";
+}
 int main() {
+    realBrushRoundTrip();
     constexpr std::uint32_t n = 256 * 256;
     std::vector<std::uint32_t> empty, before(n, 0), after = before;
     after[42] = 0x80402010U;
