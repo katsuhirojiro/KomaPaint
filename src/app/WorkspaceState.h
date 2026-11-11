@@ -13,6 +13,9 @@
 #include <QUuid>
 #include <QVariantList>
 #include <vector>
+#include <memory>
+#include <QLockFile>
+#include <QTimer>
 
 namespace komapaint {
 
@@ -33,6 +36,8 @@ class WorkspaceState : public QObject
     Q_PROPERTY(UndoStack*      history   READ history   NOTIFY documentChanged)
     Q_PROPERTY(QVariantList projectTabs READ projectTabs NOTIFY tabsChanged)
     Q_PROPERTY(int activeTab READ activeTab NOTIFY tabsChanged)
+    Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryAvailableChanged)
+    Q_PROPERTY(bool recoveryReady READ recoveryReady NOTIFY recoveryAvailableChanged)
     Q_PROPERTY(QString         currentFile READ currentFile NOTIFY currentFileChanged)
     Q_PROPERTY(QString         activeTool READ activeTool WRITE setActiveTool NOTIFY activeToolChanged)
     Q_PROPERTY(qreal           zoom      READ zoom      WRITE setZoom      NOTIFY zoomChanged)
@@ -55,6 +60,14 @@ public:
     Q_INVOKABLE bool activateTab(int index);
     // Discard must be explicit; the UI is responsible for confirmation.
     Q_INVOKABLE bool closeTab(int index, bool discard = false);
+    bool initializeRecovery(const QString& directory);
+    bool recoveryAvailable() const { return m_recoveryAvailable; }
+    bool recoveryReady() const { return bool(m_recoveryLock); }
+    Q_INVOKABLE bool restoreWorkspace();
+    Q_INVOKABLE bool discardRecovery();
+    Q_INVOKABLE bool persistWorkspace(const QStringList& discardIds = {});
+    Q_INVOKABLE void setRecoveryInterval(int minutes);
+    void setRecoveryFailureForTests(int stage) { m_recoveryFailureForTests = stage; }
 
     Q_INVOKABLE bool newDocument(int width, int height, bool transparent, const QColor& background);
     // Creates a new illustration project from the New Project dialog: applies
@@ -107,6 +120,7 @@ signals:
     void zoomChanged(qreal zoom);
     void currentFileChanged();
     void tabsChanged();
+    void recoveryAvailableChanged();
     void creationErrorChanged();
     void fileErrorOccurred(const QString& message);
     void fileAssociationCompleted(const QString& message, bool ok);
@@ -116,10 +130,15 @@ private:
     // is not yet undoable. Connected to every document we own or swap in.
     void connectLayerDeletion(const CanvasDocument* document, UndoStack* history);
     void addDocument(CanvasDocument* document, const QString& path = {});
-    struct Tab { CanvasDocument* document; UndoStack* history; QString path; QUuid id; };
+    struct Tab { CanvasDocument* document; UndoStack* history; QString path; QUuid id; QByteArray savedHash; };
     std::vector<Tab> m_tabs;
     int m_activeTab = 0;
     bool m_initialPlaceholder = true;
+    QString m_recoveryDirectory;
+    std::unique_ptr<QLockFile> m_recoveryLock;
+    QTimer m_recoveryTimer;
+    bool m_recoveryAvailable = false;
+    int m_recoveryFailureForTests = 0;
     BrushSettings* m_brush;
     CanvasDocument* m_document;
     TimelineState*  m_timeline;

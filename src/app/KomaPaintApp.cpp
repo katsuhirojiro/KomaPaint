@@ -9,6 +9,8 @@
 #include <QFont>
 #include <QFontDatabase>
 #include <QQuickWindow>
+#include <QStandardPaths>
+#include <QDir>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlError>
@@ -120,9 +122,14 @@ int KomaPaintApp::run()
         if (QFontDatabase::hasFamily(name)) { app->setFont(QFont(name, 10)); break; }
     }
 
+    const bool recoveryReady = m_workspace.initializeRecovery(QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath(QStringLiteral("recovery")));
+    if (!recoveryReady) qWarning("[KomaPaint] Workspace recovery is unavailable (directory or lock failure).");
     registerTypes();
     loadStyles();
     loadUi();
+    if (!recoveryReady) QTimer::singleShot(0, &m_workspace, [this] {
+        emit m_workspace.fileErrorOccurred(QStringLiteral("Workspace recovery is unavailable. Automatic recovery and workspace restoration will not run in this instance."));
+    });
 
     if (!m_fileToOpen.isEmpty()) {
         qInfo("[KomaPaint] run(): opening command-line file %s", qUtf8Printable(m_fileToOpen));

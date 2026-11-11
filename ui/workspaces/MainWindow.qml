@@ -60,6 +60,11 @@ ApplicationWindow {
                 return
             }
         }
+        if (Workspace.recoveryReady && !Workspace.persistWorkspace(approvedCloseIds)) {
+            closeAction = ""
+            approvedCloseIds = []
+            return
+        }
         closeAction = ""
         allowCloseWithArtwork = true
         root.close()
@@ -159,10 +164,15 @@ ApplicationWindow {
         Settings.windowSize = Qt.size(width, height)
     onVisibilityChanged: Settings.windowMaximized = (visibility === Window.Maximized)
 
-    Component.onCompleted:
-    // Nothing to perform yet — document creation, welcome dialog, etc.
-    // will hook in here as they are implemented.
-    {
+    function beginRecovery() {
+        if (Workspace.recoveryAvailable) recoveryChoiceDialog.open()
+        else Workspace.setRecoveryInterval(Number(Settings.value("recovery/intervalMinutes", 10)))
+    }
+    Component.onCompleted: {
+        if (Workspace.recoveryReady) {
+            if (!Settings.value("recovery/configured", false)) recoverySettingsDialog.open()
+            else beginRecovery()
+        }
     }
 
     // ---- Top-level column: menu bar → toolbar → workspace → status bar ----
@@ -230,6 +240,10 @@ ApplicationWindow {
                     enabled: false
                 }
                 MenuSeparator {
+                }
+                MenuItem {
+                    text: qsTr("Recovery settings...")
+                    onTriggered: recoverySettingsDialog.open()
                 }
                 MenuItem {
                     text: qsTr("Associate &.koma Files...")
@@ -561,6 +575,57 @@ ApplicationWindow {
         }
     }
 
+    Dialog {
+        id: recoverySettingsDialog
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Automatic recovery")
+        onAboutToShow: {
+            const saved = Number(Settings.value("recovery/intervalMinutes", 10))
+            const values = [5, 10, 15, 30, 60, 0]
+            const found = values.indexOf(saved)
+            recoveryInterval.currentIndex = found < 0 ? 1 : found
+        }
+        contentItem: ColumnLayout {
+            width: 380
+            Label { text: qsTr("Save separate recovery snapshots:"); color: KP.text; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+            ComboBox { id: recoveryInterval; Layout.fillWidth: true; model: [qsTr("Every 5 minutes"), qsTr("Every 10 minutes"), qsTr("Every 15 minutes"), qsTr("Every 30 minutes"), qsTr("Every 60 minutes"), qsTr("Never")] }
+            Label { text: qsTr("Never disables periodic crash protection for unsaved work. Recovery snapshots do not overwrite your project files."); color: KP.textMuted; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+        }
+        footer: DialogButtonBox {
+            Button { text: qsTr("OK"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: {
+                const minutes = [5, 10, 15, 30, 60, 0][recoveryInterval.currentIndex]
+                Settings.setValue("recovery/intervalMinutes", minutes)
+                Settings.setValue("recovery/configured", true)
+                recoverySettingsDialog.close()
+                root.beginRecovery()
+            } }
+        }
+    }
+    Dialog {
+        id: recoveryChoiceDialog
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Restore previous workspace?")
+        contentItem: Label { text: qsTr("Restore the last recovery snapshots and project tabs? Original files will not be overwritten. Undo history starts empty."); color: KP.text; wrapMode: Text.WordWrap; width: 380 }
+        footer: DialogButtonBox {
+            Button { text: qsTr("Restore"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: {
+                if (Workspace.restoreWorkspace()) { recoveryChoiceDialog.close(); root.beginRecovery() }
+            } }
+            Button { text: qsTr("Discard recovery"); DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole; onClicked: recoveryDiscardConfirmation.open() }
+        }
+    }
+    Dialog {
+        id: recoveryDiscardConfirmation
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Discard recovery?")
+        standardButtons: Dialog.Yes | Dialog.Cancel
+        contentItem: Label { text: qsTr("Discard the previous workspace recovery information? Original project files will not be changed."); color: KP.text; wrapMode: Text.WordWrap; width: 380 }
+        onAccepted: if (Workspace.discardRecovery()) { recoveryChoiceDialog.close(); root.beginRecovery() }
+    }
     Dialog {
         id: saveChangesDialog
         anchors.centerIn: parent
