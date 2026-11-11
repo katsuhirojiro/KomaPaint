@@ -44,6 +44,8 @@ void TestWorkspaceRecovery::restartAndIsolation()
         QVERIFY(ws.newProject("Unsaved", 90, 80, true, "white", 144));
         QVERIFY(paint(ws, 0xff0000ffU));
         ws.layers()->addLayer(); ws.layers()->layerAt(1)->setVisible(false);
+        ws.layers()->layerAt(1)->setOpacity(0.42);
+        ws.setActiveTool("eraser"); ws.setZoom(250.0);
         QVERIFY(ws.persistWorkspace());
         QVERIFY(ws.activateTab(firstTab)); QCOMPARE(ws.document(), first);
         QCOMPARE(ws.layers()->layerAt(0)->tiles().pixel({2, 3}).value(), 0xff00ff00U);
@@ -63,6 +65,9 @@ void TestWorkspaceRecovery::restartAndIsolation()
         QVERIFY(reopened.document()->isModified());
         QCOMPARE(reopened.layers()->rowCount(), 2);
         QVERIFY(!reopened.layers()->layerAt(1)->isVisible());
+        QCOMPARE(reopened.layers()->layerAt(1)->opacity(), 0.42);
+        QCOMPARE(reopened.activeTool(), QStringLiteral("eraser"));
+        QCOMPARE(reopened.zoom(), 250.0);
         QCOMPARE(reopened.layers()->layerAt(0)->tiles().pixel({2, 3}).value(), 0xff0000ffU);
         QVERIFY(!reopened.history()->canUndo());
         QVERIFY(reopened.activateTab(0));
