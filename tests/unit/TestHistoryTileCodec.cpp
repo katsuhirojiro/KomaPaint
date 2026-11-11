@@ -88,7 +88,7 @@ static void realBrushRoundTrip() {
         CHECK(std::equal(pixels.begin(), pixels.end(), after[x].begin(), after[x].end()));
     }
     CHECK(other.pixel({10, 20}) == 0xff123456U);
-    std::cout << "Real brush across three tiles, experimental encoded payload=" << encoded << " bytes\n";
+    std::cout << "::notice title=Real brush codec experiment::Three tiles; experimental encoded payload=" << encoded << " bytes\n";
 }
 int main() {
     realBrushRoundTrip();
