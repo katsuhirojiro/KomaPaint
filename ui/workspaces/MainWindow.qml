@@ -185,7 +185,7 @@ ApplicationWindow {
     // Defer opening dialogs until the window has completed and its overlay is
     // available; opening a popup directly from Component.onCompleted can be
     // lost on first show.
-    Component.onCompleted: Qt.callLater(root.beginRecoverySetup)
+    Component.onCompleted: Qt.callLater(function() { root.beginRecoverySetup() })
 
     // ---- Top-level column: menu bar → toolbar → workspace → status bar ----
     ColumnLayout {
