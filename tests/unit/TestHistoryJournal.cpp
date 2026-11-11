@@ -9,6 +9,8 @@ class TestHistoryJournal : public QObject {
 private slots:
     void roundTripAndIdentity();
     void interruptedTail();
+    void truncatedFrames();
+    void rejectedOperationsPreserveOutputs();
     void corruptRecord();
     void invalidPathAndExistingFile();
 };
@@ -63,6 +65,44 @@ void TestHistoryJournal::interruptedTail()
     QVERIFY(!reopened.open(path, id, &error));
     QVERIFY(error.contains(QStringLiteral("incomplete")));
     QCOMPARE(QFile(path).size(), size); // never silently truncates the tail
+}
+void TestHistoryJournal::truncatedFrames()
+{
+    for (int tailBytes : {1, 4, 10, 43, 44, 47, 50}) {
+        QTemporaryDir dir; QVERIFY(dir.isValid());
+        const auto path = dir.filePath(QStringLiteral("history.bin"));
+        const auto id = QUuid::createUuid(); QString error;
+        qint64 first = -1, second = -1;
+        {
+            HistoryJournal journal;
+            QVERIFY(journal.create(path, id, &error));
+            QVERIFY(journal.append(QByteArray("intact"), &first, &error));
+            QVERIFY(journal.append(QByteArray("1234567"), &second, &error));
+        }
+        QFile file(path); QVERIFY(file.open(QIODevice::ReadWrite));
+        QVERIFY(file.resize(second + tailBytes));
+        const auto expected = file.size(); file.close();
+        HistoryJournal damaged;
+        QVERIFY(!damaged.open(path, id, &error));
+        QCOMPARE(QFile(path).size(), expected);
+    }
+}
+void TestHistoryJournal::rejectedOperationsPreserveOutputs()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    const auto id = QUuid::createUuid(); QString error;
+    qint64 offset = 123;
+    HistoryJournal unopened;
+    QVERIFY(!unopened.append(QByteArray("x"), &offset, &error));
+    QCOMPARE(offset, qint64(123));
+    HistoryJournal journal;
+    QVERIFY(journal.create(dir.filePath(QStringLiteral("h")), id, &error));
+    QVERIFY(journal.append(QByteArray("first"), &offset, &error));
+    QByteArray output("untouched");
+    QVERIFY(!journal.read(offset + 1, &output, &error));
+    QCOMPARE(output, QByteArray("untouched"));
+    QVERIFY(journal.read(offset, &output, &error));
+    QCOMPARE(output, QByteArray("first"));
 }
 void TestHistoryJournal::corruptRecord()
 {

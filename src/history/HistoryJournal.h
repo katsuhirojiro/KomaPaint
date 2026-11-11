@@ -23,6 +23,7 @@ private:
     bool rollbackAppend(qint64 start) noexcept;
     QFile m_file;
     QUuid m_documentId;
+    qint64 m_end = 0;
     bool m_writable = false;
 };
 }

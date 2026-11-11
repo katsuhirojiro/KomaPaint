@@ -56,6 +56,7 @@ bool HistoryJournal::create(const QString& path, const QUuid& documentId, QStrin
         m_file.remove(); return false;
     }
     m_documentId = documentId;
+    m_end = fileHeader;
     m_writable = true; return true;
 }
 bool HistoryJournal::open(const QString& path, const QUuid& documentId, QString* error)
@@ -69,6 +70,7 @@ bool HistoryJournal::open(const QString& path, const QUuid& documentId, QString*
     m_documentId = documentId;
     // Do not append to a damaged or interrupted journal.
     if (!verify(nullptr, error)) { m_file.close(); return false; }
+    m_end = m_file.size();
     m_writable = true; return true;
 }
 bool HistoryJournal::rollbackAppend(qint64 start) noexcept
@@ -85,6 +87,11 @@ bool HistoryJournal::append(const QByteArray& payload, qint64* offset, QString* 
 {
     if (!m_file.isOpen() || !m_writable || !offset) { setError(error, QStringLiteral("History journal is not writable.")); return false; }
     const auto start = m_file.size();
+    if (start != m_end) {
+        m_writable = false;
+        setError(error, QStringLiteral("History journal changed unexpectedly; further writes are disabled."));
+        return false;
+    }
     if (start < fileHeader || start > std::numeric_limits<qint64>::max() - frameHeader - frameFooter
         || payload.size() > std::numeric_limits<qint64>::max() - start - frameHeader - frameFooter || !m_file.seek(start)) {
         setError(error, QStringLiteral("History journal is too large or cannot seek.")); return false;
@@ -99,6 +106,7 @@ bool HistoryJournal::append(const QByteArray& payload, qint64* offset, QString* 
         }
         QByteArray check;
         if (!read(start, &check, error) || check != payload) { rollbackAppend(start); return false; }
+        m_end = start + frameHeader + payload.size() + frameFooter;
         *offset = start;
         return true;
     } catch (const std::bad_alloc&) {
