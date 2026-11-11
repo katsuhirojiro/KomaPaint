@@ -143,7 +143,7 @@ void UndoStack::tryCompact() noexcept
         const auto charge = actual + 512 * n;
         if (charge >= m_currentBytes) return; // only retain a genuine saving
         if (actual > std::numeric_limits<std::size_t>::max() - m_current->historyBytes ||
-            actual > std::numeric_limits<std::size_t>::max() - m_currentBytes) return;
+            actual > std::numeric_limits<std::size_t>::max() - m_currentBytes - m_bytes) return;
         m_current->compact = std::move(compact);
         // Keep the before-images alive until the stroke is actually committed.
         // Future persistence failures must still be able to roll back.
