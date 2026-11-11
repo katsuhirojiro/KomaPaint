@@ -87,6 +87,7 @@ CanvasDocument* ProjectCreationService::buildDocument(
     doc->setDpi(dpi);
     doc->setBackgroundColor(backgroundColor);
     doc->setTransparentBackground(transparent);
+    doc->setModified(false);
     return doc;
 }
 

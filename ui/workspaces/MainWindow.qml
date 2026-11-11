@@ -20,8 +20,7 @@ ApplicationWindow {
 
     property bool allowCloseWithArtwork: false
     function requestNewDocument() {
-        if (Workspace.document.modified) discardForNew.open()
-        else newProjectDialog.open()
+        newProjectDialog.open()
     }
     // Converts a plain local path (Unix, Windows drive, UNC) into a file:// URL
     // suitable for FileDialog. Qt.resolvedUrl would treat "C:/..." as scheme "c".
@@ -34,17 +33,56 @@ ApplicationWindow {
         return path;
     }
     function requestOpenImage() {
-        if (Workspace.document.modified) discardForOpen.open()
-        else openImageDialog.open()
+        openImageDialog.open()
     }
     function saveImage() {
         if (Workspace.currentFile.length > 0) Workspace.saveToPath(Workspace.currentFile)
         else saveImageDialog.open()
     }
+    property string closeAction: ""
+    property int closeTabIndex: -1
+    property var approvedCloseIds: []
+    function requestTabClose(index) {
+        if (!Workspace.activateTab(index)) return
+        if (!Workspace.document.modified) { Workspace.closeTab(index); return }
+        closeAction = "tab"
+        closeTabIndex = index
+        saveChangesDialog.open()
+    }
+    function continueApplicationClose() {
+        const tabs = Workspace.projectTabs
+        for (let i = 0; i < tabs.length; ++i) {
+            if (tabs[i].modified && approvedCloseIds.indexOf(tabs[i].id) < 0) {
+                if (!Workspace.activateTab(i)) { closeAction = ""; return }
+                closeAction = "app"
+                closeTabIndex = i
+                saveChangesDialog.open()
+                return
+            }
+        }
+        closeAction = ""
+        allowCloseWithArtwork = true
+        root.close()
+    }
+    function closeDecisionComplete(discard) {
+        if (closeAction === "tab") {
+            Workspace.closeTab(closeTabIndex, discard)
+            closeAction = ""
+        } else if (closeAction === "app") {
+            if (discard) approvedCloseIds = approvedCloseIds.concat([Workspace.projectTabs[closeTabIndex].id])
+            continueApplicationClose()
+        }
+    }
+    function saveForClose() {
+        if (Workspace.currentFile.length === 0) { saveImageDialog.open(); return }
+        if (Workspace.saveToPath(Workspace.currentFile)) closeDecisionComplete(false)
+        else { closeAction = ""; approvedCloseIds = [] }
+    }
     onClosing: function(event) {
-        if (Workspace.document.modified && !allowCloseWithArtwork) {
+        if (!allowCloseWithArtwork) {
             event.accepted = false
-            discardForClose.open()
+            approvedCloseIds = []
+            continueApplicationClose()
         }
     }
 
@@ -103,7 +141,12 @@ ApplicationWindow {
         selectedFile: Workspace.currentFile.length > 0
                       ? root.fileUrlForPath(Workspace.currentFile)
                       : Qt.resolvedUrl(Workspace.document.title + ".koma")
-        onAccepted: Workspace.saveToPath(selectedFile.toString())
+        onAccepted: {
+            if (Workspace.saveToPath(selectedFile.toString())) {
+                if (root.closeAction !== "") root.closeDecisionComplete(false)
+            } else { root.closeAction = ""; root.approvedCloseIds = [] }
+        }
+        onRejected: { root.closeAction = ""; root.approvedCloseIds = [] }
     }
 
     minimumWidth: 1024
@@ -387,6 +430,29 @@ ApplicationWindow {
             }
         }
 
+        ScrollView {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 38
+            contentHeight: 38
+            clip: true
+            Row {
+                spacing: 2
+                Repeater {
+                    model: Workspace.projectTabs
+                    delegate: Row {
+                        required property int index
+                        required property var modelData
+                        Button {
+                            text: modelData.title + (modelData.modified ? " *" : "")
+                            highlighted: index === Workspace.activeTab
+                            onClicked: Workspace.activateTab(index)
+                        }
+                        ToolButton { text: "×"; Accessible.name: qsTr("Close project"); onClicked: root.requestTabClose(index) }
+                    }
+                }
+            }
+        }
+
         // ------------------------------------------------------------- Toolbar
         MainToolbar {
             id: toolbar
@@ -495,6 +561,19 @@ ApplicationWindow {
         }
     }
 
+    Dialog {
+        id: saveChangesDialog
+        anchors.centerIn: parent
+        modal: true
+        closePolicy: Popup.NoAutoClose
+        title: qsTr("Save changes?")
+        contentItem: Label { text: qsTr("Save changes to %1?").arg(Workspace.document.title); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+        footer: DialogButtonBox {
+            Button { text: qsTr("Save"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: { saveChangesDialog.close(); root.saveForClose() } }
+            Button { text: qsTr("Don't Save"); DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole; onClicked: { saveChangesDialog.close(); root.closeDecisionComplete(true) } }
+            Button { text: qsTr("Cancel"); DialogButtonBox.buttonRole: DialogButtonBox.RejectRole; onClicked: { saveChangesDialog.close(); root.closeAction = ""; root.approvedCloseIds = [] } }
+        }
+    }
     Dialog {
         id: clearHistoryDialog
         anchors.centerIn: parent

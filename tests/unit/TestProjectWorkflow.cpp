@@ -165,18 +165,12 @@ void TestProjectWorkflow::replaceOpenedArtwork()
     QTRY_VERIFY(workspace.document()->isModified());
     auto* previous = workspace.document();
     QVERIFY(workspace.history()->canUndo());
+    const int originalTab = workspace.activeTab();
     click(toolbar);
-    QTRY_VERIFY(discard->property("visible").toBool());
-    QVERIFY(!dialog->property("visible").toBool());
-    // Rejecting the confirmation preserves both the existing artwork and file.
-    QVERIFY(QMetaObject::invokeMethod(discard, "reject"));
-    QTRY_VERIFY(!discard->property("visible").toBool());
+    QTRY_VERIFY(dialog->property("visible").toBool());
+    QVERIFY(!discard->property("visible").toBool());
     QCOMPARE(workspace.document(), previous);
     QCOMPARE(workspace.currentFile(), file);
-    click(toolbar);
-    QTRY_VERIFY(discard->property("visible").toBool());
-    QVERIFY(QMetaObject::invokeMethod(discard, "accept"));
-    QTRY_VERIFY(dialog->property("visible").toBool());
     // Every active control must have geometry inside the actual window.
     for (auto* control : {name, width, height, dpi, units, transparent, background, create}) {
         QVERIFY(control->isVisible());
@@ -249,6 +243,14 @@ void TestProjectWorkflow::replaceOpenedArtwork()
     QVERIFY(workspace.currentFile().isEmpty());
     QVERIFY(!workspace.history()->canUndo());
     QCOMPARE(canvas->document(), static_cast<QObject*>(workspace.document()));
+    auto* created = workspace.document();
+    QVERIFY(workspace.activateTab(originalTab));
+    QCOMPARE(workspace.document(), previous);
+    QCOMPARE(workspace.currentFile(), file);
+    QVERIFY(workspace.document()->isModified());
+    QVERIFY(workspace.history()->canUndo());
+    QVERIFY(workspace.activateTab(static_cast<int>(workspace.projectTabs().size()) - 1));
+    QCOMPARE(workspace.document(), created);
     canvas->refreshNow();
     const QPoint center(qRound(canvas->width()/2), qRound(canvas->height()/2));
     QCOMPARE(canvas->frameSnapshot().pixelColor(center), QColor(QStringLiteral("#22aa44")));

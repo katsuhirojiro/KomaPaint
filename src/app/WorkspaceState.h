@@ -10,6 +10,9 @@
 
 #include <QObject>
 #include <QString>
+#include <QUuid>
+#include <QVariantList>
+#include <vector>
 
 namespace komapaint {
 
@@ -27,7 +30,9 @@ class WorkspaceState : public QObject
     Q_PROPERTY(LayerModel*     layers    READ layers    NOTIFY documentChanged)
     Q_PROPERTY(TimelineState*  timeline  READ timeline  CONSTANT)
     Q_PROPERTY(ColorPalette*   colors    READ colors    CONSTANT)
-    Q_PROPERTY(UndoStack*      history   READ history   CONSTANT)
+    Q_PROPERTY(UndoStack*      history   READ history   NOTIFY documentChanged)
+    Q_PROPERTY(QVariantList projectTabs READ projectTabs NOTIFY tabsChanged)
+    Q_PROPERTY(int activeTab READ activeTab NOTIFY tabsChanged)
     Q_PROPERTY(QString         currentFile READ currentFile NOTIFY currentFileChanged)
     Q_PROPERTY(QString         activeTool READ activeTool WRITE setActiveTool NOTIFY activeToolChanged)
     Q_PROPERTY(qreal           zoom      READ zoom      WRITE setZoom      NOTIFY zoomChanged)
@@ -45,6 +50,11 @@ public:
     QString activeTool() const { return m_activeTool; }
     qreal   zoom()       const { return m_zoom; }
     QString currentFile() const { return m_currentFile; }
+    QVariantList projectTabs() const;
+    int activeTab() const { return m_activeTab; }
+    Q_INVOKABLE bool activateTab(int index);
+    // Discard must be explicit; the UI is responsible for confirmation.
+    Q_INVOKABLE bool closeTab(int index, bool discard = false);
 
     Q_INVOKABLE bool newDocument(int width, int height, bool transparent, const QColor& background);
     // Creates a new illustration project from the New Project dialog: applies
@@ -96,6 +106,7 @@ signals:
     void activeToolChanged(const QString& tool);
     void zoomChanged(qreal zoom);
     void currentFileChanged();
+    void tabsChanged();
     void creationErrorChanged();
     void fileErrorOccurred(const QString& message);
     void fileAssociationCompleted(const QString& message, bool ok);
@@ -103,7 +114,12 @@ signals:
 private:
     // Clears artwork history when a layer is deleted, because layer deletion
     // is not yet undoable. Connected to every document we own or swap in.
-    void connectLayerDeletion(const CanvasDocument* document);
+    void connectLayerDeletion(const CanvasDocument* document, UndoStack* history);
+    void addDocument(CanvasDocument* document, const QString& path = {});
+    struct Tab { CanvasDocument* document; UndoStack* history; QString path; QUuid id; };
+    std::vector<Tab> m_tabs;
+    int m_activeTab = 0;
+    bool m_initialPlaceholder = true;
     BrushSettings* m_brush;
     CanvasDocument* m_document;
     TimelineState*  m_timeline;

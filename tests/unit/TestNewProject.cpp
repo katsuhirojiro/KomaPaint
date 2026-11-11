@@ -167,11 +167,20 @@ void TestNewProject::creatingProjectWhileAnotherOpenClearsHistory()
     workspace.layers()->layerAt(0)->tiles().setPixel({0, 0}, 0xffffffffU);
     QVERIFY(workspace.history()->commitStroke());
     QVERIFY(workspace.history()->canUndo());
+    auto* first = workspace.document();
+    const int firstTab = workspace.activeTab();
 
     QVERIFY(workspace.newProject("Second", 200, 200, true, "white", 72.0));
     QVERIFY(!workspace.history()->canUndo());
     QVERIFY(!workspace.history()->canRedo());
     QCOMPARE(workspace.document()->title(), QString("Second"));
+    QVERIFY(workspace.activateTab(firstTab));
+    QCOMPARE(workspace.document(), first);
+    QVERIFY(workspace.history()->canUndo());
+    workspace.history()->undo();
+    QCOMPARE(workspace.layers()->layerAt(0)->tiles().pixel({0, 0}).value(), 0U);
+    QVERIFY(!workspace.closeTab(firstTab));
+    QVERIFY(workspace.activateTab(firstTab));
 }
 
 QTEST_APPLESS_MAIN(TestNewProject)

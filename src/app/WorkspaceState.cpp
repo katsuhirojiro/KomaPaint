@@ -1,6 +1,7 @@
 #include "WorkspaceState.h"
 
 #include <QColor>
+#include <algorithm>
 #include <QDebug>
 #include <QDateTime>
 #include <QFile>
@@ -24,15 +25,90 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     m_colors   = new ColorPalette(this);
     m_history  = new UndoStack(this);
     m_creationService = new ProjectCreationService(this);
-    connectLayerDeletion(m_document);
+    m_tabs.push_back({m_document, m_history, {}, QUuid::createUuid()});
+    connectLayerDeletion(m_document, m_history);
+    connect(m_document, &CanvasDocument::titleChanged, this, &WorkspaceState::tabsChanged);
+    connect(m_document, &CanvasDocument::modifiedChanged, this, &WorkspaceState::tabsChanged);
 }
 
-void WorkspaceState::connectLayerDeletion(const CanvasDocument* document)
+void WorkspaceState::connectLayerDeletion(const CanvasDocument* document, UndoStack* history)
 {
-    connect(document->layers(), &QAbstractItemModel::rowsAboutToBeRemoved, this, [this] {
-        if (m_history->strokeActive()) m_history->cancelStroke();
-        if (m_history->canUndo() || m_history->canRedo()) { m_history->clear(); emit m_history->errorOccurred(QStringLiteral("Artwork history was cleared because a layer was deleted.")); }
+    connect(document->layers(), &QAbstractItemModel::rowsAboutToBeRemoved, history, [history] {
+        if (history->strokeActive()) history->cancelStroke();
+        if (history->canUndo() || history->canRedo()) { history->clear(); emit history->errorOccurred(QStringLiteral("Artwork history was cleared because a layer was deleted.")); }
     });
+}
+
+QVariantList WorkspaceState::projectTabs() const
+{
+    QVariantList result;
+    for (const auto& tab : m_tabs) {
+        QVariantMap item;
+        item.insert(QStringLiteral("title"), tab.document->title());
+        item.insert(QStringLiteral("modified"), tab.document->isModified());
+        item.insert(QStringLiteral("id"), tab.id.toString(QUuid::WithoutBraces));
+        result.append(item);
+    }
+    return result;
+}
+
+bool WorkspaceState::activateTab(int index)
+{
+    if (index < 0 || index >= static_cast<int>(m_tabs.size())) return false;
+    if (index == m_activeTab) return true;
+    if (m_history->strokeActive()) {
+        emit fileErrorOccurred(QStringLiteral("Finish or cancel the current stroke before switching projects."));
+        return false;
+    }
+    m_activeTab = index;
+    const auto& tab = m_tabs[static_cast<std::size_t>(index)];
+    m_document = tab.document; m_history = tab.history; m_currentFile = tab.path;
+    emit documentChanged(); emit currentFileChanged(); emit tabsChanged();
+    return true;
+}
+
+void WorkspaceState::addDocument(CanvasDocument* document, const QString& path)
+{
+    document->setParent(this);
+    auto* history = new UndoStack(this);
+    connectLayerDeletion(document, history);
+    connect(document, &CanvasDocument::titleChanged, this, &WorkspaceState::tabsChanged);
+    connect(document, &CanvasDocument::modifiedChanged, this, &WorkspaceState::tabsChanged);
+    if (m_initialPlaceholder && m_tabs.size() == 1 && !m_document->isModified()
+        && m_currentFile.isEmpty() && !m_history->canUndo() && !m_history->canRedo()) {
+        auto old = m_tabs.front();
+        m_tabs.clear();
+        old.history->deleteLater(); old.document->deleteLater();
+        m_activeTab = -1;
+    }
+    m_initialPlaceholder = false;
+    m_tabs.push_back({document, history, path, QUuid::createUuid()});
+    activateTab(static_cast<int>(m_tabs.size()) - 1);
+}
+
+bool WorkspaceState::closeTab(int index, bool discard)
+{
+    if (index < 0 || index >= static_cast<int>(m_tabs.size()) || m_history->strokeActive()) return false;
+    const auto tab = m_tabs[static_cast<std::size_t>(index)];
+    if (tab.history->strokeActive() || (tab.document->isModified() && !discard)) return false;
+    m_tabs.erase(m_tabs.begin() + index);
+    tab.history->deleteLater(); tab.document->deleteLater();
+    if (m_tabs.empty()) {
+        auto* blank = new CanvasDocument(this);
+        auto* history = new UndoStack(this);
+        m_tabs.push_back({blank, history, {}, QUuid::createUuid()});
+        connectLayerDeletion(blank, history);
+        connect(blank, &CanvasDocument::titleChanged, this, &WorkspaceState::tabsChanged);
+        connect(blank, &CanvasDocument::modifiedChanged, this, &WorkspaceState::tabsChanged);
+        m_initialPlaceholder = true;
+        m_activeTab = -1;
+        return activateTab(0);
+    }
+    int next = m_activeTab;
+    if (index < next) --next;
+    else if (index == next) next = std::min(index, static_cast<int>(m_tabs.size()) - 1);
+    m_activeTab = -1;
+    return activateTab(next);
 }
 
 static QString localPathFromQml(const QString& input)
@@ -70,19 +146,7 @@ void WorkspaceState::associateWithKomaFiles()
 
 void WorkspaceState::replaceDocument(CanvasDocument* next)
 {
-    qDebug() << "[NewProject] replaceDocument() called:"
-             << "previous=" << m_document << "next=" << next;
-
-    auto* previous = m_document;
-    m_history->clear(); // history references tiles of the document being replaced
-    m_document = next;
-    connectLayerDeletion(m_document);
-    m_currentFile.clear();
-    emit currentFileChanged();
-    qDebug() << "[NewProject] replaceDocument: emitting documentChanged()";
-    emit documentChanged();
-    previous->deleteLater();
-    qDebug() << "[NewProject] replaceDocument: done";
+    addDocument(next);
 }
 
 bool WorkspaceState::newDocument(int width, int height, bool transparent, const QColor& background)
@@ -94,6 +158,7 @@ bool WorkspaceState::newDocument(int width, int height, bool transparent, const 
     next->setSize(QSize(width, height));
     next->setBackgroundColor(background);
     next->setTransparentBackground(transparent);
+    next->setModified(false);
     replaceDocument(next);
     return true;
 }
@@ -149,11 +214,12 @@ bool WorkspaceState::saveToPath(const QString& pathOrUrl)
     }
     QString error;
     if (!DocumentFile::save(*m_document, path, &error)) { emit fileErrorOccurred(error); return false; }
-    m_document->setModified(false);
     const bool changed = m_currentFile != path;
     m_currentFile = path;
+    m_tabs[static_cast<std::size_t>(m_activeTab)].path = path;
     if (m_document->title().isEmpty() || m_document->title() == QStringLiteral("Untitled"))
         m_document->setTitle(QFileInfo(path).completeBaseName());
+    m_document->setModified(false);
     if (changed) emit currentFileChanged();
     return true;
 }
@@ -166,16 +232,7 @@ bool WorkspaceState::openFromPath(const QString& pathOrUrl)
     QString error;
     CanvasDocument* next = DocumentFile::open(path, &error);
     if (!next) { emit fileErrorOccurred(error); return false; }
-    auto* previous = m_document;
-    m_history->clear(); // history references tiles of the document being replaced
-    m_document = next;
-    connectLayerDeletion(m_document);
-    const bool changed = m_currentFile != path;
-    m_currentFile = path;
-    // The title travels with the file; do not clobber a user-chosen title.
-    emit documentChanged();
-    if (changed) emit currentFileChanged();
-    previous->deleteLater();
+    addDocument(next, path);
     return true;
 }
 
