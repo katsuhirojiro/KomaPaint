@@ -68,6 +68,9 @@ public:
     Q_INVOKABLE bool discardRecovery();
     Q_INVOKABLE bool persistWorkspace(const QStringList& discardIds = {}, const QStringList& excludeIds = {});
     Q_INVOKABLE void setRecoveryInterval(int minutes);
+    // True while periodic recovery snapshots are scheduled. Never (0) and an
+    // unavailable recovery location leave this false.
+    bool recoveryTimerActive() const { return m_recoveryTimer.isActive(); }
     void setRecoveryFailureForTests(int stage) { m_recoveryFailureForTests = stage; }
 
     Q_INVOKABLE bool newDocument(int width, int height, bool transparent, const QColor& background);

@@ -266,6 +266,9 @@ bool WorkspaceState::saveToPath(const QString& pathOrUrl)
         path = localPathFromQml(pathOrUrl);
         if (path.isEmpty()) { emit fileErrorOccurred(QStringLiteral("\"%1\" is not a local file path.").arg(pathOrUrl)); return false; }
     }
+    // Store an absolute path so recovery can re-associate the tab after a
+    // restart from a different working directory.
+    path = QFileInfo(path).absoluteFilePath();
     QString error;
     if (!DocumentFile::save(*m_document, path, &error)) { emit fileErrorOccurred(error); return false; }
     const bool changed = m_currentFile != path;
@@ -282,8 +285,9 @@ bool WorkspaceState::saveToPath(const QString& pathOrUrl)
 bool WorkspaceState::openFromPath(const QString& pathOrUrl)
 {
     if (m_history->strokeActive()) { emit fileErrorOccurred(QStringLiteral("Finish or cancel the current stroke before opening a file.")); return false; }
-    const QString path = localPathFromQml(pathOrUrl);
-    if (path.isEmpty()) { emit fileErrorOccurred(QStringLiteral("No readable filename was given.")); return false; }
+    const QString requested = localPathFromQml(pathOrUrl);
+    if (requested.isEmpty()) { emit fileErrorOccurred(QStringLiteral("No readable filename was given.")); return false; }
+    const QString path = QFileInfo(requested).absoluteFilePath();
     QString error;
     CanvasDocument* next = DocumentFile::open(path, &error);
     if (!next) { emit fileErrorOccurred(error); return false; }
@@ -326,8 +330,16 @@ void WorkspaceState::setRecoveryInterval(int minutes)
 
 bool WorkspaceState::persistWorkspace(const QStringList& discardIds, const QStringList& excludeIds)
 {
-    if (!m_recoveryLock || m_recoveryAvailable || m_history->strokeActive()) {
-        emit fileErrorOccurred(QStringLiteral("The workspace recovery location is unavailable or an earlier recovery decision is still pending. The previous recovery state has not been changed."));
+    if (!m_recoveryLock) {
+        emit fileErrorOccurred(QStringLiteral("The workspace recovery location is unavailable. The previous recovery state has not been changed."));
+        return false;
+    }
+    if (m_recoveryAvailable) {
+        emit fileErrorOccurred(QStringLiteral("An earlier recovery decision is still pending. Restore or discard it before new recovery snapshots are written; the previous recovery state has not been changed."));
+        return false;
+    }
+    if (m_history->strokeActive()) {
+        emit fileErrorOccurred(QStringLiteral("Finish or cancel the current stroke before saving recovery snapshots."));
         return false;
     }
     QDir dir(m_recoveryDirectory);

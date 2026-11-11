@@ -20,6 +20,7 @@ private slots:
     void documentTypesAndRegistry();
     void unknownTypeIsRejectedAndRetained();
     void cleanupOnlyAfterValidIndex();
+    void recoveryIntervalScheduling();
 };
 
 static bool paint(WorkspaceState& ws, quint32 color)
@@ -247,5 +248,18 @@ void TestWorkspaceRecovery::cleanupOnlyAfterValidIndex()
     }
 }
 
-QTEST_APPLESS_MAIN(TestWorkspaceRecovery)
+void TestWorkspaceRecovery::recoveryIntervalScheduling()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    WorkspaceState ws; QVERIFY(ws.initializeRecovery(dir.filePath("recovery")));
+    QVERIFY(!ws.recoveryTimerActive());
+    for (int minutes : {5, 10, 15, 30, 60}) {
+        ws.setRecoveryInterval(minutes);
+        QVERIFY(ws.recoveryTimerActive());
+    }
+    ws.setRecoveryInterval(0);  // Never
+    QVERIFY(!ws.recoveryTimerActive());
+}
+
+QTEST_GUILESS_MAIN(TestWorkspaceRecovery)
 #include "TestWorkspaceRecovery.moc"
