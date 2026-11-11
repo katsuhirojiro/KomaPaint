@@ -77,10 +77,14 @@ void TestRecoveryUi::firstLaunchShowsSetupDefaultingToTenMinutes()
     window->show();
     QVERIFY(QTest::qWaitForWindowExposed(window));
 
+    QVERIFY(parts.workspace.recoveryReady());
     auto* dialog = root->findChild<QObject*>(QStringLiteral("recoverySettingsDialog"));
     auto* combo = root->findChild<QObject*>(QStringLiteral("recoveryIntervalCombo"));
-    QVERIFY(dialog && combo);
-    QTRY_VERIFY(dialog->property("visible").toBool());
+    QVERIFY2(dialog && combo, "recovery setup widgets were not found in MainWindow.qml");
+    QTRY_VERIFY2(dialog->property("visible").toBool(),
+                 qPrintable(QStringLiteral("setup dialog did not open (ready=%1 configured=%2)")
+                     .arg(parts.workspace.recoveryReady())
+                     .arg(settings.value("recovery/configured").toBool())));
     QCOMPARE(combo->property("currentIndex").toInt(), 1);  // Every 10 minutes
     QMetaObject::invokeMethod(dialog, "close");
     delete root;
@@ -111,6 +115,7 @@ void TestRecoveryUi::restoresPreviousWorkspaceThroughDialog()
     WindowParts parts;
     QVERIFY(parts.workspace.initializeRecovery(recovery));
     QVERIFY(parts.workspace.recoveryAvailable());
+    QVERIFY(parts.workspace.recoveryReady());
     QQmlEngine engine;
     QObject* root = createMainWindow(engine, parts);
     QVERIFY(root);
@@ -121,8 +126,12 @@ void TestRecoveryUi::restoresPreviousWorkspaceThroughDialog()
 
     auto* dialog = root->findChild<QObject*>(QStringLiteral("recoveryChoiceDialog"));
     auto* restore = root->findChild<QObject*>(QStringLiteral("restoreRecoveryButton"));
-    QVERIFY(dialog && restore);
-    QTRY_VERIFY(dialog->property("visible").toBool());
+    QVERIFY2(dialog && restore, "recovery choice widgets were not found in MainWindow.qml");
+    QTRY_VERIFY2(dialog->property("visible").toBool(),
+                 qPrintable(QStringLiteral("recovery dialog did not open (ready=%1 available=%2 configured=%3)")
+                     .arg(parts.workspace.recoveryReady())
+                     .arg(parts.workspace.recoveryAvailable())
+                     .arg(settings.value("recovery/configured").toBool())));
     QVERIFY(QMetaObject::invokeMethod(restore, "clicked"));
     QTRY_COMPARE(parts.workspace.projectTabs().size(), 1);
     QTRY_VERIFY(!dialog->property("visible").toBool());

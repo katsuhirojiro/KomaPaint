@@ -177,12 +177,15 @@ ApplicationWindow {
         if (Workspace.recoveryAvailable) recoveryChoiceDialog.open()
         else Workspace.setRecoveryInterval(Number(Settings.value("recovery/intervalMinutes", 10)))
     }
-    Component.onCompleted: {
-        if (Workspace.recoveryReady) {
-            if (!Settings.value("recovery/configured", false)) recoverySettingsDialog.open()
-            else beginRecovery()
-        }
+    function beginRecoverySetup() {
+        if (!Workspace.recoveryReady) return
+        if (!Settings.value("recovery/configured", false)) recoverySettingsDialog.open()
+        else beginRecovery()
     }
+    // Defer opening dialogs until the window has completed and its overlay is
+    // available; opening a popup directly from Component.onCompleted can be
+    // lost on first show.
+    Component.onCompleted: Qt.callLater(root.beginRecoverySetup)
 
     // ---- Top-level column: menu bar → toolbar → workspace → status bar ----
     ColumnLayout {
