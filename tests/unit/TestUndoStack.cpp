@@ -278,6 +278,18 @@ void TestUndoStack::pressureFailureAndRecovery()
     history.redo();
     QVERIFY(history.canUndo()); QVERIFY(!history.canRedo());
     QCOMPARE(store.pixel({1, 1}).value(), 0xff123456U);
+    // If pressure appears only at optional compaction, keep the fully
+    // admitted raw record, rather than rejecting or losing the stroke.
+    history.clear();
+    QVERIFY(history.beginStroke(&layer));
+    QCOMPARE(store.setPixel({1, 1}, 0x80800000U), SparseTileStore::WriteResult::Changed);
+    simulatedPressure = true;
+    const bool committed = history.commitStroke();
+    simulatedPressure = false;
+    QVERIFY(committed); QVERIFY(history.canUndo());
+    QCOMPARE(budget->historyBytes(), 2 * store.tileBytes());
+    history.undo(); QCOMPARE(store.pixel({1, 1}).value(), 0xff123456U);
+    history.redo(); QCOMPARE(store.pixel({1, 1}).value(), 0x80800000U);
 }
 
 void TestUndoStack::compactRejectsIncompatibleReplay()

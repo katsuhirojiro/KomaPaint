@@ -67,7 +67,7 @@ void TestHistoryAudit::fullSnapshotReference()
     std::printf("::notice title=Full-snapshot reference::130 one-pixel strokes (beyond 64 MiB); charge=%llu bytes tracked=%zu bytes paint=%lld ms undo=%lld ms redo=%lld ms\n",
                 history.memoryBytes(), budget->historyBytes(), static_cast<long long>(paintMs), static_cast<long long>(undoMs), static_cast<long long>(redoMs));
 #if defined(Q_OS_WIN)
-    std::printf("::notice title=Full-snapshot process memory::private baseline=%llu after127=%llu peak working=%llu; same process is reused for compact test\n", baseline.privateBytes, filled.privateBytes, filled.peakWorkingBytes);
+    std::printf("::notice title=Full-snapshot process memory::private baseline=%llu after130=%llu peak working=%llu; same process is reused for compact test\n", baseline.privateBytes, filled.privateBytes, filled.peakWorkingBytes);
 #endif
     std::fflush(stdout);
 }
@@ -128,8 +128,8 @@ void TestHistoryAudit::oneTileHistoryBudget()
     const auto redoMs = timer.elapsed();
     QVERIFY(!history.canRedo());
     QCOMPARE(layer.tiles().pixel({64, 64}).value(), painted);
-    std::printf("::notice title=Compact 127-stroke comparison::127 one-pixel strokes; charge=%llu bytes tracked=%zu bytes paint=%lld ms undo=%lld ms redo=%lld ms; same workload as full-snapshot reference\n", compactCharge127, compactTracked127, static_cast<long long>(compactPaint127), static_cast<long long>(compactUndo127), static_cast<long long>(compactRedo127));
-    std::printf("::notice title=Production compact history::10000 one-pixel strokes; retained safeguard charge=%llu bytes; tracked compact capacity=%zu bytes; paint=%lld ms undo=%lld ms redo=%lld ms; full history retained\n",
+    std::printf("::notice title=Compact 127-stroke comparison::127 one-pixel strokes; charge=%llu bytes tracked=%zu bytes paint=%lld ms undo=%lld ms redo=%lld ms; same pixel workload as full-snapshot reference (127 versus 130 strokes)\n", compactCharge127, compactTracked127, static_cast<long long>(compactPaint127), static_cast<long long>(compactUndo127), static_cast<long long>(compactRedo127));
+    std::printf("::notice title=Production compact history::10000 one-pixel strokes; estimated retained history charge=%llu bytes; tracked compact capacity=%zu bytes; paint=%lld ms undo=%lld ms redo=%lld ms; full history retained\n",
                 historyCharge, tracked, static_cast<long long>(paintMs), static_cast<long long>(undoMs), static_cast<long long>(redoMs));
 #if defined(Q_OS_WIN)
     const auto replayed = processMemory();
