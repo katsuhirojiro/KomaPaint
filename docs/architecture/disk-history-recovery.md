@@ -1,0 +1,23 @@
+# Disk history and recovery: first increment
+
+**Not yet integrated.** `HistoryJournal` is a tested building block, not the application's history backend or a crash-recovery feature. Existing UndoStack still holds all retained records in RAM. No history is restored after restart; do not claim disk-backed undo or crash recovery is complete.
+
+## Existing implementation audit
+
+* `UndoStack` owns the history cursor and in-memory command vector. Each command identifies a live layer with `QPointer<Layer>`; commands retain either compact per-tile delta/RLE/raw records or admitted full before/after snapshots. It prepares replay tiles and dirty changes before publishing the cursor. A recorded stroke keeps rollback pixels and pre-stroke dirty state until commit.
+* `DocumentMemoryBudget` tracks selected logical artwork, history, decode staging and composite-cache payloads. System-memory checks are advisory. This is not comprehensive process accounting.
+* `WorkspaceState` clears history when replacing/opening a document; normal layer deletion clears history with an explicit warning. Save/open stores artwork and metadata in `.koma`, using `QSaveFile`, but not undo history. There is no autosave, session recovery journal, durable layer identifier or persistent history cursor. In-memory pointers cannot identify a layer after restart.
+* Persisting only undo records is **not** crash recovery: replay must use exactly the artwork, layer identities, document metadata, command order and cursor corresponding to those records. An unsaved document also needs a recoverable artwork base. Reapplying historical records to an arbitrary saved version risks damaging the document.
+
+## Record-journal building block
+
+The new append-only journal is separate from `.koma`. A versioned magic and UUID bind it to a caller-supplied identity. Each frame has a length, SHA-256 digest, payload and final marker. Append writes the complete frame, flushes, asks the OS to synchronize it, then reads back and checks it before reporting success. A failed append attempts to truncate and synchronize the incomplete tail; if that fails, further writes are disabled. Opening verifies the identity and every record and refuses damaged or interrupted tails without silently truncating them. Existing file creation is exclusive; it cannot overwrite a file. Tests cover round-trip, wrong identity, corruption, incomplete tails, missing paths and refusing to overwrite an existing file.
+
+This is intentionally not yet the full storage design: it does not serialize `StrokeCommand`, index a live UndoStack, store a cursor, recover artwork or enable replay. Verification currently reads whole records into RAM, and neither journal scratch buffers nor actual disk space are admitted through the document budget. Per-append synchronous disk flush and full readback may be too slow for painting; measure on real hardware before integration. Directory-entry durability after creating the file is platform/filesystem-dependent. No claim is made about complete disk-full, short-write, power-loss or allocation-failure coverage. A verified byte frame alone is not evidence that artwork and history were committed together.
+
+## Required next steps before switching production history
+
+1. Define stable document and layer identities, and a persistent, atomic artwork checkpoint plus ordered history/cursor commits for both saved and unsaved projects. Recovery must validate that the journal belongs to the exact checkpoint and never apply records to a different document. Specify clean close, explicit discard, missing/corrupt files, divergent saved project and crash recovery user choices.
+2. Serialize the existing compact representation and its full-snapshot fallback with checked lengths and a versioned schema. Keep the rollback snapshots alive until the entire record is durably admitted; on a write/read/validation failure roll back pixels, dirty state and redo. Decode and reserve before replay, and advance the cursor only after success.
+3. Inject short writes, disk-full, failed sync, read errors, truncation and allocation failures at each boundary. Test multiple layers, undo/redo branches and repeated retry, as well as simulated process interruption and restart against a matching recovered artwork checkpoint. Preserve `.koma` compatibility.
+4. Measure and address synchronous I/O latency and transient memory before enabling the backend. Define safe cleanup for discarded sessions and orphaned files without silently deleting recoverable work. A disk cache/preferences interface is deferred until its actual behavior exists.

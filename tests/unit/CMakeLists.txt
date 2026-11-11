@@ -110,3 +110,5 @@ if(WIN32)
     target_link_libraries(test_history_tile_codec PRIVATE Psapi)
 endif()
 add_test(NAME test_history_tile_codec COMMAND test_history_tile_codec)
+
+komapaint_add_test(test_history_journal TestHistoryJournal.cpp)
