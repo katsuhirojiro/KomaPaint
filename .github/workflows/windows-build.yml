@@ -285,8 +285,19 @@ jobs:
         shell: pwsh
         run: |
           $bin = "${{ env.STAGE_DIR }}"
+          # IMPORTANT: do NOT put Qt's development bin directory on PATH here.
+          # The staged package must resolve every Qt DLL from its own folder.
+          # If the dev Qt bin were on PATH, a package missing a DLL would still
+          # launch in CI and only fail on the user's machine. The runner's
+          # process-level PATH already contains the Qt bin (set via GITHUB_PATH
+          # for the build/test steps); strip each entry from it so this smoke
+          # test truly proves the ZIP is self-contained.
           $qtBin = "${{ steps.qt.outputs.qtBin }}"
-          $env:PATH = "$bin;$qtBin;" + $env:PATH
+          $env:PATH = (($env:PATH -split ';') |
+            Where-Object { $_ -and ($_.TrimEnd('\') -ne $qtBin.TrimEnd('\')) }) -join ';'
+          # The staged folder goes first so komapaint.exe is found by name.
+          $env:PATH = "$bin;" + $env:PATH
+          Write-Host "[DIAG] Qt dev bin removed from PATH: $(-not (($env:PATH -split ';') -contains $qtBin))"
           # Use Qt's native Windows platform for the packaged-app smoke test.
           # The offscreen QPA has no native HWND for .NET's Process object to
           # find, so CloseMainWindow() can never deliver WM_CLOSE under it.
