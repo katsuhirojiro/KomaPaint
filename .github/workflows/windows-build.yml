@@ -186,7 +186,7 @@ jobs:
           # are, so the test result stays verifiable from the run itself.
           $totals = @($totals)
           $totalsLine = if ($totals.Count -gt 0) { $totals -join ' ; ' } else { 'no Totals lines' }
-          if ($totalsLine.Length -gt 2400) { $totalsLine = $totalsLine.Substring(0, 2400) + ' ...' }
+          if ($totalsLine.Length -gt 8000) { $totalsLine = $totalsLine.Substring(0, 8000) + ' ...' }
           Write-Host "::notice title=Unit test totals::$($exes.Count) test executables; $totalsLine"
 
       - name: Stage application directory
