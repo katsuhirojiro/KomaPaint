@@ -76,6 +76,7 @@ void CanvasViewport::setDocument(QObject* object)
     clearCache();
     m_cacheBudget = doc ? doc->layers()->documentBudget() : nullptr;
     m_originInitialized = false;
+    m_pendingView = false;
     qDebug() << "[CanvasViewport] setDocument: m_document updated to" << m_document.data()
              << "m_originInitialized reset to false";
 
@@ -137,7 +138,7 @@ void CanvasViewport::setZoom(qreal zoom)
     const QPointF point = viewportToDocument(center.x(), center.y());
     m_zoom = zoom;
     m_origin = center - point * (zoom / 100);
-    emit zoomChanged(); invalidateAll();
+    emit zoomChanged(); emit viewChanged(); invalidateAll();
 }
 void CanvasViewport::zoomAt(qreal x, qreal y, qreal factor)
 {
@@ -146,13 +147,14 @@ void CanvasViewport::zoomAt(qreal x, qreal y, qreal factor)
     if (qFuzzyCompare(next, m_zoom)) return;
     const QPointF doc = viewportToDocument(x, y);
     m_zoom = next; m_origin = QPointF(x, y) - doc * (next / 100);
-    emit zoomChanged(); emit zoomRequested(next); invalidateAll();
+    emit zoomChanged(); emit zoomRequested(next); emit viewChanged(); invalidateAll();
 }
 void CanvasViewport::panBy(qreal dx, qreal dy)
 {
     if (!std::isfinite(dx) || !std::isfinite(dy)) return;
     m_origin.setX(qBound(-1.0e9, m_origin.x() + dx, 1.0e9));
     m_origin.setY(qBound(-1.0e9, m_origin.y() + dy, 1.0e9));
+    emit viewChanged();
     invalidateAll();
 }
 QPointF CanvasViewport::viewportToDocument(qreal x, qreal y) const { return (QPointF(x, y) - m_origin) / (m_zoom / 100); }
@@ -174,15 +176,52 @@ void CanvasViewport::fit()
     m_zoom = qBound(6.25, 100 * std::min(width() / m_document->width(), height() / m_document->height()), 6400.0);
     m_origin = QPointF((width() - m_document->width() * m_zoom / 100) / 2, (height() - m_document->height() * m_zoom / 100) / 2);
     m_originInitialized = true;
+    m_pendingView = false;
     qDebug() << "[CanvasViewport] fit: zoom=" << m_zoom << "origin=" << m_origin
              << "docSize=" << m_document->width() << "x" << m_document->height();
-    emit zoomChanged(); emit zoomRequested(m_zoom); invalidateAll();
+    emit zoomChanged(); emit zoomRequested(m_zoom); emit viewChanged(); invalidateAll();
     qDebug() << "[CanvasViewport] fit: done";
+}
+QPointF CanvasViewport::viewCenter() const
+{
+    if (m_pendingView) return m_pendingCenter;
+    return viewportToDocument(width() / 2, height() / 2);
+}
+void CanvasViewport::restoreView(qreal zoom, qreal centerX, qreal centerY)
+{
+    if (!std::isfinite(zoom) || !std::isfinite(centerX) || !std::isfinite(centerY)) return;
+    zoom = qBound(6.25, zoom, 6400.0);
+    const bool zoomDiffers = !qFuzzyCompare(m_zoom, zoom);
+    m_zoom = zoom;
+    if (width() > 0 && height() > 0) {
+        m_origin = QPointF(width() / 2, height() / 2) - QPointF(centerX, centerY) * (zoom / 100);
+        m_originInitialized = true;
+        m_pendingView = false;
+    } else {
+        // No size yet: remember the request and apply it on the first resize.
+        m_pendingView = true;
+        m_pendingCenter = QPointF(centerX, centerY);
+    }
+    if (zoomDiffers) emit zoomChanged();
+    emit viewChanged();
+    invalidateAll();
 }
 void CanvasViewport::geometryChange(const QRectF& now, const QRectF& old)
 {
     QQuickPaintedItem::geometryChange(now, old);
-    if (now.size() != old.size()) invalidateAll();
+    if (now.size() == old.size()) return;
+    if (m_pendingView && now.width() > 0 && now.height() > 0) {
+        m_origin = QPointF(now.width() / 2, now.height() / 2) - m_pendingCenter * (m_zoom / 100);
+        m_originInitialized = true;
+        m_pendingView = false;
+    } else if (m_originInitialized && old.width() > 0 && old.height() > 0) {
+        // Keep the same point of the artwork in the middle of the view when
+        // the window or a dock is resized. Without this a project's stored
+        // position would drift every time the layout changed.
+        m_origin += QPointF((now.width() - old.width()) / 2, (now.height() - old.height()) / 2);
+    }
+    emit viewChanged();
+    invalidateAll();
 }
 std::vector<CompositeLayer> CanvasViewport::layers() const
 {
@@ -409,6 +448,8 @@ void CanvasViewport::refreshNow()
                                (height() - m_document->height() * m_zoom / 100) / 2);
             m_originInitialized = true;
             dirty = QRectF(QPointF(0, 0), QSizeF(frameSize));
+            // Reported after this function returns: the frame lock is held here.
+            QMetaObject::invokeMethod(this, &CanvasViewport::viewChanged, Qt::QueuedConnection);
             qDebug() << "[CanvasViewport] refreshNow: auto-centered origin=" << m_origin;
         }
         QPainter painter(&m_frame);

@@ -122,8 +122,14 @@ int KomaPaintApp::run()
         if (QFontDatabase::hasFamily(name)) { app->setFont(QFont(name, 10)); break; }
     }
 
-    const bool recoveryReady = m_workspace.initializeRecovery(QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath(QStringLiteral("recovery")));
+    const QDir appData(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+    const bool recoveryReady = m_workspace.initializeRecovery(appData.filePath(QStringLiteral("recovery")));
     if (!recoveryReady) qWarning("[KomaPaint] Workspace recovery is unavailable (directory or lock failure).");
+    // The session (open tabs, per-project view, window layout) is its own
+    // small file next to the recovery folder. Only the instance that holds
+    // the recovery lock owns the session, so a second running copy cannot
+    // overwrite the first one's tab list.
+    if (recoveryReady) m_workspace.initializeSession(appData.filePath(QStringLiteral("session.json")));
     registerTypes();
     loadStyles();
     loadUi();

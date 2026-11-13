@@ -2,6 +2,8 @@
 
 #include "../canvas/CanvasDocument.h"
 #include "../files/DocumentFile.h"
+#include "../layers/Layer.h"
+#include "../layers/LayerModel.h"
 
 #include <QFile>
 
@@ -62,6 +64,17 @@ public:
             return nullptr;
         }
         return document;
+    }
+    quint64 estimatedSnapshotBytes(const CanvasDocument& document) const override
+    {
+        // .koma stores the allocated tile pixels uncompressed, so the pixel
+        // bytes plus a generous allowance for names and tables is an upper
+        // estimate of the file size.
+        quint64 bytes = 64U * 1024U;
+        const auto* model = document.layers();
+        for (int i = 0; i < model->rowCount(); ++i)
+            bytes += static_cast<quint64>(model->layerAt(i)->tiles().allocatedPixelBytes()) + 8U * 1024U;
+        return bytes;
     }
 };
 

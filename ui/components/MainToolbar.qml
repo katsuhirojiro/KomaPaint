@@ -7,6 +7,8 @@ Item {
     id: root
     implicitHeight: KP.toolbarHeight
     signal newDocumentRequested()
+    signal openRequested()
+    signal saveRequested()
     signal fitRequested()
 
     Rectangle {
@@ -29,16 +31,16 @@ Item {
             onClicked: root.newDocumentRequested()
         }
         ToolbarButton {
+            objectName: "openToolbarButton"
             iconText: "O"
             tooltip: "Open..."
-            onClicked: /* placeholder */  {
-            }
+            onClicked: root.openRequested()
         }
         ToolbarButton {
+            objectName: "saveToolbarButton"
             iconText: "S"
             tooltip: "Save"
-            onClicked: /* placeholder */  {
-            }
+            onClicked: root.saveRequested()
         }
         Sep {
         }

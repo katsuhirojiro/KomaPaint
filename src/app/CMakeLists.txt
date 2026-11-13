@@ -15,6 +15,8 @@ add_library(komapaint_app STATIC
     PanelManager.h
     ProjectCreationService.cpp
     ProjectCreationService.h
+    SessionStore.cpp
+    SessionStore.h
     WorkspaceState.cpp
     WorkspaceState.h
 )

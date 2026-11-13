@@ -18,6 +18,9 @@ class CanvasViewport : public QQuickPaintedItem {
     Q_PROPERTY(QObject* document READ document WRITE setDocument NOTIFY documentChanged)
     Q_PROPERTY(QObject* history READ history WRITE setHistory NOTIFY historyChanged)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged)
+    // Document point shown at the centre of the viewport. Together with zoom
+    // this is the view state each project keeps for itself.
+    Q_PROPERTY(QPointF viewCenter READ viewCenter NOTIFY viewChanged)
 public:
     explicit CanvasViewport(QQuickItem* parent = nullptr);
     ~CanvasViewport() override;
@@ -32,6 +35,11 @@ public:
     Q_INVOKABLE QPointF viewportToDocument(qreal x, qreal y) const;
     Q_INVOKABLE QPointF documentToViewport(qreal x, qreal y) const;
     Q_INVOKABLE void fit();
+    QPointF viewCenter() const;
+    // Shows the given document point at the centre of the viewport at the
+    // given zoom. Used when a project tab is shown again and after a restart.
+    // If the item has no size yet the view is applied as soon as it has one.
+    Q_INVOKABLE void restoreView(qreal zoom, qreal centerX, qreal centerY);
     Q_INVOKABLE bool beginStroke(qreal x, qreal y, qreal pressure, QObject* settings, const QColor& color);
     Q_INVOKABLE void continueStroke(qreal x, qreal y, qreal pressure);
     Q_INVOKABLE void endStroke(qreal x, qreal y, qreal pressure);
@@ -46,6 +54,8 @@ signals:
     void historyChanged();
     void zoomChanged();
     void zoomRequested(qreal zoom);
+    // Zoom or position changed (pan, zoom, fit, resize).
+    void viewChanged();
     void strokeError(const QString& message);
 protected:
     void geometryChange(const QRectF& newGeometry, const QRectF& oldGeometry) override;
@@ -74,6 +84,8 @@ private:
     qreal m_zoom = 100;
     QPointF m_origin;
     bool m_originInitialized = false;
+    bool m_pendingView = false;   // restoreView() arrived before the item had a size
+    QPointF m_pendingCenter;
     bool m_modifiedBeforeStroke = false;
     bool m_scheduled = false;
     QRectF m_pending;

@@ -8,6 +8,30 @@ Rectangle {
     id: ws
     color: KP.canvasBg
     function fitCanvas() { canvas.fit() }
+
+    // Zoom and viewport position belong to the project, not to the window.
+    // The canvas reports every change to the active project, and each time a
+    // different project is shown its own stored view is put back. A project
+    // shown for the first time has no stored view and is fitted instead.
+    property bool applyingView: false
+    function rememberView() {
+        if (applyingView || !canvas.document || canvas.document !== Workspace.document) return
+        if (canvas.width <= 0 || canvas.height <= 0) return
+        const center = canvas.viewCenter
+        Workspace.storeActiveView(canvas.zoom, center.x, center.y)
+    }
+    function applyStoredView() {
+        if (!canvas.document) return
+        applyingView = true
+        if (Workspace.activeViewStored()) {
+            const center = Workspace.activeViewCenter()
+            canvas.restoreView(Workspace.zoom, center.x, center.y)
+        } else {
+            canvas.fit()
+        }
+        applyingView = false
+        rememberView()
+    }
     CanvasViewport {
         id: canvas
         objectName: "canvasViewport"
@@ -15,16 +39,14 @@ Rectangle {
         document: Workspace.document
         history: Workspace.history
         zoom: Workspace.zoom
-        onZoomRequested: function(value) { Workspace.zoom = value }
+        onZoomRequested: function(value) { if (canvas.document === Workspace.document) Workspace.zoom = value }
+        onViewChanged: ws.rememberView()
         onStrokeError: function(message) { brushError.text = message; brushErrorDialog.open() }
-        // Fit each new document to the viewport immediately after setDocument()
-        // has updated m_document. Fitting here (not on Workspace.documentChanged)
-        // ensures fit() uses the new document's dimensions, not the old one.
+        // Runs immediately after setDocument() has updated the canvas, so the
+        // view is applied against the new document's dimensions.
         Connections {
             target: canvas
-            function onDocumentChanged() {
-                if (canvas.document) canvas.fit()
-            }
+            function onDocumentChanged() { ws.applyStoredView() }
         }
     }
     MouseArea {

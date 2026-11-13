@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QStringList>
+#include <QtGlobal>
 
 #include <memory>
 #include <vector>
@@ -39,6 +40,15 @@ public:
     // Fully validates a snapshot and returns a detached, unmodified document.
     // Returns nullptr and sets *error on any mismatch or corruption.
     virtual CanvasDocument* open(const QString& path, QString* error) const = 0;
+    // Upper estimate of the bytes a snapshot of this document needs on disk,
+    // or 0 when the type cannot tell. The workspace uses it to skip a
+    // snapshot that cannot fit in the free space instead of filling the disk
+    // and leaving no room for the user's own Save.
+    virtual quint64 estimatedSnapshotBytes(const CanvasDocument& document) const
+    {
+        Q_UNUSED(document);
+        return 0;
+    }
 };
 
 class DocumentRecoveryRegistry

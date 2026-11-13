@@ -50,32 +50,56 @@ ApplicationWindow {
         closeTabIndex = index
         saveChangesDialog.open()
     }
+    // Closing one tab touches only that tab: its document, its history and
+    // (because the user saved or explicitly chose Don't Save) its recovery copy.
     function finishTabClose(index, discard) {
-        if (Workspace.recoveryReady && !Workspace.recoveryAvailable
-                && !Workspace.persistWorkspace([], [Workspace.projectTabs[index].id])) return
         Workspace.closeTab(index, discard)
     }
-    function continueApplicationClose() {
+    // Cancel: nothing is closed, nothing is discarded, and the project the
+    // user was working on is shown again.
+    function cancelClose() {
+        const wasApp = closeAction === "app"
+        closeAction = ""
+        approvedCloseIds = []
+        if (wasApp && activeTabAtClose >= 0 && activeTabAtClose < Workspace.projectTabs.length)
+            Workspace.activateTab(activeTabAtClose)
+    }
+    // Returns true when every modified project has a decision and the
+    // window may close; false when a question is now on screen (or a stroke
+    // in progress blocks the close).
+    function prepareApplicationClose() {
         const tabs = Workspace.projectTabs
         for (let i = 0; i < tabs.length; ++i) {
             if (tabs[i].modified && approvedCloseIds.indexOf(tabs[i].id) < 0) {
-                if (!Workspace.activateTab(i)) { closeAction = ""; return }
+                if (!Workspace.activateTab(i)) { closeAction = ""; return false }
                 closeAction = "app"
                 closeTabIndex = i
                 saveChangesDialog.open()
-                return
+                return false
             }
         }
+        // Every modified project now has a decision and nothing has been
+        // closed yet. Write the session (tabs, active project, layout) and
+        // drop recovery copies only for projects that were saved or that the
+        // user chose not to save. A storage problem here never traps the
+        // user in the application.
         if (activeTabAtClose >= 0 && activeTabAtClose < Workspace.projectTabs.length)
             Workspace.activateTab(activeTabAtClose)
-        if (Workspace.recoveryReady && !Workspace.recoveryAvailable && !Workspace.persistWorkspace(approvedCloseIds)) {
-            closeAction = ""
-            approvedCloseIds = []
-            return
-        }
+        Workspace.finishShutdown(approvedCloseIds)
         closeAction = ""
         allowCloseWithArtwork = true
-        root.close()
+        return true
+    }
+    // Called after an answer in the Save changes dialog.
+    function continueApplicationClose() {
+        if (prepareApplicationClose()) root.close()
+    }
+    function applyCloseAnswer() {
+        const answer = saveChangesDialog.decision
+        saveChangesDialog.decision = ""
+        if (answer === "save") saveForClose()
+        else if (answer === "discard") closeDecisionComplete(true)
+        else if (!saveChangesDialog.visible) cancelClose()  // Cancel, or closed any other way: keep everything
     }
     function closeDecisionComplete(discard) {
         if (closeAction === "tab") {
@@ -89,14 +113,16 @@ ApplicationWindow {
     function saveForClose() {
         if (Workspace.currentFile.length === 0) { saveImageDialog.open(); return }
         if (Workspace.saveToPath(Workspace.currentFile)) closeDecisionComplete(false)
-        else { closeAction = ""; approvedCloseIds = [] }
+        else cancelClose()
     }
     onClosing: function(event) {
         if (!allowCloseWithArtwork) {
-            event.accepted = false
             if (closeAction === "") activeTabAtClose = Workspace.activeTab
             approvedCloseIds = []
-            continueApplicationClose()
+            // Accept this very close request when nothing needs asking. (A
+            // second close() from inside this handler is ignored by Qt, which
+            // used to make File > Exit do nothing the first time.)
+            event.accepted = prepareApplicationClose()
         }
     }
 
@@ -158,9 +184,9 @@ ApplicationWindow {
         onAccepted: {
             if (Workspace.saveToPath(selectedFile.toString())) {
                 if (root.closeAction !== "") root.closeDecisionComplete(false)
-            } else { root.closeAction = ""; root.approvedCloseIds = [] }
+            } else root.cancelClose()
         }
-        onRejected: { root.closeAction = ""; root.approvedCloseIds = [] }
+        onRejected: root.cancelClose()
     }
 
     minimumWidth: 1024
@@ -173,14 +199,57 @@ ApplicationWindow {
         Settings.windowSize = Qt.size(width, height)
     onVisibilityChanged: Settings.windowMaximized = (visibility === Window.Maximized)
 
+    // Width of the right dock; the user drags the handle next to it. Kept in
+    // the session together with which panels are shown.
+    property real rightDockWidth: 260
+    property bool recoveryPrompted: false
+    // Stored settings come back as text on some platforms ("false" is not
+    // false in JavaScript), so compare explicitly.
+    function settingIsTrue(key, fallback) {
+        const v = Settings.value(key, fallback)
+        return v === true || v === "true" || v === 1 || v === "1"
+    }
+    // Session: reopen last time's saved projects (each with its own tool,
+    // zoom and position) and put the window layout back. This is separate
+    // from recovery and never asks a question.
+    function restoreSessionState() {
+        Workspace.restoreSession()
+        const ids = ["layers", "properties", "color", "timeline"]
+        for (let i = 0; i < ids.length; ++i) {
+            const v = Workspace.sessionValue("panel/" + ids[i])
+            if (v !== undefined && v !== null) Panels.setVisible(ids[i], v === true || v === "true")
+        }
+        const dock = Number(Workspace.sessionValue("layout/rightDockWidth", 0))
+        if (dock > 0) rightDockWidth = dock
+    }
+    // Recovery: periodic snapshots always run at the chosen interval, also
+    // while older recovery entries are still waiting for a decision.
     function beginRecovery() {
-        if (Workspace.recoveryAvailable) recoveryChoiceDialog.open()
-        else Workspace.setRecoveryInterval(Number(Settings.value("recovery/intervalMinutes", 10)))
+        Workspace.setRecoveryInterval(Number(Settings.value("recovery/intervalMinutes", 10)))
+        if (Workspace.recoveryAvailable && !recoveryPrompted) {
+            recoveryPrompted = true
+            recoveryChoiceDialog.open()
+        }
     }
     function beginRecoverySetup() {
+        restoreSessionState()
         if (!Workspace.recoveryReady) return
-        if (!Settings.value("recovery/configured", false)) recoverySettingsDialog.open()
+        if (!settingIsTrue("recovery/configured", false)) recoverySettingsDialog.open()
         else beginRecovery()
+    }
+    function recoveryNote(entry) {
+        const parts = []
+        if (entry.snapshotTime.length > 0) parts.push(qsTr("Recovery copy from %1.").arg(entry.snapshotTime))
+        if (entry.originalState === "changed")
+            parts.push(qsTr("The saved file has changed since then, so this opens as a separate project that you keep with Save As."))
+        else if (entry.originalState === "missing")
+            parts.push(qsTr("The saved file is missing, so this opens as a separate project that you keep with Save As."))
+        if (entry.message.length > 0) parts.push(entry.message)
+        return parts.join(" ")
+    }
+    Connections {
+        target: Panels
+        function onPanelVisibilityChanged(id, v) { Workspace.setSessionValue("panel/" + id, v) }
     }
     // Defer opening dialogs until the window has completed and its overlay is
     // available; opening a popup directly from Component.onCompleted can be
@@ -252,6 +321,12 @@ ApplicationWindow {
                     enabled: false
                 }
                 MenuSeparator {
+                }
+                MenuItem {
+                    objectName: "recoverUnsavedMenuItem"
+                    text: qsTr("Recover Unsaved Work...")
+                    enabled: Workspace.recoveryAvailable
+                    onTriggered: recoveryChoiceDialog.open()
                 }
                 MenuItem {
                     text: qsTr("Recovery settings...")
@@ -365,17 +440,15 @@ ApplicationWindow {
                         checked: Panels.isVisible("timeline")
                         onTriggered: Panels.toggle("timeline")
                     }
+                    // These panels do not exist yet; they are shown disabled
+                    // rather than pretending to toggle something.
                     MenuItem {
                         text: qsTr("Assets")
-                        checkable: true
-                        checked: Panels.isVisible("assets")
-                        onTriggered: Panels.toggle("assets")
+                        enabled: false
                     }
                     MenuItem {
                         text: qsTr("History")
-                        checkable: true
-                        checked: Panels.isVisible("history")
-                        onTriggered: Panels.toggle("history")
+                        enabled: false
                     }
                     MenuSeparator {
                     }
@@ -469,11 +542,14 @@ ApplicationWindow {
                         required property int index
                         required property var modelData
                         Button {
+                            objectName: "projectTabButton" + index
                             text: modelData.title + (modelData.modified ? " *" : "")
                             highlighted: index === Workspace.activeTab
+                            ToolTip.visible: hovered && modelData.path.length > 0
+                            ToolTip.text: modelData.path
                             onClicked: Workspace.activateTab(index)
                         }
-                        ToolButton { text: "×"; Accessible.name: qsTr("Close project"); onClicked: root.requestTabClose(index) }
+                        ToolButton { objectName: "projectTabClose" + index; text: "×"; Accessible.name: qsTr("Close project"); onClicked: root.requestTabClose(index) }
                     }
                 }
             }
@@ -484,6 +560,8 @@ ApplicationWindow {
             id: toolbar
             Layout.fillWidth: true
             onNewDocumentRequested: root.requestNewDocument()
+            onOpenRequested: root.requestOpenImage()
+            onSaveRequested: root.saveImage()
             onFitRequested: canvasArea.fitCanvas()
         }
 
@@ -530,14 +608,41 @@ ApplicationWindow {
                     }
                 }
 
+                // ---- Drag handle: resizes the right dock
+                Rectangle {
+                    id: rightDockHandle
+                    objectName: "rightDockHandle"
+                    Layout.preferredWidth: 5
+                    Layout.fillHeight: true
+                    color: dockDrag.pressed || dockDrag.containsMouse ? KP.selection : KP.border
+                    MouseArea {
+                        id: dockDrag
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.SplitHCursor
+                        property real startX: 0
+                        property real startWidth: 0
+                        onPressed: function(mouse) {
+                            startX = mapToItem(workspaceArea, mouse.x, 0).x
+                            startWidth = root.rightDockWidth
+                        }
+                        onPositionChanged: function(mouse) {
+                            if (!pressed) return
+                            const moved = mapToItem(workspaceArea, mouse.x, 0).x - startX
+                            root.rightDockWidth = Math.max(200, Math.min(workspaceArea.width * 0.6, startWidth - moved))
+                        }
+                        onReleased: Workspace.setSessionValue("layout/rightDockWidth", Math.round(root.rightDockWidth))
+                    }
+                }
+
                 // ---- Right: dock panel column
                 ColumnLayout {
                     id: rightColumn
-                    Layout.preferredWidth: 260
+                    Layout.preferredWidth: root.rightDockWidth
                     // A nested layout reports no useful implicit width, and
                     // without an explicit cap the row layout stretches this
                     // dock across the whole window, collapsing the canvas.
-                    Layout.maximumWidth: 260
+                    Layout.maximumWidth: root.rightDockWidth
                     Layout.fillHeight: true
                     spacing: 1
 
@@ -621,43 +726,145 @@ ApplicationWindow {
             } }
         }
     }
+    // Crash recovery: one row per recoverable project, each with its own
+    // Recover and Discard. Nothing here ever writes to a saved project file.
     Dialog {
         id: recoveryChoiceDialog
         objectName: "recoveryChoiceDialog"
         anchors.centerIn: parent
         modal: true
         closePolicy: Popup.NoAutoClose
-        title: qsTr("Restore previous workspace?")
-        contentItem: Label { text: qsTr("Restore the last recovery snapshots and project tabs? Original files will not be overwritten. Undo history starts empty. Choosing Not now keeps the old recovery data but creates no new snapshots this session."); color: KP.text; wrapMode: Text.WordWrap; width: 420 }
+        width: Math.min(root.width - 80, 640)
+        title: qsTr("Recover unsaved work")
+        Connections {
+            target: Workspace
+            function onRecoveryAvailableChanged() { if (!Workspace.recoveryAvailable) recoveryChoiceDialog.close() }
+        }
+        contentItem: ColumnLayout {
+            spacing: KP.gapM
+            Label {
+                text: qsTr("KomaPaint has recovery copies of the projects below. Recovering opens the copy in its own tab. Your saved files are not changed unless you then choose Save. Undo history starts empty.")
+                color: KP.text
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            ListView {
+                id: recoveryList
+                objectName: "recoveryEntryList"
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(contentHeight, 320)
+                clip: true
+                spacing: 6
+                model: Workspace.recoveryEntries
+                ScrollBar.vertical: ScrollBar { }
+                delegate: Rectangle {
+                    id: recoveryRow
+                    required property var modelData
+                    required property int index
+                    objectName: "recoveryEntry" + index
+                    width: ListView.view.width
+                    height: recoveryRowLayout.implicitHeight + 16
+                    color: KP.paneBgAlt
+                    border.color: modelData.status === "damaged" ? KP.error : KP.border
+                    radius: KP.radiusS
+                    RowLayout {
+                        id: recoveryRowLayout
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: KP.gapM
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Label {
+                                objectName: "recoveryEntryTitle" + recoveryRow.index
+                                text: recoveryRow.modelData.title
+                                color: KP.text
+                                font.bold: true
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Label {
+                                objectName: "recoveryEntryKind" + recoveryRow.index
+                                text: recoveryRow.modelData.saved
+                                      ? qsTr("Saved file: %1").arg(recoveryRow.modelData.fileName)
+                                      : qsTr("Never saved")
+                                color: KP.textMuted
+                                font.pixelSize: KP.fontS
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Label {
+                                visible: recoveryRow.modelData.saved
+                                text: recoveryRow.modelData.originalPath
+                                color: KP.textSubtle
+                                font.pixelSize: KP.fontXS
+                                elide: Text.ElideMiddle
+                                Layout.fillWidth: true
+                            }
+                            Label {
+                                text: root.recoveryNote(recoveryRow.modelData)
+                                visible: text.length > 0
+                                color: recoveryRow.modelData.status === "damaged" ? KP.error : KP.textMuted
+                                font.pixelSize: KP.fontXS
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+                        Button {
+                            objectName: "recoverEntryButton" + recoveryRow.index
+                            text: qsTr("Recover")
+                            onClicked: Workspace.recoverEntry(recoveryRow.modelData.key)
+                        }
+                        Button {
+                            objectName: "discardEntryButton" + recoveryRow.index
+                            text: qsTr("Discard")
+                            onClicked: {
+                                recoveryDiscardConfirmation.entryKey = recoveryRow.modelData.key
+                                recoveryDiscardConfirmation.entryTitle = recoveryRow.modelData.title
+                                recoveryDiscardConfirmation.open()
+                            }
+                        }
+                    }
+                }
+            }
+        }
         footer: DialogButtonBox {
-            Button { objectName: "restoreRecoveryButton"; text: qsTr("Restore"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: {
-                if (Workspace.restoreWorkspace()) { recoveryChoiceDialog.close(); root.beginRecovery() }
-            } }
-            Button { text: qsTr("Discard recovery"); DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole; onClicked: recoveryDiscardConfirmation.open() }
-            Button { objectName: "notNowRecoveryButton"; text: qsTr("Not now"); DialogButtonBox.buttonRole: DialogButtonBox.RejectRole; onClicked: recoveryChoiceDialog.close() }
+            Button { objectName: "restoreRecoveryButton"; text: qsTr("Recover all"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: Workspace.restoreWorkspace() }
+            Button { objectName: "notNowRecoveryButton"; text: qsTr("Decide later"); DialogButtonBox.buttonRole: DialogButtonBox.RejectRole; onClicked: recoveryChoiceDialog.close() }
         }
     }
     Dialog {
         id: recoveryDiscardConfirmation
+        objectName: "recoveryDiscardConfirmation"
         anchors.centerIn: parent
         modal: true
-        title: qsTr("Discard recovery?")
+        title: qsTr("Discard recovery copy?")
         standardButtons: Dialog.Yes | Dialog.Cancel
-        contentItem: Label { text: qsTr("Discard the previous workspace recovery information? Original project files will not be changed."); color: KP.text; wrapMode: Text.WordWrap; width: 380 }
-        onAccepted: if (Workspace.discardRecovery()) { recoveryChoiceDialog.close(); root.beginRecovery() }
+        property string entryKey: ""
+        property string entryTitle: ""
+        contentItem: Label { text: qsTr("Permanently discard the recovery copy of \"%1\"? This cannot be undone. Saved project files will not be changed.").arg(recoveryDiscardConfirmation.entryTitle); color: KP.text; wrapMode: Text.WordWrap; width: 380 }
+        onAccepted: Workspace.discardEntry(entryKey)
     }
     Dialog {
         id: saveChangesDialog
+        objectName: "saveChangesDialog"
         anchors.centerIn: parent
         modal: true
         closePolicy: Popup.NoAutoClose
         title: qsTr("Save changes?")
         contentItem: Label { text: qsTr("Save changes to %1?").arg(Workspace.document.title); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+        // The answer is acted on one event-loop turn after the dialog has
+        // closed. Asking about the next project means opening this same
+        // dialog again, and re-opening it from inside its own button handler
+        // left it closed: the second question never appeared, so the
+        // application could not be closed with two unsaved projects.
+        property string decision: ""
         footer: DialogButtonBox {
-            Button { text: qsTr("Save"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: { saveChangesDialog.close(); root.saveForClose() } }
-            Button { text: qsTr("Don't Save"); DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole; onClicked: { saveChangesDialog.close(); root.closeDecisionComplete(true) } }
-            Button { text: qsTr("Cancel"); DialogButtonBox.buttonRole: DialogButtonBox.RejectRole; onClicked: { saveChangesDialog.close(); root.closeAction = ""; root.approvedCloseIds = [] } }
+            Button { objectName: "saveChangesSaveButton"; text: qsTr("Save"); DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: { saveChangesDialog.decision = "save"; saveChangesDialog.close() } }
+            Button { objectName: "saveChangesDiscardButton"; text: qsTr("Don't Save"); DialogButtonBox.buttonRole: DialogButtonBox.DestructiveRole; onClicked: { saveChangesDialog.decision = "discard"; saveChangesDialog.close() } }
+            Button { objectName: "saveChangesCancelButton"; text: qsTr("Cancel"); DialogButtonBox.buttonRole: DialogButtonBox.RejectRole; onClicked: { saveChangesDialog.decision = "cancel"; saveChangesDialog.close() } }
         }
+        onClosed: Qt.callLater(root.applyCloseAnswer)
     }
     Dialog {
         id: clearHistoryDialog
@@ -678,25 +885,6 @@ ApplicationWindow {
         contentItem: Label { text: qsTr("Your artwork has unsaved changes. Creating a new project will permanently discard them."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
         onAccepted: newProjectDialog.open()
     }
-    Dialog {
-        id: discardForOpen
-        anchors.centerIn: parent
-        modal: true
-        title: qsTr("Discard unsaved changes?")
-        standardButtons: Dialog.Yes | Dialog.Cancel
-        contentItem: Label { text: qsTr("Your artwork has unsaved changes. Opening another illustration will permanently discard them."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
-        onAccepted: openImageDialog.open()
-    }
-    Dialog {
-        id: discardForClose
-        anchors.centerIn: parent
-        modal: true
-        title: qsTr("Discard unsaved changes?")
-        standardButtons: Dialog.Yes | Dialog.Cancel
-        contentItem: Label { text: qsTr("Your artwork has unsaved changes. Closing KomaPaint will permanently discard them."); color: KP.text; wrapMode: Text.WordWrap; width: 360 }
-        onAccepted: { root.allowCloseWithArtwork = true; root.close() }
-    }
-
     NewProjectDialog {
         id: newProjectDialog
     }
@@ -732,7 +920,7 @@ ApplicationWindow {
             Label {
                 Layout.leftMargin: KP.gapL
                 Layout.rightMargin: KP.gapL
-                text: "Professional 2D digital painting and animation.\n\nThis is an early Phase-1 build: the application shell is in place but painting and animation engines are not yet implemented."
+                text: "Professional 2D digital painting and animation.\n\nThis is an early alpha build. Brush painting, layers, project tabs, saving and automatic recovery work. Selection, transform, fill, text, shape and animation tools are not implemented yet."
                 color: KP.text
                 font.family: KP.fontUi
                 font.pixelSize: KP.fontS
