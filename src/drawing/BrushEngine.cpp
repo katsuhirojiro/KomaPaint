@@ -18,9 +18,15 @@ bool clipAxis(double position, double delta, double lo, double hi, double& start
 struct Batch { SparseTileStore& store; explicit Batch(SparseTileStore& s) : store(s) { s.beginBatch(); } ~Batch() { store.endBatch(); } };
 }
 double BrushRasterizer::sensorOpacity(double pressure) { return clamp01(pressure); }
-double BrushRasterizer::tipCoverage(BrushTip tip, double dx, double dy, double radius, std::int64_t x, std::int64_t y)
+double BrushRasterizer::tipCoverage(BrushTip tip, double dx, double dy, double radius, std::int64_t x, std::int64_t y, double hardness)
 {
-    double coverage = clamp01(radius + 0.5 - std::hypot(dx, dy));
+    // The edge fades over a band that is one pixel wide at full hardness (plain
+    // anti-aliasing, unchanged from the hard tip) and the whole radius at zero.
+    const double softness = 1.0 - clamp01(hardness);
+    const double band = std::max(1.0, softness * (radius + 0.5));
+    double coverage = clamp01((radius + 0.5 - std::hypot(dx, dy)) / band);
+    // Soft tips ease in and out instead of forming a cone.
+    if (softness > 0) coverage += softness * (coverage * coverage * (3.0 - 2.0 * coverage) - coverage);
     if (tip == BrushTip::Textured) {
         // Stable, deterministic grain anchored in document pixels.
         std::uint32_t n = static_cast<std::uint32_t>(x) * 0x8da6b343U ^ static_cast<std::uint32_t>(y) * 0xd8163841U;
@@ -37,10 +43,16 @@ std::uint32_t BrushRasterizer::deposit(std::uint32_t dst, std::uint32_t color, d
     const auto outAlpha = std::min(255U, alpha + scale((dst >> 24) & 255U, inverse));
     return (outAlpha << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0);
 }
+std::uint32_t BrushRasterizer::erase(std::uint32_t dst, double amount)
+{
+    const auto keep = 255U - static_cast<unsigned>(std::lround(clamp01(amount) * 255.0));
+    auto channel = [&](unsigned shift) { return scale((dst >> shift) & 255U, keep); };
+    return (channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0);
+}
 SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const BrushDefinition& b, InputSample p)
 {
     using R = SparseTileStore::WriteResult;
-    if (!valid(p) || !std::isfinite(b.size) || !std::isfinite(b.opacity) || !std::isfinite(b.flow) || b.size < 1 || b.size > 256 || b.opacity < 0 || b.opacity > 1 || b.flow < 0 || b.flow > 1) return R::InvalidPixel;
+    if (!valid(p) || !std::isfinite(b.size) || !std::isfinite(b.opacity) || !std::isfinite(b.flow) || b.size < 1 || b.size > 256 || b.opacity < 0 || b.opacity > 1 || b.flow < 0 || b.flow > 1 || !std::isfinite(b.hardness) || b.hardness < 0 || b.hardness > 1) return R::InvalidPixel;
     const auto& g = store.geometry();
     if (!store.isValid()) return R::OutOfBounds;
     const double radius = b.size / 2;
@@ -53,10 +65,11 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     bool changed = false;
     for (auto y = static_cast<std::int64_t>(top); y < static_cast<std::int64_t>(bottom); ++y) {
         for (auto x = static_cast<std::int64_t>(left); x < static_cast<std::int64_t>(right); ++x) {
-            const double coverage = tipCoverage(b.tip, x + 0.5 - p.x, y + 0.5 - p.y, radius, x, y);
+            const double coverage = tipCoverage(b.tip, x + 0.5 - p.x, y + 0.5 - p.y, radius, x, y, b.hardness);
             if (coverage <= 0) continue;
             const auto old = store.pixel({x, y}).value();
-            const auto next = deposit(old, b.color, coverage * b.opacity * b.flow * sensorOpacity(p.pressure));
+            const double amount = coverage * b.opacity * b.flow * sensorOpacity(p.pressure);
+            const auto next = b.erase ? erase(old, amount) : deposit(old, b.color, amount);
             auto result = store.setPixel({x, y}, next);
             if (result == R::Changed) changed = true;
             else if (result != R::Unchanged) return result; // partial dab remains visible; caller reports failure

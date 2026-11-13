@@ -1,10 +1,54 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Layouts
 import "../themes"
 
+// Two-column tool palette. Tools are grouped by what they do; a thin rule
+// separates the groups. Every icon comes from ui/assets/icons/tools.
+//
+// A tool is available when the application really implements it:
+//  - painting tools are the ones the sub tool library knows (they drive the
+//    brush engine), and
+//  - `viewTools` are handled by the canvas (see CanvasWorkspace.qml).
+// Every other tool is shown as unavailable: dimmed, not selectable, and its
+// tooltip says so.
 Item {
     id: root
+
+    // Tools implemented by CanvasWorkspace itself.
+    readonly property var viewTools: ["zoom", "hand", "eyedropper"]
+    function isAvailable(tool) { return Workspace.subTools.paints(tool) || viewTools.indexOf(tool) >= 0 }
+    function labelFor(tool) {
+        for (let g = 0; g < groups.length; ++g)
+            for (let i = 0; i < groups[g].length; ++i)
+                if (groups[g][i].id === tool) return groups[g][i].label
+        return tool
+    }
+
+    // id = Workspace.activeTool value and icon file name; key = real shortcut (see MainWindow.qml).
+    readonly property var groups: [
+        [ { id: "zoom", label: qsTr("Zoom"), key: "Z" },
+          { id: "hand", label: qsTr("Hand"), key: "H" } ],
+        [ { id: "move", label: qsTr("Move"), key: "" },
+          { id: "transform", label: qsTr("Transform"), key: "" } ],
+        [ { id: "selection", label: qsTr("Selection"), key: "" },
+          { id: "lasso", label: qsTr("Lasso"), key: "" },
+          { id: "wand", label: qsTr("Auto select"), key: "" },
+          { id: "eyedropper", label: qsTr("Eyedropper"), key: "I" } ],
+        [ { id: "pen", label: qsTr("Pen"), key: "P" },
+          { id: "pencil", label: qsTr("Pencil"), key: "N" },
+          { id: "brush", label: qsTr("Brush"), key: "B" },
+          { id: "airbrush", label: qsTr("Airbrush"), key: "A" },
+          { id: "eraser", label: qsTr("Eraser"), key: "E" },
+          { id: "smudge", label: qsTr("Blend"), key: "" } ],
+        [ { id: "fill", label: qsTr("Fill"), key: "" },
+          { id: "gradient", label: qsTr("Gradient"), key: "" } ],
+        [ { id: "line", label: qsTr("Line"), key: "" },
+          { id: "curveline", label: qsTr("Curve"), key: "" },
+          { id: "rectangle", label: qsTr("Rectangle"), key: "" },
+          { id: "circle", label: qsTr("Ellipse"), key: "" } ],
+        [ { id: "text", label: qsTr("Text"), key: "" } ]
+    ]
+
     Rectangle {
         anchors.fill: parent
         color: KP.paneHeaderBg
@@ -12,129 +56,91 @@ Item {
         border.width: 1
     }
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.topMargin: 4
-        anchors.bottomMargin: 4
-        spacing: 3
+    Column {
+        id: toolColumn
+        anchors.top: parent.top
+        anchors.topMargin: 5
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: 2 * KP.toolButtonSize + KP.paletteGap
+        spacing: 0
 
         Repeater {
-            model: ListModel {
-                ListElement {
-                    tool: "selection"
-                    glyph: "⬚"
-                    tip: "Selection (V)"
-                }
-                ListElement {
-                    tool: "move"
-                    glyph: "✥"
-                    tip: "Move (M)"
-                }
-                ListElement {
-                    tool: "brush"
-                    glyph: "🖌"
-                    tip: "Brush (B)"
-                }
-                ListElement {
-                    tool: "pencil"
-                    glyph: "✎"
-                    tip: "Pencil (P)"
-                }
-                ListElement {
-                    tool: "eraser"
-                    glyph: "⌫"
-                    tip: "Eraser (E)"
-                }
-                ListElement {
-                    tool: "fill"
-                    glyph: "▣"
-                    tip: "Fill (G)"
-                }
-                ListElement {
-                    tool: "eyedropper"
-                    glyph: "◉"
-                    tip: "Eyedropper (I)"
-                }
-                ListElement {
-                    tool: "text"
-                    glyph: "T"
-                    tip: "Text (T)"
-                }
-            }
-
-            ToolButton {
+            model: root.groups
+            Column {
+                id: group
                 required property int index
-                required property string tool
-                required property string glyph
-                required property string tip
+                required property var modelData
+                width: toolColumn.width
+                spacing: 0
 
-                Layout.alignment: Qt.AlignHCenter
-                width: KP.toolButtonSize
-                height: KP.toolButtonSize
-                padding: 0
-                flat: true
-                checkable: true
-                checked: Workspace.activeTool === tool
-                onClicked: Workspace.activeTool = tool
-
-                ToolTip.text: tip
-                ToolTip.visible: hovered
-                ToolTip.delay: 400
-
-                background: Rectangle {
-                    color: parent.checked ? KP.toolActive : parent.hovered ? KP.buttonBgHover : "transparent"
-                    radius: KP.radiusS
-                    border.color: parent.checked ? KP.borderLight : "transparent"
-                    border.width: 1
+                // rule between groups
+                Item {
+                    visible: group.index > 0
+                    width: parent.width
+                    height: 7
+                    Rectangle {
+                        y: 3
+                        width: parent.width
+                        height: 1
+                        color: KP.separator
+                    }
                 }
-                contentItem: Label {
-                    text: glyph
-                    color: parent.checked ? "#ffffff" : KP.text
-                    font.family: KP.fontUi
-                    font.pixelSize: KP.fontL
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    renderType: Text.NativeRendering
+                Grid {
+                    columns: 2
+                    spacing: KP.paletteGap
+                    Repeater {
+                        model: group.modelData
+                        IconButton {
+                            required property var modelData
+                            objectName: "tool_" + modelData.id
+                            cell: KP.toolButtonSize
+                            iconSize: KP.toolIconSize
+                            iconName: "tools/" + modelData.id
+                            available: root.isAvailable(modelData.id)
+                            selected: Workspace.activeTool === modelData.id
+                            tooltip: modelData.key.length > 0 && available
+                                     ? modelData.label + " (" + modelData.key + ")" : modelData.label
+                            onActivated: Workspace.activeTool = modelData.id
+                        }
+                    }
                 }
             }
         }
+    }
 
-        Item {
-            Layout.fillHeight: true
-        }
-
-        // Foreground/background color swatch (mini, bottom of palette)
+    Item {
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 6
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: 52
+        height: 52
+        // Drawing colour over background colour; click swaps them.
         Rectangle {
-            Layout.alignment: Qt.AlignHCenter
-            width: 36
-            height: 36
-            color: "transparent"
-            Rectangle {
-                x: 0
-                y: 8
-                width: 20
-                height: 20
-                color: Workspace.colors.background
-                border.color: KP.border
-                radius: KP.radiusS
-            }
-            Rectangle {
-                x: 10
-                y: 0
-                width: 20
-                height: 20
-                color: Workspace.colors.foreground
-                border.color: KP.border
-                radius: KP.radiusS
-                MouseArea {
-                    anchors.fill: parent
-                    onDoubleClicked: Workspace.colors.swap()
-                }
-            }
-            MouseArea {
-                anchors.fill: parent
-                onClicked: Workspace.colors.swap()
-            }
+            x: 20
+            y: 20
+            width: 30
+            height: 30
+            color: Workspace.colors.background
+            border.color: KP.border
+            radius: KP.radiusS
+        }
+        Rectangle {
+            x: 2
+            y: 2
+            width: 30
+            height: 30
+            color: Workspace.colors.foreground
+            border.color: KP.accent
+            border.width: 2
+            radius: KP.radiusS
+        }
+        MouseArea {
+            anchors.fill: parent
+            onClicked: Workspace.colors.swap()
+            ToolTip.text: qsTr("Drawing colour / background colour — click to swap")
+            ToolTip.visible: containsMouse
+            ToolTip.delay: 500
+            hoverEnabled: true
         }
     }
 }

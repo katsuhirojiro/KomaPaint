@@ -17,6 +17,8 @@ add_library(komapaint_app STATIC
     ProjectCreationService.h
     SessionStore.cpp
     SessionStore.h
+    SubToolLibrary.cpp
+    SubToolLibrary.h
     WorkspaceState.cpp
     WorkspaceState.h
 )

@@ -79,39 +79,87 @@ Dialog {
 
         // ------------------------------------------------------------- Modes
         Label { text: qsTr("Project type"); font.pixelSize: KP.fontS; color: KP.textMuted }
+        // Only Illustration projects can be created so far. The other types
+        // are shown so the choice is visible, but cannot be selected.
         RowLayout {
-            spacing: KP.gapS
-            Button {
-                id: modeIllustration
-                text: qsTr("Illustration")
-                checkable: true
-                checked: true
-                enabled: true
-                Layout.fillWidth: true
-            }
-            Button {
-                text: qsTr("Comic Page")
-                checkable: true
-                checked: false
-                enabled: false
-                Layout.fillWidth: true
-            }
-            Button {
-                text: qsTr("Multi-page Comic")
-                checkable: true
-                checked: false
-                enabled: false
-                Layout.fillWidth: true
-            }
-            Button {
-                text: qsTr("Animation")
-                checkable: true
-                checked: false
-                enabled: false
-                Layout.fillWidth: true
+            objectName: "projectTypeRow"
+            Layout.fillWidth: true
+            spacing: KP.gapM
+            Repeater {
+                model: [
+                    { id: "illustration", icon: "project-types/illustration", label: qsTr("Illustration"), available: true },
+                    { id: "comic-page", icon: "project-types/comic-page", label: qsTr("Comic Page"), available: false },
+                    { id: "multi-page-comic", icon: "project-types/multi-page-comic", label: qsTr("Multi-page Comic"), available: false },
+                    { id: "animation", icon: "project-types/animation", label: qsTr("Animation"), available: false }
+                ]
+                AbstractButton {
+                    id: typeTile
+                    required property var modelData
+                    readonly property bool current: modelData.id === "illustration"
+                    objectName: "projectType_" + modelData.id
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 110
+                    implicitHeight: 92
+                    hoverEnabled: true
+                    focusPolicy: Qt.NoFocus
+                    Accessible.name: modelData.label
+                    ToolTip.text: qsTr("%1 — not available yet").arg(modelData.label)
+                    ToolTip.visible: hovered && !modelData.available
+                    ToolTip.delay: 500
+                    background: Rectangle {
+                        radius: KP.radiusM
+                        color: typeTile.current ? KP.toolActive
+                             : (typeTile.hovered && typeTile.modelData.available ? KP.buttonBgHover : KP.paneBgAlt)
+                        border.width: 1
+                        border.color: typeTile.current ? KP.accent : KP.border
+                    }
+                    contentItem: Item {
+                        // The project-type artwork is a finished illustration,
+                        // not a single-colour glyph: it keeps its own colours
+                        // (KpIcon.tinted is false) and is never recoloured by
+                        // the icon theme. It sits on a paper-coloured preview
+                        // card so it reads on the dark and on the light theme
+                        // alike; availability is shown by dimming the card.
+                        Rectangle {
+                            id: previewCard
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.topMargin: 8
+                            width: 52
+                            height: 52
+                            radius: KP.radiusS
+                            color: typeTile.current ? KP.canvasPaper : KP.previewPaper
+                            border.width: 1
+                            border.color: typeTile.current ? KP.accent : KP.borderLight
+                            // The card itself stays solid in both themes, so the
+                            // artwork always sits on paper; only the drawing
+                            // itself is faded when the type cannot be used yet.
+                            KpIcon {
+                                id: typeIcon
+                                anchors.centerIn: parent
+                                name: typeTile.modelData.icon
+                                size: 44
+                                tinted: false
+                                opacity: typeTile.modelData.available ? 1 : (typeTile.hovered ? 0.75 : 0.6)
+                            }
+                        }
+                        Label {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            width: parent.width - 8
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
+                            text: typeTile.modelData.label
+                            color: !typeTile.modelData.available ? KP.textSubtle
+                                 : typeTile.current ? KP.textOnActive : KP.text
+                            font.family: KP.fontUi
+                            font.pixelSize: KP.fontS
+                        }
+                    }
+                }
             }
         }
-
         // ------------------------------------------------------------- Illustration settings
         Rectangle {
             Layout.fillWidth: true

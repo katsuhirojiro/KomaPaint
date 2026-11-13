@@ -12,6 +12,8 @@ struct BrushDefinition {
     double spacing = 0.15;        // fraction of diameter
     std::uint32_t color = 0xff000000; // straight ARGB
     BrushTip tip = BrushTip::Round;
+    double hardness = 1;          // 1 = crisp edge; 0 = fades from the centre to the rim
+    bool erase = false;           // remove paint from the layer instead of depositing colour
 };
 struct InputSample { double x, y, pressure = 1; };
 
@@ -19,8 +21,10 @@ struct InputSample { double x, y, pressure = 1; };
 class BrushRasterizer {
 public:
     static double sensorOpacity(double pressure);
-    static double tipCoverage(BrushTip tip, double dx, double dy, double radius, std::int64_t x, std::int64_t y);
+    static double tipCoverage(BrushTip tip, double dx, double dy, double radius, std::int64_t x, std::int64_t y, double hardness = 1);
     static std::uint32_t deposit(std::uint32_t destination, std::uint32_t color, double amount);
+    // Scales a premultiplied pixel towards transparent; amount 1 clears it.
+    static std::uint32_t erase(std::uint32_t destination, double amount);
     static SparseTileStore::WriteResult dab(SparseTileStore& store, const BrushDefinition& brush, InputSample sample);
 };
 

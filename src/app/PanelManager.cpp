@@ -3,6 +3,9 @@
 namespace komapaint {
 
 const QList<PanelManager::Default> PanelManager::kDefaults = {
+    { QStringLiteral("subtool"),      true  },
+    { QStringLiteral("toolproperty"), true  },
+    { QStringLiteral("brushsize"),    true  },
     { QStringLiteral("layers"),     true  },
     { QStringLiteral("properties"), true  },
     { QStringLiteral("color"),      true  },

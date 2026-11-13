@@ -9,6 +9,7 @@
 #include "DocumentRecovery.h"
 #include "ProjectCreationService.h"
 #include "SessionStore.h"
+#include "SubToolLibrary.h"
 
 #include <QDateTime>
 #include <QJsonObject>
@@ -46,6 +47,7 @@ class WorkspaceState : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(BrushSettings* brush READ brush CONSTANT)
+    Q_PROPERTY(SubToolLibrary* subTools READ subTools CONSTANT)
     Q_PROPERTY(CanvasDocument* document  READ document  NOTIFY documentChanged)
     Q_PROPERTY(LayerModel*     layers    READ layers    NOTIFY documentChanged)
     Q_PROPERTY(TimelineState*  timeline  READ timeline  CONSTANT)
@@ -64,6 +66,7 @@ public:
     explicit WorkspaceState(QObject* parent = nullptr);
 
     BrushSettings* brush() const { return m_brush; }
+    SubToolLibrary* subTools() const { return m_subTools; }
     CanvasDocument* document() const { return m_document; }
     LayerModel*     layers()   const { return m_document->layers(); }
     TimelineState*  timeline() const { return m_timeline; }
@@ -262,6 +265,7 @@ private:
     bool m_sessionRestorePending = false;  // restoreSession() has not run yet
     bool m_sessionBatch = false;       // suppress saves while restoring
     BrushSettings* m_brush;
+    SubToolLibrary* m_subTools;
     CanvasDocument* m_document;
     TimelineState*  m_timeline;
     ColorPalette*   m_colors;

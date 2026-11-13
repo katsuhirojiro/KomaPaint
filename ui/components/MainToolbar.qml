@@ -100,27 +100,7 @@ Item {
             tooltip: "Fit to window"
             onClicked: root.fitRequested()
         }
-        Sep {
-        }
 
-        Sep { }
-        RowLayout {
-            visible: Workspace.activeTool === "brush"
-            spacing: 4
-            Label { text: "Size"; color: KP.text; font.pixelSize: KP.fontS }
-            SpinBox { from: 1; to: 256; value: Workspace.brush.size; editable: true; onValueModified: Workspace.brush.size = value }
-            Label { text: "Opacity %"; color: KP.text; font.pixelSize: KP.fontS }
-            SpinBox { from: 0; to: 100; value: Workspace.brush.opacity; editable: true; onValueModified: Workspace.brush.opacity = value }
-            Label { text: "Flow %"; color: KP.text; font.pixelSize: KP.fontS }
-            SpinBox { from: 0; to: 100; value: Workspace.brush.flow; editable: true; onValueModified: Workspace.brush.flow = value }
-            Label { text: "Spacing %"; color: KP.text; font.pixelSize: KP.fontS }
-            SpinBox { from: 5; to: 50; value: Workspace.brush.spacing; editable: true; onValueModified: Workspace.brush.spacing = value }
-            ComboBox {
-                model: ["Round", "Textured"]
-                currentIndex: Workspace.brush.textured ? 1 : 0
-                onActivated: Workspace.brush.textured = currentIndex === 1
-            }
-        }
         // Spacer
         Item {
             Layout.fillWidth: true

@@ -17,6 +17,27 @@ ApplicationWindow {
     height: Settings.windowSize.height
     visibility: Settings.windowMaximized ? Window.Maximized : Window.Windowed
     color: KP.windowBg
+    // Qt Quick Controls (text fields, spin boxes, combo boxes, buttons and the
+    // dialogs that host them) read the window palette. Binding it to the theme
+    // keeps them in step with the panels in both themes instead of always
+    // looking like the system's light style.
+    palette.window: KP.paneBg
+    palette.windowText: KP.text
+    palette.base: KP.inputBg
+    palette.alternateBase: KP.paneBgAlt
+    palette.text: KP.text
+    palette.button: KP.buttonBg
+    palette.buttonText: KP.text
+    palette.brightText: KP.textOnAccent
+    palette.highlight: KP.selection
+    palette.highlightedText: KP.textOnAccent
+    palette.toolTipBase: KP.paneHeaderBg
+    palette.toolTipText: KP.text
+    palette.placeholderText: KP.textSubtle
+    palette.mid: KP.border
+    palette.midlight: KP.borderLight
+    palette.dark: KP.border
+    palette.light: KP.borderLight
 
     property bool allowCloseWithArtwork: false
     function requestNewDocument() {
@@ -132,6 +153,24 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+O"; enabled: !root.editingText; onActivated: root.requestOpenImage() }
     Shortcut { sequence: "Ctrl+S"; enabled: !root.editingText; onActivated: root.saveImage() }
     Shortcut { sequence: "Ctrl+Shift+S"; enabled: !root.editingText; onActivated: saveImageDialog.open() }
+    // Tool keys (shown in the tool palette tooltips).
+    Shortcut { sequence: "Z"; enabled: !root.editingText; onActivated: Workspace.activeTool = "zoom" }
+    Shortcut { sequence: "H"; enabled: !root.editingText; onActivated: Workspace.activeTool = "hand" }
+    Shortcut { sequence: "I"; enabled: !root.editingText; onActivated: Workspace.activeTool = "eyedropper" }
+    Shortcut { sequence: "P"; enabled: !root.editingText; onActivated: Workspace.activeTool = "pen" }
+    Shortcut { sequence: "N"; enabled: !root.editingText; onActivated: Workspace.activeTool = "pencil" }
+    Shortcut { sequence: "B"; enabled: !root.editingText; onActivated: Workspace.activeTool = "brush" }
+    Shortcut { sequence: "A"; enabled: !root.editingText; onActivated: Workspace.activeTool = "airbrush" }
+    Shortcut { sequence: "E"; enabled: !root.editingText; onActivated: Workspace.activeTool = "eraser" }
+    // [ and ] step to the next smaller / larger size of the Brush Size panel.
+    function stepBrushSize(direction) {
+        if (!Workspace.subTools.paintTool) return
+        const sizes = brushSizePanel.sizes, now = Workspace.brush.size
+        if (direction > 0) { for (let i = 0; i < sizes.length; ++i) if (sizes[i] > now) { Workspace.brush.size = sizes[i]; return } }
+        else { for (let i = sizes.length - 1; i >= 0; --i) if (sizes[i] < now) { Workspace.brush.size = sizes[i]; return } }
+    }
+    Shortcut { sequence: "["; enabled: !root.editingText; onActivated: root.stepBrushSize(-1) }
+    Shortcut { sequence: "]"; enabled: !root.editingText; onActivated: root.stepBrushSize(1) }
     Connections {
         target: Workspace.history
         function onErrorOccurred(message) { historyErrorText.text = message; historyErrorDialog.open() }
@@ -209,12 +248,39 @@ ApplicationWindow {
         const v = Settings.value(key, fallback)
         return v === true || v === "true" || v === 1 || v === "1"
     }
+    // ---- Theme -------------------------------------------------------------
+    // KomaTheme.qml owns the colours and the icon tints; the chosen theme and
+    // any icon colour overrides are user preferences, stored next to the
+    // window geometry. Loading happens before the first frame, so the window
+    // never flashes the wrong theme.
+    function loadThemePreferences() {
+        KP.mode = (String(Settings.value("ui/theme", "dark")) === "light") ? "light" : "dark"
+        KP.iconNormalPref = String(Settings.value("ui/icons/normal", ""))
+        KP.iconHoverPref = String(Settings.value("ui/icons/hover", ""))
+        KP.iconSelectedPref = String(Settings.value("ui/icons/selected", ""))
+        KP.iconDisabledPref = String(Settings.value("ui/icons/disabled", ""))
+    }
+    // Written immediately (and flushed) rather than at exit: a theme the user
+    // picked is expected to survive a crash as well as a clean close.
+    function storeThemeValue(key, value) {
+        Settings.setValue(key, value)
+        Settings.sync()
+    }
+    Connections {
+        target: KP
+        function onModeChanged() { root.storeThemeValue("ui/theme", KP.mode) }
+        function onIconNormalPrefChanged() { root.storeThemeValue("ui/icons/normal", KP.iconNormalPref) }
+        function onIconHoverPrefChanged() { root.storeThemeValue("ui/icons/hover", KP.iconHoverPref) }
+        function onIconSelectedPrefChanged() { root.storeThemeValue("ui/icons/selected", KP.iconSelectedPref) }
+        function onIconDisabledPrefChanged() { root.storeThemeValue("ui/icons/disabled", KP.iconDisabledPref) }
+    }
+
     // Session: reopen last time's saved projects (each with its own tool,
     // zoom and position) and put the window layout back. This is separate
     // from recovery and never asks a question.
     function restoreSessionState() {
         Workspace.restoreSession()
-        const ids = ["layers", "properties", "color", "timeline"]
+        const ids = ["subtool", "toolproperty", "brushsize", "layers", "properties", "color", "timeline"]
         for (let i = 0; i < ids.length; ++i) {
             const v = Workspace.sessionValue("panel/" + ids[i])
             if (v !== undefined && v !== null) Panels.setVisible(ids[i], v === true || v === "true")
@@ -254,7 +320,10 @@ ApplicationWindow {
     // Defer opening dialogs until the window has completed and its overlay is
     // available; opening a popup directly from Component.onCompleted can be
     // lost on first show.
-    Component.onCompleted: Qt.callLater(function() { root.beginRecoverySetup() })
+    Component.onCompleted: {
+        root.loadThemePreferences()
+        Qt.callLater(function() { root.beginRecoverySetup() })
+    }
 
     // ---- Top-level column: menu bar → toolbar → workspace → status bar ----
     ColumnLayout {
@@ -276,7 +345,7 @@ ApplicationWindow {
                 id: mbi
                 contentItem: Label {
                     text: mbi.text
-                    color: mbi.highlighted ? "#ffffff" : KP.text
+                    color: mbi.highlighted ? KP.textOnAccent : KP.text
                     font.family: KP.fontUi
                     font.pixelSize: KP.fontS
                     verticalAlignment: Text.AlignVCenter
@@ -378,8 +447,9 @@ ApplicationWindow {
                 MenuSeparator {
                 }
                 MenuItem {
+                    objectName: "preferencesMenuItem"
                     text: qsTr("Preferences...")
-                    enabled: false
+                    onTriggered: preferencesDialog.open()
                 }
             }
             Menu {
@@ -416,6 +486,26 @@ ApplicationWindow {
                 }
                 Menu {
                     title: qsTr("&Panels")
+                    MenuItem {
+                        text: qsTr("Sub Tool")
+                        checkable: true
+                        checked: Panels.isVisible("subtool")
+                        onTriggered: Panels.toggle("subtool")
+                    }
+                    MenuItem {
+                        text: qsTr("Tool Property")
+                        checkable: true
+                        checked: Panels.isVisible("toolproperty")
+                        onTriggered: Panels.toggle("toolproperty")
+                    }
+                    MenuItem {
+                        text: qsTr("Brush Size")
+                        checkable: true
+                        checked: Panels.isVisible("brushsize")
+                        onTriggered: Panels.toggle("brushsize")
+                    }
+                    MenuSeparator {
+                    }
                     MenuItem {
                         text: qsTr("Layers")
                         checkable: true
@@ -580,6 +670,61 @@ ApplicationWindow {
                     id: toolPalette
                     Layout.preferredWidth: KP.paletteWidth
                     Layout.fillHeight: true
+                }
+
+                // ---- Left dock: Sub Tool / Tool Property / Brush Size
+                // The brush is set up here, next to the tools, not in the
+                // top toolbar. The column disappears when all three panels
+                // are closed (View > Panels brings them back).
+                ColumnLayout {
+                    id: leftDock
+                    objectName: "leftDock"
+                    // Panel visibility as bindable values. Panels.isVisible()
+                    // is a function call, so it is re-read when the panel
+                    // manager reports a change.
+                    property int revision: 0
+                    function shown(id) { return revision >= 0 && Panels.isVisible(id) }
+                    readonly property bool showSubTool: shown("subtool")
+                    readonly property bool showToolProperty: shown("toolproperty")
+                    readonly property bool showBrushSize: shown("brushsize")
+                    Connections {
+                        target: Panels
+                        function onVisiblePanelsChanged() { leftDock.revision += 1 }
+                    }
+                    visible: showSubTool || showToolProperty || showBrushSize
+                    Layout.preferredWidth: KP.leftDockWidth
+                    Layout.maximumWidth: KP.leftDockWidth
+                    Layout.fillHeight: true
+                    spacing: 1
+
+                    SubToolPanel {
+                        id: subToolPanel
+                        objectName: "subToolPanel"
+                        visible: leftDock.showSubTool
+                        toolLabel: toolPalette.labelFor(Workspace.activeTool)
+                        Layout.fillWidth: true
+                        // Takes the spare height only when Tool Property is closed.
+                        Layout.fillHeight: !leftDock.showToolProperty
+                        Layout.preferredHeight: 166
+                        Layout.minimumHeight: 100
+                    }
+                    ToolPropertyPanel {
+                        id: toolPropertyPanel
+                        objectName: "toolPropertyPanel"
+                        visible: leftDock.showToolProperty
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.minimumHeight: 140
+                    }
+                    BrushSizePanel {
+                        id: brushSizePanel
+                        objectName: "brushSizePanel"
+                        visible: leftDock.showBrushSize
+                        Layout.fillWidth: true
+                        Layout.fillHeight: !leftDock.showSubTool && !leftDock.showToolProperty
+                        Layout.preferredHeight: preferredHeight
+                        Layout.minimumHeight: KP.panelHeaderH + cellHeight
+                    }
                 }
 
                 // ---- Middle: canvas + bottom timeline
@@ -887,6 +1032,9 @@ ApplicationWindow {
     }
     NewProjectDialog {
         id: newProjectDialog
+    }
+    PreferencesDialog {
+        id: preferencesDialog
     }
 
     // ------------------------------------------------------------- About dialog

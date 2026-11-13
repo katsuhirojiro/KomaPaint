@@ -7,3 +7,8 @@ PanelHeader 1.0 PanelHeader.qml
 CanvasWorkspace 1.0 CanvasWorkspace.qml
 StatusBar 1.0 StatusBar.qml
 NewProjectDialog 1.0 NewProjectDialog.qml
+KpIcon 1.0 KpIcon.qml
+IconButton 1.0 IconButton.qml
+PropertySlider 1.0 PropertySlider.qml
+SegmentedChoice 1.0 SegmentedChoice.qml
+PreferencesDialog 1.0 PreferencesDialog.qml

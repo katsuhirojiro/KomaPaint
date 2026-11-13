@@ -153,6 +153,11 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
         emit fileErrorOccurred(error);
     });
     m_brush = new BrushSettings(this);
+    // The sub tool library follows the active tool wherever it changes (tool
+    // palette, tab switch, session restore) and loads that tool's settings.
+    m_subTools = new SubToolLibrary(m_brush, this);
+    m_subTools->setTool(m_activeTool);
+    connect(this, &WorkspaceState::activeToolChanged, m_subTools, &SubToolLibrary::setTool);
     m_document = new CanvasDocument(this);
     m_timeline = new TimelineState(this);
     m_colors   = new ColorPalette(this);

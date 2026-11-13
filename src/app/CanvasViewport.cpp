@@ -112,6 +112,30 @@ void CanvasViewport::reconnectLayers()
     }
 }
 void CanvasViewport::invalidateAll() { schedule(QRectF(0, 0, width(), height())); }
+
+void CanvasViewport::setDeskColour(const QColor& colour)
+{
+    if (!colour.isValid() || m_deskColour == colour) return;
+    m_deskColour = colour;
+    emit canvasColoursChanged();
+    invalidateAll();
+}
+
+void CanvasViewport::setCheckerLight(const QColor& colour)
+{
+    if (!colour.isValid() || m_checkerLight == colour) return;
+    m_checkerLight = colour;
+    emit canvasColoursChanged();
+    invalidateAll();
+}
+
+void CanvasViewport::setCheckerDark(const QColor& colour)
+{
+    if (!colour.isValid() || m_checkerDark == colour) return;
+    m_checkerDark = colour;
+    emit canvasColoursChanged();
+    invalidateAll();
+}
 void CanvasViewport::schedule(const QRectF& region)
 {
     m_pending = m_pending.united(region.intersected(QRectF(0, 0, width(), height())));
@@ -333,6 +357,8 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
     definition.size = brush->size(); definition.opacity = brush->opacity() / 100.0;
     definition.flow = brush->flow() / 100.0; definition.spacing = brush->spacing() / 100.0;
     definition.tip = brush->textured() ? BrushTip::Textured : BrushTip::Round;
+    definition.hardness = brush->hardness() / 100.0;
+    definition.erase = brush->erase();
     definition.color = color.rgba();
     try { m_stroke = std::make_unique<BrushStroke>(layer->tiles(), definition); }
     catch (const std::bad_alloc&) { m_history->cancelStroke(); emit strokeError(QStringLiteral("Not enough memory to start a stroke.")); return false; }
@@ -340,6 +366,8 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
     auto point = viewportToDocument(x, y);
     qDebug() << "[CanvasViewport] beginStroke: viewport(" << x << "," << y << ") -> document("
              << point.x() << "," << point.y() << ")";
+    m_stabilizer = StrokeStabilizer(brush->stabilization());
+    m_stabilizer.begin({point.x(), point.y(), pressure});
     if (!m_stroke->begin({point.x(), point.y(), pressure})) {
         const auto reason = m_stroke->failureReason();
         const auto tileBytes = layer->tiles().allocatedPixelBytes();
@@ -365,7 +393,10 @@ void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
     auto point = viewportToDocument(x, y);
     qDebug() << "[CanvasViewport] continueStroke: viewport(" << x << "," << y << ") -> document("
              << point.x() << "," << point.y() << ")";
-    if (!m_stroke->extend({point.x(), point.y(), pressure})) {
+    // Stabilisation smooths the samples between pen-down and pen-up; endStroke()
+    // then draws on to the real pen-up position.
+    const InputSample sample = m_stabilizer.filter({point.x(), point.y(), pressure});
+    if (!m_stroke->extend(sample)) {
         const auto reason = m_stroke->failureReason();
         const auto tileBytes = m_strokeLayer->tiles().allocatedPixelBytes();
         const auto tileBudget = m_strokeLayer->tiles().pixelBudget();
@@ -402,6 +433,33 @@ void CanvasViewport::cancelStroke() {
     qDebug() << "[CanvasViewport] cancelStroke() called";
     if (m_history && m_history->strokeActive()) m_history->cancelStroke();
     m_stroke.reset(); m_strokeLayer = nullptr;
+}
+
+QVariant CanvasViewport::colorAt(qreal x, qreal y) const
+{
+    if (!m_document) return {};
+    const QPointF point = viewportToDocument(x, y);
+    if (!std::isfinite(point.x()) || !std::isfinite(point.y())) return {};
+    if (point.x() < 0 || point.y() < 0 || point.x() >= m_document->width() || point.y() >= m_document->height()) return {};
+    const auto list = layers();
+    if (list.empty()) return {};
+    const auto& geometry = list.front().store->geometry();
+    const auto address = geometry.address({static_cast<std::int64_t>(std::floor(point.x())),
+                                           static_cast<std::int64_t>(std::floor(point.y()))});
+    if (!address) return {};
+    // Composed directly, without the viewport cache: sampling must not disturb
+    // the cache or the invalidation bookkeeping of the display.
+    const auto background = m_document->hasTransparentBackground() ? 0U : m_document->backgroundColor().rgba();
+    const auto tile = CpuTileCompositor::compose(geometry, address->tile, list, background);
+    if (!tile) return {};
+    const auto index = static_cast<std::size_t>(address->local.y) * static_cast<std::size_t>(tile->width)
+                     + static_cast<std::size_t>(address->local.x);
+    if (index >= tile->pixels.size()) return {};
+    const std::uint32_t pixel = tile->pixels[index];   // premultiplied ARGB
+    const unsigned alpha = (pixel >> 24) & 255U;
+    if (alpha == 0) return {};
+    auto channel = [&](unsigned shift) { return static_cast<int>(std::min(255U, (((pixel >> shift) & 255U) * 255U + alpha / 2) / alpha)); };
+    return QColor(channel(16), channel(8), channel(0));
 }
 
 void CanvasViewport::paint(QPainter* painter)
@@ -454,7 +512,7 @@ void CanvasViewport::refreshNow()
         }
         QPainter painter(&m_frame);
         painter.setClipRect(dirty);
-        painter.fillRect(dirty, QColor("#4a4d52"));
+        painter.fillRect(dirty, m_deskColour);
         if (m_document) {
             auto list = layers();
             const auto background = m_document->hasTransparentBackground() ? 0U : m_document->backgroundColor().rgba();
@@ -474,8 +532,8 @@ void CanvasViewport::refreshNow()
             const QRectF documentRect(0, 0, m_document->width(), m_document->height());
             painter.setClipRect(documentRect, Qt::IntersectClip);
             QImage checks(16, 16, QImage::Format_RGB32);
-            checks.fill(QColor("#767a81"));
-            { QPainter cp(&checks); cp.fillRect(0, 0, 8, 8, QColor("#5a5d63")); cp.fillRect(8, 8, 8, 8, QColor("#5a5d63")); }
+            checks.fill(m_checkerLight);
+            { QPainter cp(&checks); cp.fillRect(0, 0, 8, 8, m_checkerDark); cp.fillRect(8, 8, 8, 8, m_checkerDark); }
             painter.fillRect(documentRect, QBrush(checks));
             if (!list.empty()) {
                 const auto& geometry = list.front().store->geometry();

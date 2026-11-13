@@ -30,7 +30,7 @@ Button {
 
     contentItem: Label {
         text: btn.iconText
-        color: btn.enabled ? (btn.checkedButton ? "#ffffff" : KP.text) : KP.textSubtle
+        color: btn.enabled ? (btn.checkedButton ? KP.textOnActive : KP.text) : KP.textSubtle
         font.family: KP.fontUi
         font.pixelSize: btn.fontPx
         font.bold: false

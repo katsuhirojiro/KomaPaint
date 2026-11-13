@@ -23,7 +23,9 @@ target_link_libraries(komapaint PRIVATE
 # Windows they are routed to the debugger output channel (see main.cpp),
 # so no console is needed to inspect them during development.
 
-# Finalize the executable in the same directory scope where it is declared.
-# This runs the AUTOMOC/AUTORCC final pass and registers deployment hooks
-# so windeployqt / macdeployqt can pick up the correct dependencies.
-qt_finalize_executable(komapaint)
+# No explicit qt_finalize_executable() call here: since Qt 6.3 qt_add_executable
+# finalises the target at the end of this directory scope by itself (it runs the
+# AUTOMOC/AUTORCC final pass and registers the windeployqt / macdeployqt
+# deployment hooks). Calling it again produced "Tried to call
+# qt6_finalize_target twice on target 'komapaint'" on every reconfigure. The
+# project requires Qt 6.5, so the automatic pass is always available.

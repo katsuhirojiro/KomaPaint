@@ -7,6 +7,7 @@ import "../themes"
 Rectangle {
     id: ws
     color: KP.canvasBg
+    clip: true   // the brush outline must not draw over neighbouring panels
     function fitCanvas() { canvas.fit() }
 
     // Zoom and viewport position belong to the project, not to the window.
@@ -39,6 +40,11 @@ Rectangle {
         document: Workspace.document
         history: Workspace.history
         zoom: Workspace.zoom
+        // The desk and the transparency checkerboard are part of the theme,
+        // so a theme switch re-paints the canvas chrome as well.
+        deskColour: KP.canvasBg
+        checkerLight: KP.transparencyLight
+        checkerDark: KP.transparencyDark
         onZoomRequested: function(value) { if (canvas.document === Workspace.document) Workspace.zoom = value }
         onViewChanged: ws.rememberView()
         onStrokeError: function(message) { brushError.text = message; brushErrorDialog.open() }
@@ -64,12 +70,76 @@ Rectangle {
             wheel.accepted = true
         }
     }
+    // View tools. Painting tools are handled by the pointer handlers below.
+    //  hand        drag moves the view
+    //  zoom        click zooms in around the pointer; Alt-click or right-click zooms out
+    //  eyedropper  click or drag picks the drawing colour from the artwork
+    MouseArea {
+        id: viewTool
+        objectName: "viewToolArea"
+        anchors.fill: parent
+        readonly property string tool: Workspace.activeTool
+        enabled: tool === "hand" || tool === "zoom" || tool === "eyedropper"
+        acceptedButtons: tool === "zoom" ? (Qt.LeftButton | Qt.RightButton) : Qt.LeftButton
+        cursorShape: tool === "hand" ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : Qt.CrossCursor
+        property real lastX
+        property real lastY
+        function pick(x, y) {
+            const picked = canvas.colorAt(x, y)
+            if (picked !== undefined && picked !== null) Workspace.colors.foreground = picked
+        }
+        onPressed: function(mouse) {
+            lastX = mouse.x; lastY = mouse.y
+            if (tool === "eyedropper") pick(mouse.x, mouse.y)
+        }
+        onPositionChanged: function(mouse) {
+            if (!pressed) return
+            if (tool === "hand") { canvas.panBy(mouse.x - lastX, mouse.y - lastY); lastX = mouse.x; lastY = mouse.y }
+            else if (tool === "eyedropper") pick(mouse.x, mouse.y)
+        }
+        onClicked: function(mouse) {
+            if (tool !== "zoom") return
+            const out = mouse.button === Qt.RightButton || (mouse.modifiers & Qt.AltModifier)
+            canvas.zoomAt(mouse.x, mouse.y, out ? 1 / 1.5 : 1.5)
+        }
+    }
+    // Outline of the brush tip at its real size on the artwork, following the
+    // pointer while a painting tool is active.
+    HoverHandler {
+        id: brushHover
+        enabled: Workspace.subTools.paintTool
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad | PointerDevice.Stylus
+    }
+    Rectangle {
+        id: brushOutline
+        objectName: "brushOutline"
+        readonly property real diameter: Math.max(3, Workspace.brush.size * canvas.zoom / 100)
+        visible: Workspace.subTools.paintTool && brushHover.hovered
+        x: brushHover.point.position.x - diameter / 2
+        y: brushHover.point.position.y - diameter / 2
+        width: diameter
+        height: diameter
+        radius: diameter / 2
+        color: "transparent"
+        border.width: 1
+        border.color: "#f2f2f2"
+        antialiasing: true
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 1
+            radius: width / 2
+            color: "transparent"
+            border.width: 1
+            border.color: "#80000000"
+            antialiasing: true
+        }
+    }
     // Qt Quick pointer handlers deliver mouse and stylus samples independently.
     PointHandler {
         id: mouseBrush
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         acceptedButtons: Qt.LeftButton
-        enabled: Workspace.activeTool === "brush"
+        enabled: Workspace.subTools.paintTool
         property bool drawing: false
         property point lastPosition
         function finish() { if (drawing) { canvas.endStroke(lastPosition.x, lastPosition.y, 1); drawing = false } }
@@ -85,7 +155,7 @@ Rectangle {
         acceptedDevices: PointerDevice.Stylus | PointerDevice.Airbrush
         acceptedPointerTypes: PointerDevice.Pen
         acceptedButtons: Qt.LeftButton
-        enabled: Workspace.activeTool === "brush"
+        enabled: Workspace.subTools.paintTool
         property bool drawing: false
         property point lastPosition
         property real lastPressure: 0

@@ -94,6 +94,13 @@ The QML layer is strictly presentational and contains no business logic.
   entire palette, font, spacing and sizing token set. **Every other QML
   file must reference tokens through `KP.*`**; adding a new hex color
   outside of `KomaTheme.qml` is considered a regression.
+* The same singleton holds both themes: `mode` is `"dark"` (default) or
+  `"light"`, and every colour token is a binding on it, so there is no second
+  palette to keep in sync. `MainWindow.qml` stores the mode as `ui/theme` and
+  the optional icon-tint overrides as `ui/icons/<state>`, restores them before
+  the first frame, and binds the window `palette` so Qt Quick Controls follow
+  the theme too. The UI tests (`TestBrushUi`) cover the tints, the overrides
+  and the restart path.
 * `ui/components/` contains small, generic primitives (toolbar buttons,
   separators, panel headers, the canvas surface placeholder, status bar,
   tool palette).
