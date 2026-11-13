@@ -186,7 +186,7 @@ jobs:
           # are, so the test result stays verifiable from the run itself.
           $totals = @($totals)
           $totalsLine = if ($totals.Count -gt 0) { $totals -join ' ; ' } else { 'no Totals lines' }
-          if ($totalsLine.Length -gt 1200) { $totalsLine = $totalsLine.Substring(0, 1200) + ' ...' }
+          if ($totalsLine.Length -gt 2400) { $totalsLine = $totalsLine.Substring(0, 2400) + ' ...' }
           Write-Host "::notice title=Unit test totals::$($exes.Count) test executables; $totalsLine"
 
       - name: Stage application directory
@@ -318,7 +318,8 @@ jobs:
           if ($inventory.Length -gt 1400) { $inventory = $inventory.Substring(0, 1400) + ' ...' }
           $hasExe = Test-Path (Join-Path "${{ env.STAGE_DIR }}" 'komapaint.exe')
           $hasQWindows = Test-Path (Join-Path "${{ env.STAGE_DIR }}" 'platforms\qwindows.dll')
-          Write-Host "::notice title=Release package inventory::zip $([math]::Round($zip.Length / 1MB, 1)) MB; komapaint.exe=$hasExe; DLLs=$($dlls.Count); QML files=$($qmlFiles.Count); qwindows.dll=$hasQWindows; $inventory"
+          $zipBytes = (Get-Item $zip).Length
+          Write-Host "::notice title=Release package inventory::zip $([math]::Round($zipBytes / 1MB, 1)) MB; komapaint.exe=$hasExe; DLLs=$($dlls.Count); QML files=$($qmlFiles.Count); qwindows.dll=$hasQWindows; $inventory"
 
       - name: Smoke-test packaged executable launches
         shell: pwsh
