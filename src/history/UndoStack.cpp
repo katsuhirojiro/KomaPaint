@@ -6,7 +6,14 @@
 #include <stdexcept>
 
 namespace komapaint {
-UndoStack::UndoStack(QObject* parent) : QObject(parent) {}
+UndoStack::UndoStack(QObject* parent) : QObject(parent)
+{
+    // Qt allocates a QObject's weak-reference block the first time a QPointer
+    // is made for it. Doing that once here means the "is this stack still
+    // alive?" guards in cancel/undo/redo never allocate, so cancelling a
+    // stroke keeps working when memory has just run out.
+    m_self = this;
+}
 UndoStack::~UndoStack() {
     if (m_current && m_current->layer) {
         detachCapture();
@@ -46,8 +53,15 @@ bool UndoStack::beginStroke(Layer* layer)
         layer->tiles().setBeforeChange(&UndoStack::capture, this);
         emit stackChanged();
         return true;
-    } catch (const std::bad_alloc&) { fail(QStringLiteral("Not enough memory to start undo history.")); return false; }
-      catch (const std::length_error&) { fail(QStringLiteral("Undo history is full.")); return false; }
+    } catch (const std::bad_alloc&) {
+        // An allocation can fail after the command object exists (for example
+        // while Qt attaches the layer pointer). No stroke may stay half-open.
+        m_current.reset();
+        fail(QStringLiteral("Not enough memory to start undo history.")); return false;
+    } catch (const std::length_error&) {
+        m_current.reset();
+        fail(QStringLiteral("Undo history is full.")); return false;
+    }
 }
 SparseTileStore::CaptureResult UndoStack::capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept
 {

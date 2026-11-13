@@ -61,6 +61,7 @@ private:
     std::vector<std::unique_ptr<StrokeCommand>> m_commands;
     std::unique_ptr<StrokeCommand> m_current;
     bool m_replaying = false;
+    QPointer<UndoStack> m_self;  // see constructor: keeps liveness guards allocation-free
     std::size_t m_cursor = 0, m_bytes = 0, m_currentBytes = 0;
 };
 } // namespace komapaint
