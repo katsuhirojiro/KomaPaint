@@ -141,6 +141,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $failed = 0
           $failingSummary = @()
+          $totals = @()
           $exes = Get-ChildItem "${{ env.TEST_DIR }}" -Filter "test_*.exe" | Sort-Object Name
           if ($exes.Count -eq 0) {
             Write-Error "No test executables were produced in ${{ env.TEST_DIR }}"
@@ -156,6 +157,8 @@ jobs:
             $code = $LASTEXITCODE
             if (Test-Path $resultFile) { $output += "`n" + (Get-Content $resultFile -Raw) }
             Write-Host $output
+            $totalsLine = ($output -split "`n" | Where-Object { $_ -match '^Totals: ' } | Select-Object -Last 1)
+            if ($totalsLine) { $totals += ("$($exe.BaseName): " + $totalsLine.Trim()) }
             if ($code -ne 0) {
               Write-Host ">>> $($exe.Name) FAILED with exit code $code <<<"
               $failed++
@@ -178,6 +181,13 @@ jobs:
             exit 1
           }
           Write-Host "=== All tests passed ==="
+          # Single-line annotation with the per-executable totals. Artifact and
+          # raw logs are not always retrievable (blob storage), but annotations
+          # are, so the test result stays verifiable from the run itself.
+          $totals = @($totals)
+          $totalsLine = if ($totals.Count -gt 0) { $totals -join ' ; ' } else { 'no Totals lines' }
+          if ($totalsLine.Length -gt 1200) { $totalsLine = $totalsLine.Substring(0, 1200) + ' ...' }
+          Write-Host "::notice title=Unit test totals::$($exes.Count) test executables; $totalsLine"
 
       - name: Stage application directory
         shell: pwsh
@@ -298,6 +308,17 @@ jobs:
             exit 1
           }
           Get-Item $zip | Format-List Name,Length
+          # Inventory annotation so the package contents can be checked without
+          # downloading the artifact (list truncated to keep the annotation small).
+          $files = @(Get-ChildItem "${{ env.STAGE_DIR }}" -Recurse -File)
+          $dlls = @($files | Where-Object { $_.Extension -eq '.dll' })
+          $qmlFiles = @($files | Where-Object { $_.FullName -match '\\qml\\' })
+          $topLevel = @($files | Where-Object { $_.DirectoryName -eq "${{ env.STAGE_DIR }}" })
+          $inventory = "$($files.Count) files total; top level: " + (($topLevel | Sort-Object Name | ForEach-Object { $_.Name }) -join ', ')
+          if ($inventory.Length -gt 1400) { $inventory = $inventory.Substring(0, 1400) + ' ...' }
+          $hasExe = Test-Path (Join-Path "${{ env.STAGE_DIR }}" 'komapaint.exe')
+          $hasQWindows = Test-Path (Join-Path "${{ env.STAGE_DIR }}" 'platforms\qwindows.dll')
+          Write-Host "::notice title=Release package inventory::zip $([math]::Round($zip.Length / 1MB, 1)) MB; komapaint.exe=$hasExe; DLLs=$($dlls.Count); QML files=$($qmlFiles.Count); qwindows.dll=$hasQWindows; $inventory"
 
       - name: Smoke-test packaged executable launches
         shell: pwsh
@@ -473,6 +494,7 @@ jobs:
               Fail-Smoke "process exited with non-zero code $($p.ExitCode) after WM_CLOSE."
             }
             Write-Host "=== Smoke test PASSED ==="
+            Write-Host "::notice title=Packaged smoke test::extracted ZIP launched from a clean PATH with no Qt on it; native window title '$mainWindowTitle'; PE subsystem $peSubsystem (Windows GUI); closed with WM_CLOSE; exit code 0"
           } else {
             Fail-Smoke "komapaint.exe exited prematurely with code $($p.ExitCode) (expected the event loop to run; check for a startup crash or a QML load failure)."
           }
