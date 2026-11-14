@@ -25,13 +25,7 @@ KpDialog {
     }
 
 
-    // Diagnostic log: Documents/KomaPaint/NewProjectDiagnostic.log
-    // Written by WorkspaceState::writeDiagnosticLog().
-
     onOpened: {
-        Workspace.clearDiagnosticLog()
-        Workspace.writeDiagnosticLog("=== New Project dialog opened ===")
-
         NewProject.resetToDefaults()
         nameInput.text = NewProject.name
         unitCombo.currentIndex = NewProject.availableUnits().indexOf(NewProject.units)
@@ -42,15 +36,6 @@ KpDialog {
         creationStatus.text = qsTr("Ready to create project.")
         creationStatus.color = KP.textMuted
         summaryError.text = ""
-
-        Workspace.writeDiagnosticLog("name=" + NewProject.name)
-        Workspace.writeDiagnosticLog("units=" + NewProject.units)
-        Workspace.writeDiagnosticLog("widthPixels=" + NewProject.widthPixels)
-        Workspace.writeDiagnosticLog("heightPixels=" + NewProject.heightPixels)
-        Workspace.writeDiagnosticLog("dpi=" + NewProject.dpi)
-        Workspace.writeDiagnosticLog("transparent=" + NewProject.transparentBackground)
-        Workspace.writeDiagnosticLog("bgColor=" + NewProject.backgroundColor)
-        Workspace.writeDiagnosticLog("isValid=" + NewProject.valid)
     }
 
     // Reflect creation errors from the C++ service into the UI.
@@ -318,7 +303,8 @@ KpDialog {
         // ------------------------------------------------------------- Creation status
         Rectangle {
             Layout.fillWidth: true
-            color: "#2d2d2d"
+            color: KP.paneBgAlt
+            border.width: 1
             border.color: KP.border
             radius: KP.radiusS
             implicitHeight: statusContent.implicitHeight + 2 * KP.gapS
@@ -338,13 +324,6 @@ KpDialog {
                     wrapMode: Text.WordWrap
                     Layout.fillWidth: true
                 }
-                Label {
-                    text: qsTr("Diagnostic log: Documents/KomaPaint/NewProjectDiagnostic.log")
-                    color: KP.textMuted
-                    font.pixelSize: KP.fontXS
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
-                }
             }
         }
     ]
@@ -357,20 +336,11 @@ KpDialog {
         KpButton {
             objectName: "createProjectButton"
             // The one affirmative action of the dialog, so it carries the
-            // accent while Cancel and the diagnostic log stay quiet.
+            // accent while Cancel stays quiet.
             label: qsTr("Create")
             variant: "primary"
             enabled: NewProject.valid
             onClicked: {
-                Workspace.writeDiagnosticLog("=== Create button clicked ===")
-                Workspace.writeDiagnosticLog("name=" + nameInput.text.trim())
-                Workspace.writeDiagnosticLog("widthPixels=" + NewProject.widthPixels)
-                Workspace.writeDiagnosticLog("heightPixels=" + NewProject.heightPixels)
-                Workspace.writeDiagnosticLog("transparent=" + NewProject.transparentBackground)
-                Workspace.writeDiagnosticLog("bgColor=" + NewProject.backgroundColor)
-                Workspace.writeDiagnosticLog("dpi=" + NewProject.dpi)
-                Workspace.writeDiagnosticLog("isValid=" + NewProject.valid)
-
                 creationStatus.text = qsTr("Creating project...")
                 creationStatus.color = KP.textMuted
 
@@ -380,28 +350,12 @@ KpDialog {
                                                 NewProject.transparentBackground,
                                                 NewProject.backgroundColor,
                                                 NewProject.dpi)
-                Workspace.writeDiagnosticLog("Workspace.newProject() returned: " + ok)
 
-                if (ok) {
-                    Workspace.writeDiagnosticLog("Creation succeeded, closing dialog")
-                    creationStatus.text = qsTr("Project created successfully.")
-                    creationStatus.color = "#4caf50"
-                    newProjectDialog.accept()
-                } else {
-                    Workspace.writeDiagnosticLog("Creation FAILED — dialog stays open")
-                    // creationStatus is updated via onCreationErrorChanged
-                }
+                if (ok) newProjectDialog.accept()
+                // On failure the dialog stays open and the status box below the
+                // form shows Workspace.creationError (see onCreationErrorChanged).
             }
         },
-        KpButton {
-            label: qsTr("Open Diagnostic Log")
-            onClicked: {
-                const path = Workspace.diagnosticLogPath()
-                Workspace.writeDiagnosticLog("Opening diagnostic log: " + path)
-                const opened = Qt.openUrlExternally(path)
-                Workspace.writeDiagnosticLog("Log opened: " + opened)
-            }
-        }
     ]
 
 
