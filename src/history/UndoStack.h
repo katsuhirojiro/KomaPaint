@@ -1,5 +1,6 @@
 #pragma once
 #include "../canvas/SparseTileStore.h"
+#include "HistoryTileCodec.h"
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -19,14 +20,11 @@ class UndoStack : public QObject {
 public:
     explicit UndoStack(QObject* parent = nullptr);
     ~UndoStack() override;
-    bool canUndo() const { return !m_current && m_cursor > 0; }
-    bool canRedo() const { return !m_current && m_cursor < m_commands.size(); }
+    bool canUndo() const { return !m_replaying && !m_current && m_cursor > 0; }
+    bool canRedo() const { return !m_replaying && !m_current && m_cursor < m_commands.size(); }
     QString undoText() const;
     QString redoText() const;
     qulonglong memoryBytes() const { return m_bytes + m_currentBytes; }
-    std::size_t byteLimit() const { return m_limit; }
-    // Set only while history is empty, for predictable accounting and tests.
-    bool setByteLimit(std::size_t bytes);
     bool beginStroke(Layer* layer);
     bool commitStroke();
     bool cancelStroke();
@@ -37,20 +35,33 @@ public:
 signals:
     void stackChanged();
     void errorOccurred(const QString& message);
+    void strokeRolledBack();
 private:
+    struct CompactTile {
+        TilePoint tile;
+        history_codec::TileRecord record;
+    };
     struct StrokeCommand {
         QPointer<Layer> layer;
         std::vector<SparseTileStore::TileSnapshot> before, after;
+        std::vector<CompactTile> compact;
         std::size_t bytes = 0;
+        std::shared_ptr<DocumentMemoryBudget> budget;
+        std::size_t historyBytes = 0;
+        std::size_t compactBytes = 0;
+        ~StrokeCommand() { if (budget) budget->release(DocumentMemoryBudget::Category::History, historyBytes); }
     };
-    static bool capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept;
-    bool captureTile(TilePoint tile, bool existed, std::span<const std::uint32_t> pixels);
+    static SparseTileStore::CaptureResult capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept;
+    SparseTileStore::CaptureResult captureTile(TilePoint tile, bool existed, std::span<const std::uint32_t> pixels);
     void finishCapture();
+    void tryCompact() noexcept;
+    void replay(bool forward);
     void detachCapture() noexcept;
     void fail(const QString& message) { emit errorOccurred(message); }
     std::vector<std::unique_ptr<StrokeCommand>> m_commands;
     std::unique_ptr<StrokeCommand> m_current;
+    bool m_replaying = false;
+    QPointer<UndoStack> m_self;  // see constructor: keeps liveness guards allocation-free
     std::size_t m_cursor = 0, m_bytes = 0, m_currentBytes = 0;
-    std::size_t m_limit = 64U * 1024U * 1024U;
 };
 } // namespace komapaint

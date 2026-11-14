@@ -5,12 +5,22 @@ add_library(komapaint_app STATIC
     CanvasViewport.h
     CommandLine.cpp
     CommandLine.h
+    DockModel.cpp
+    DockModel.h
+    DocumentRecovery.cpp
+    DocumentRecovery.h
     FileAssociation.cpp
     FileAssociation.h
     KomaPaintApp.cpp
     KomaPaintApp.h
     PanelManager.cpp
     PanelManager.h
+    ProjectCreationService.cpp
+    ProjectCreationService.h
+    SessionStore.cpp
+    SessionStore.h
+    SubToolLibrary.cpp
+    SubToolLibrary.h
     WorkspaceState.cpp
     WorkspaceState.h
 )

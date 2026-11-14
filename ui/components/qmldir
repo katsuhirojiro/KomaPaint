@@ -1,8 +1,24 @@
 module components
 MainToolbar 1.0 MainToolbar.qml
-ToolbarButton 1.0 ToolbarButton.qml
-Sep 1.0 Sep.qml
 ToolPalette 1.0 ToolPalette.qml
-PanelHeader 1.0 PanelHeader.qml
 CanvasWorkspace 1.0 CanvasWorkspace.qml
 StatusBar 1.0 StatusBar.qml
+NewProjectDialog 1.0 NewProjectDialog.qml
+KpIcon 1.0 KpIcon.qml
+IconButton 1.0 IconButton.qml
+PropertySlider 1.0 PropertySlider.qml
+SegmentedChoice 1.0 SegmentedChoice.qml
+PreferencesDialog 1.0 PreferencesDialog.qml
+KpGlyph 1.0 KpGlyph.qml
+KpButton 1.0 KpButton.qml
+KpNumberField 1.0 KpNumberField.qml
+KpSpinBox 1.0 KpSpinBox.qml
+KpTextField 1.0 KpTextField.qml
+KpMenu 1.0 KpMenu.qml
+KpMenuItem 1.0 KpMenuItem.qml
+KpMenuSeparator 1.0 KpMenuSeparator.qml
+PanelSection 1.0 PanelSection.qml
+KpScrollBar 1.0 KpScrollBar.qml
+KpDialog 1.0 KpDialog.qml
+BrushStrokePreview 1.0 BrushStrokePreview.qml
+DocumentTabs 1.0 DocumentTabs.qml

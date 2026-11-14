@@ -14,7 +14,7 @@ high-level split is:
 │  src/app                                    │
 │  - KomaPaintApp  (QML bootstrap)            │
 │  - WorkspaceState (doc + tools + colors …)  │
-│  - PanelManager (visibility of dock panels) │
+│  - PanelManager (dock panels + layout)     │
 └───────────────────────┬─────────────────────┘
                         │
 ┌───────────────────────┴─────────────────────┐
@@ -43,9 +43,15 @@ The glue between C++ services and the QML front-end:
   singletons as QML context properties and loads the main window QML.
 * `WorkspaceState` aggregates the current document, layer list, timeline,
   palette and history and exposes the active tool and zoom level.
-* `PanelManager` tracks visibility of the dock panels and provides
-  `toggle()`, `setVisible()` and `resetLayout()` slots used by menus and
-  panel close buttons.
+* `DockModel` is the workspace layout: a tree of splits, tab groups and the
+  canvas slot, plus floating windows and hidden panels. It owns re-arranging,
+  collapse, presets and persistence (`workspace/layout`,
+  `workspace/presets`) and knows nothing about what a panel *is* beyond
+  `panelTable()`. See [docking.md](docking.md).
+* `PanelManager` is the façade the rest of the application uses: it owns the
+  `DockModel`, keeps the per-panel visibility flags the menus bind to, and
+  provides the `toggle()`, `setVisible()` and `resetLayout()` slots used by
+  menus and panel close buttons.
 
 ### `src/canvas`
 The document model (`CanvasDocument`): dimensions, title, DPI, and whether
@@ -94,13 +100,24 @@ The QML layer is strictly presentational and contains no business logic.
   entire palette, font, spacing and sizing token set. **Every other QML
   file must reference tokens through `KP.*`**; adding a new hex color
   outside of `KomaTheme.qml` is considered a regression.
+* The same singleton holds both themes: `mode` is `"dark"` (default) or
+  `"light"`, and every colour token is a binding on it, so there is no second
+  palette to keep in sync. `MainWindow.qml` stores the mode as `ui/theme` and
+  the optional icon-tint overrides as `ui/icons/<state>`, restores them before
+  the first frame, and binds the window `palette` so Qt Quick Controls follow
+  the theme too. The UI tests (`TestBrushUi`) cover the tints, the overrides
+  and the restart path.
 * `ui/components/` contains small, generic primitives (toolbar buttons,
   separators, panel headers, the canvas surface placeholder, status bar,
   tool palette).
 * `ui/panels/` contains the larger dock panels (Layers, Properties, Color,
-  Timeline).
-* `ui/workspaces/MainWindow.qml` assembles the menus, toolbar and panel
-  layout into one window.
+  Timeline). Each one is only its content — title, close button, collapse,
+  dragging and the panel menu come from the docking layer.
+* `ui/docking/` is the docking workspace: splits, tab groups, floating
+  windows, drag previews and the canvas slot, all driven by `DockModel`
+  (see [docking.md](docking.md)).
+* `ui/workspaces/MainWindow.qml` assembles the menus and toolbar, maps panel
+  ids to components and puts one `DockWorkspace` in the window.
 
 ## Threading and performance
 
@@ -124,8 +141,11 @@ follows a few ground rules from the start:
 ## Testing strategy
 
 * Pure-C++ services (undo stack, layer model, timeline state, document
-  model, recent files) are covered by QtTest unit tests in `tests/unit/`.
-* QML layout / component testing (with Qt Quick Test) will be introduced
-  once the interface stabilises.
+  model, recent files, the docking layout) are covered by QtTest unit tests
+  in `tests/unit/`.
+* The window itself is tested through the real QML scene on the offscreen
+  platform: the tests load `MainWindow.qml`, find items through the visual
+  tree and drive them with `QTest` mouse events (`TestDockUi`,
+  `TestWorkspaceUi`, `TestBrushUi`, `TestCanvasViewport`).
 * There is no attempt to mock painting / rasterization in Phase 1 because
   those subsystems do not yet exist.

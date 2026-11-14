@@ -1,0 +1,9 @@
+module docking
+DockWorkspace 1.0 DockWorkspace.qml
+DockNodeView 1.0 DockNodeView.qml
+DockSplit 1.0 DockSplit.qml
+DockSplitter 1.0 DockSplitter.qml
+DockGroup 1.0 DockGroup.qml
+DockFrame 1.0 DockFrame.qml
+DockFloatingWindow 1.0 DockFloatingWindow.qml
+DockAreaStrip 1.0 DockAreaStrip.qml

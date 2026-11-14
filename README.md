@@ -195,8 +195,12 @@ Architectural principles:
 
 ## 6. Interface design
 
-The KomaPaint shell is a restrained dark-charcoal workspace. Design tokens
-are defined centrally in `ui/themes/KomaTheme.qml` and include:
+The KomaPaint shell is a restrained workspace that ships in two themes, dark
+charcoal (the default) and a light grey, switched in Edit → Preferences or with
+`KP.mode`. Both are defined in the same place: every token in
+`ui/themes/KomaTheme.qml` is a binding on the active mode, so a theme switch
+re-colours the window, the canvas desk and the icons at once. The design tokens
+include:
 
 * Narrow, near-neutral grays (no heavy gradients or "glowing" accents).
 * A single cool-blue accent used only for selection, focus and hovered
@@ -205,6 +209,12 @@ are defined centrally in `ui/themes/KomaTheme.qml` and include:
   not a marketing site.
 * Tight spacing rails and consistent typography (system UI sans-serif, with
   monospaced numerics for pixel values and timestamps).
+* Icons that take their colour from the theme instead of from the file: soft
+  grey, a brighter hover, an accent treatment when selected and a subdued grey
+  when unavailable in the dark theme; dark grey, darker hover, the accent and a
+  muted light grey in the light theme. Edit → Preferences can override each of
+  those four colours, and the choice is stored next to the window geometry.
+  The project-type illustrations keep their own colours and are never tinted.
 
 The layout follows a traditional illustration/animation application
 workspace:
@@ -240,9 +250,10 @@ The application is an early alpha. The following are **not** implemented:
   reads and writes illustrations only.
 * Color picker HSB widget (the color panel is a placeholder).
 * Preferences dialog.
-* Welcome screen / new-document dialog (the New Document dialog is minimal:
-  size, background and transparent/white; the full New Project window with
-  units, DPI and comic/animation modes is not built yet).
+* Welcome screen / new-document dialog (*New Project* dialog is built:
+  project name, canvas size in px/mm/cm/inches, DPI, white or transparent
+  background, live summary; Comic Page, Multi-page Comic and Animation modes
+  are shown but disabled until implemented).
 * Cross-platform installer packaging, signed Windows binary, auto-update.
 * Physical tablet/stylus verification has not been done on real hardware.
 

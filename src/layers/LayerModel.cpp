@@ -5,6 +5,7 @@ namespace komapaint {
 LayerModel::LayerModel(QObject* parent) : QAbstractListModel(parent)
 {
     auto* l = new Layer(QStringLiteral("Layer 1"), this);
+    l->tiles().setDocumentBudget(m_documentBudget);
     l->setIndex(0);
     m_layers.append(l);
     connect(l, &Layer::nameChanged,       this, [this,l]{ onLayerChanged(l, {NameRole}); });
@@ -77,6 +78,7 @@ void LayerModel::addLayer()
     const int row = m_layers.size();
     beginInsertRows({}, row, row);
     auto* l = new Layer(QString("Layer %1").arg(row + 1), this);
+    l->tiles().setDocumentBudget(m_documentBudget);
     l->tiles().resizeEmpty(m_canvasSize.width(), m_canvasSize.height());
     l->setIndex(row);
     connect(l, &Layer::nameChanged,       this, [this,l]{ onLayerChanged(l, {NameRole}); });
@@ -90,6 +92,10 @@ void LayerModel::addLayer()
 void LayerModel::removeLayer(int row)
 {
     if (row < 0 || row >= m_layers.size() || m_layers.size() <= 1) return;
+    // A synchronous artwork callback runs inside the store or a brush dab.
+    // Deleting any layer there can invalidate an active operation's owner.
+    for (const auto* layer : m_layers)
+        if (layer->tiles().notifyingChange()) return;
     beginRemoveRows({}, row, row);
     delete m_layers.takeAt(row);
     endRemoveRows();

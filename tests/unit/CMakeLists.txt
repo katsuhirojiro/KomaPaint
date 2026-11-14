@@ -42,6 +42,9 @@ komapaint_add_test(test_recent     TestRecentFiles.cpp)
 
 komapaint_add_test(test_document_creation TestDocumentCreation.cpp)
 target_link_libraries(test_document_creation PRIVATE komapaint::app)
+
+komapaint_add_test(test_new_project TestNewProject.cpp)
+target_link_libraries(test_new_project PRIVATE komapaint::app)
 komapaint_add_test(test_document_file TestDocumentFile.cpp)
 target_link_libraries(test_document_file PRIVATE komapaint::app komapaint::files Qt6::Widgets Qt6::Quick)
 komapaint_add_test(test_command_line TestCommandLine.cpp)
@@ -71,6 +74,11 @@ add_executable(test_cpu_tile_compositor TestCpuTileCompositor.cpp)
 target_link_libraries(test_cpu_tile_compositor PRIVATE komapaint::tile_data)
 set_target_properties(test_cpu_tile_compositor PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_cpu_tile_compositor COMMAND test_cpu_tile_compositor)
+komapaint_add_test(test_dock_ui TestDockUi.cpp)
+target_sources(test_dock_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_dock_ui PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
+komapaint_add_test(test_docking TestDocking.cpp)
+target_link_libraries(test_docking PRIVATE komapaint::app)
 komapaint_add_test(test_canvas_viewport TestCanvasViewport.cpp)
 target_sources(test_canvas_viewport PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
 target_link_libraries(test_canvas_viewport PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
@@ -78,3 +86,63 @@ add_executable(test_brush_engine TestBrushEngine.cpp)
 target_link_libraries(test_brush_engine PRIVATE komapaint::drawing)
 set_target_properties(test_brush_engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_brush_engine COMMAND test_brush_engine)
+add_executable(test_stroke_stabilizer TestStrokeStabilizer.cpp)
+target_link_libraries(test_stroke_stabilizer PRIVATE komapaint::drawing)
+set_target_properties(test_stroke_stabilizer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_stroke_stabilizer COMMAND test_stroke_stabilizer)
+
+komapaint_add_test(test_project_workflow TestProjectWorkflow.cpp)
+target_sources(test_project_workflow PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_project_workflow PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
+
+# Non-production reproducible measurement of the existing history budget.
+komapaint_add_test(test_history_audit TestHistoryAudit.cpp)
+target_link_libraries(test_history_audit PRIVATE komapaint::drawing)
+if(WIN32)
+    target_link_libraries(test_history_audit PRIVATE Psapi)
+endif()
+
+add_executable(test_document_memory_budget TestDocumentMemoryBudget.cpp)
+target_link_libraries(test_document_memory_budget PRIVATE komapaint::tile_data)
+set_target_properties(test_document_memory_budget PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_document_memory_budget COMMAND test_document_memory_budget)
+
+komapaint_add_test(test_history_allocation_failure TestHistoryAllocationFailure.cpp)
+
+# Isolated codec correctness and allocation-failure tests.
+add_executable(test_history_tile_codec TestHistoryTileCodec.cpp
+    ${CMAKE_SOURCE_DIR}/src/history/HistoryTileCodec.cpp)
+target_include_directories(test_history_tile_codec PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_history_tile_codec PRIVATE komapaint::drawing)
+set_target_properties(test_history_tile_codec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+if(WIN32)
+    target_link_libraries(test_history_tile_codec PRIVATE Psapi)
+endif()
+add_test(NAME test_history_tile_codec COMMAND test_history_tile_codec)
+
+komapaint_add_test(test_history_journal TestHistoryJournal.cpp)
+
+komapaint_add_test(test_workspace_recovery TestWorkspaceRecovery.cpp)
+target_link_libraries(test_workspace_recovery PRIVATE komapaint::app)
+
+komapaint_add_test(test_recovery_ui TestRecoveryUi.cpp)
+target_sources(test_recovery_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_recovery_ui PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
+
+# Phase 3: independent documents, per-entry recovery, session restore.
+komapaint_add_test(test_workspace_session TestWorkspaceSession.cpp)
+target_link_libraries(test_workspace_session PRIVATE komapaint::app)
+
+komapaint_add_test(test_workspace_ui TestWorkspaceUi.cpp)
+target_sources(test_workspace_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_workspace_ui PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
+
+# Icons, tool palette and the brush panels through the real main window.
+komapaint_add_test(test_brush_ui TestBrushUi.cpp)
+target_sources(test_brush_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_brush_ui PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
+
+# TEMPORARY: visual capture harness for the design pass (removed afterwards).
+komapaint_add_test(test_shots TestShots.cpp)
+target_sources(test_shots PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_shots PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)

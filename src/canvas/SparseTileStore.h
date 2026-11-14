@@ -1,9 +1,11 @@
 #pragma once
 #include "TileGeometry.h"
 #include "DirtyTileTracker.h"
+#include "DocumentMemoryBudget.h"
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <memory>
 #include <span>
 #include <unordered_map>
 #include <vector>
@@ -14,21 +16,35 @@ namespace komapaint {
 // This low-level store is not an editing transaction or undo mechanism.
 class SparseTileStore {
 public:
-    enum class WriteResult { Changed, Unchanged, OutOfBounds, InvalidPixel, MemoryLimit, TrackingLimit, HistoryLimit, AllocationFailed };
+    enum class WriteResult { Changed, Unchanged, OutOfBounds, InvalidPixel, MemoryLimit, DocumentMemoryLimit, TrackingLimit, HistoryLimit, HistoryAllocationFailed, AllocationFailed };
     static constexpr std::size_t DefaultPixelBudget = 256U * 1024U * 1024U;
     SparseTileStore(std::int64_t width, std::int64_t height,
                     int tileSize = TileGeometry::DefaultTileSize,
                     std::size_t pixelBudget = DefaultPixelBudget);
+    ~SparseTileStore();
     SparseTileStore(const SparseTileStore&) = delete;
     SparseTileStore& operator=(const SparseTileStore&) = delete;
     struct TileSnapshot { TilePoint tile; std::vector<std::uint32_t> pixels; }; // empty pixels = absent
-    using BeforeChange = bool (*)(void*, TilePoint, bool, std::span<const std::uint32_t>) noexcept;
+    enum class CaptureResult { Ready, Limit, DocumentLimit, AllocationFailed };
+    using BeforeChange = CaptureResult (*)(void*, TilePoint, bool, std::span<const std::uint32_t>) noexcept;
     void setBeforeChange(BeforeChange callback, void* context) noexcept { m_beforeChange = callback; m_beforeContext = context; }
+    // A recorded stroke keeps emptied tile nodes alive so its already-captured
+    // before images can be restored without allocating.
+    bool beginRecordedStroke() noexcept;
+    bool recordedStrokeFailed() const noexcept { return m_recordedFailure; }
+    bool rollbackRecordedStroke(const std::vector<TileSnapshot>& before) noexcept;
+    void commitRecordedStroke() noexcept;
     // All snapshots are applied atomically, or no pixels change.
-    WriteResult restoreTiles(const std::vector<TileSnapshot>& snapshots);
+    WriteResult restoreTiles(const std::vector<TileSnapshot>& snapshots, bool notify = true);
     std::size_t tileBytes() const { return m_tileBytes; }
+    std::size_t pixelBudget() const { return m_pixelBudget; }
+    // Attach only before artwork or a stroke exists. Standalone stores may
+    // continue without a document budget.
+    bool setDocumentBudget(std::shared_ptr<DocumentMemoryBudget> budget) noexcept;
+    std::shared_ptr<DocumentMemoryBudget> documentBudget() const noexcept { return m_documentBudget; }
     using ChangeCallback = void (*)(void*, TilePoint) noexcept;
     void setChangeCallback(ChangeCallback callback, void* context) noexcept { m_callback = callback; m_callbackContext = context; }
+    bool notifyingChange() const noexcept { return m_notifying; }
     bool isValid() const { return m_geometry.isValid() && m_tileSizeValid; }
     const TileGeometry& geometry() const { return m_geometry; }
     const DirtyTileTracker::Regions& dirtyRegions() const { return m_dirty.regions(); }
@@ -50,6 +66,11 @@ public:
     // Resizing is deliberately restricted until a real crop/resize operation exists.
     bool resizeEmpty(std::int64_t width, std::int64_t height);
 private:
+    WriteResult setPixelImpl(TilePoint point, std::uint32_t value);
+    bool m_recordedStroke = false;
+    bool m_recordedFailure = false;
+    // Captured before any stroke writes; restored by move without allocation.
+    std::optional<DirtyTileTracker> m_recordedDirty;
     struct Hash { std::size_t operator()(const TilePoint& p) const noexcept; };
     struct Tile { std::vector<std::uint32_t> pixels; std::size_t nonzero = 0; };
     unsigned m_batchDepth = 0;
@@ -57,6 +78,7 @@ private:
     TilePoint m_batchFirst{}, m_batchLast{};
     BeforeChange m_beforeChange = nullptr;
     void* m_beforeContext = nullptr;
+    bool m_notifying = false;
     ChangeCallback m_callback = nullptr;
     void* m_callbackContext = nullptr;
     TileGeometry m_geometry;
@@ -64,6 +86,7 @@ private:
     bool m_tileSizeValid;
     std::size_t m_tileBytes;
     std::size_t m_pixelBudget;
+    std::shared_ptr<DocumentMemoryBudget> m_documentBudget;
     std::unordered_map<TilePoint, Tile, Hash> m_tiles;
 };
 } // namespace komapaint

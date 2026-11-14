@@ -141,6 +141,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $failed = 0
           $failingSummary = @()
+          $totals = @()
           $exes = Get-ChildItem "${{ env.TEST_DIR }}" -Filter "test_*.exe" | Sort-Object Name
           if ($exes.Count -eq 0) {
             Write-Error "No test executables were produced in ${{ env.TEST_DIR }}"
@@ -156,6 +157,8 @@ jobs:
             $code = $LASTEXITCODE
             if (Test-Path $resultFile) { $output += "`n" + (Get-Content $resultFile -Raw) }
             Write-Host $output
+            $totalsLine = ($output -split "`n" | Where-Object { $_ -match '^Totals: ' } | Select-Object -Last 1)
+            if ($totalsLine) { $totals += ("$($exe.BaseName): " + $totalsLine.Trim()) }
             if ($code -ne 0) {
               Write-Host ">>> $($exe.Name) FAILED with exit code $code <<<"
               $failed++
@@ -178,6 +181,13 @@ jobs:
             exit 1
           }
           Write-Host "=== All tests passed ==="
+          # Single-line annotation with the per-executable totals. Artifact and
+          # raw logs are not always retrievable (blob storage), but annotations
+          # are, so the test result stays verifiable from the run itself.
+          $totals = @($totals)
+          $totalsLine = if ($totals.Count -gt 0) { $totals -join ' ; ' } else { 'no Totals lines' }
+          if ($totalsLine.Length -gt 8000) { $totalsLine = $totalsLine.Substring(0, 8000) + ' ...' }
+          Write-Host "::notice title=Unit test totals::$($exes.Count) test executables; $totalsLine"
 
       - name: Stage application directory
         shell: pwsh
@@ -281,18 +291,54 @@ jobs:
           Write-Host "--- Deployed files (top-level):"
           Get-ChildItem $bin -File | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
 
+      - name: Package into ZIP
+        shell: pwsh
+        run: |
+          # Ship the per-user .koma file-association helper next to the exe.
+          # It simply calls "komapaint.exe --associate" / "--unassociate";
+          # registration is per-user (HKCU) and needs no admin rights.
+          Copy-Item "${{ github.workspace }}\packaging\Register_koma_file_association.cmd" "${{ env.STAGE_DIR }}\Register_koma_file_association.cmd" -Force
+          $zip = "${{ github.workspace }}\KomaPaint-Windows-x64.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          # Zip the staged folder so the archive contains a single top-level
+          # "KomaPaint" directory with the exe and its dependencies.
+          Compress-Archive -Path "${{ env.STAGE_DIR }}" -DestinationPath $zip -CompressionLevel Optimal
+          if (!(Test-Path $zip)) {
+            Write-Error "Packaging failed; zip not produced."
+            exit 1
+          }
+          Get-Item $zip | Format-List Name,Length
+          # Inventory annotation so the package contents can be checked without
+          # downloading the artifact (list truncated to keep the annotation small).
+          $files = @(Get-ChildItem "${{ env.STAGE_DIR }}" -Recurse -File)
+          $dlls = @($files | Where-Object { $_.Extension -eq '.dll' })
+          $qmlFiles = @($files | Where-Object { $_.FullName -match '\\qml\\' })
+          $topLevel = @($files | Where-Object { $_.DirectoryName -eq "${{ env.STAGE_DIR }}" })
+          $inventory = "$($files.Count) files total; top level: " + (($topLevel | Sort-Object Name | ForEach-Object { $_.Name }) -join ', ')
+          if ($inventory.Length -gt 1400) { $inventory = $inventory.Substring(0, 1400) + ' ...' }
+          $hasExe = Test-Path (Join-Path "${{ env.STAGE_DIR }}" 'komapaint.exe')
+          $hasQWindows = Test-Path (Join-Path "${{ env.STAGE_DIR }}" 'platforms\qwindows.dll')
+          $zipBytes = (Get-Item $zip).Length
+          Write-Host "::notice title=Release package inventory::zip $([math]::Round($zipBytes / 1MB, 1)) MB; komapaint.exe=$hasExe; DLLs=$($dlls.Count); QML files=$($qmlFiles.Count); qwindows.dll=$hasQWindows; $inventory"
+
       - name: Smoke-test packaged executable launches
         shell: pwsh
         run: |
-          $bin = "${{ env.STAGE_DIR }}"
-          $qtBin = "${{ steps.qt.outputs.qtBin }}"
-          $env:PATH = "$bin;$qtBin;" + $env:PATH
+          # Smoke the actual extracted ZIP, isolated from the build and Qt SDK.
+          $extract = Join-Path $env:RUNNER_TEMP 'komapaint-zip-smoke'
+          if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+          Expand-Archive -Path "${{ github.workspace }}\KomaPaint-Windows-x64.zip" -DestinationPath $extract
+          $bin = Join-Path $extract 'KomaPaint'
+          $env:PATH = "$bin;$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
+          Remove-Item Env:QT_PLUGIN_PATH, Env:QT_QPA_PLATFORM_PLUGIN_PATH, Env:QML_IMPORT_PATH, Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
           # Use Qt's native Windows platform for the packaged-app smoke test.
           # The offscreen QPA has no native HWND for .NET's Process object to
           # find, so CloseMainWindow() can never deliver WM_CLOSE under it.
           # The windows QPA exercises the same window path as a real launch.
           $env:QT_QPA_PLATFORM = "windows"
           $exe = "$bin\komapaint.exe"
+          $env:KOMAPAINT_SMOKE_LOG = Join-Path $env:RUNNER_TEMP "komapaint-smoke.log"
+          Remove-Item $env:KOMAPAINT_SMOKE_LOG -ErrorAction SilentlyContinue
 
           Write-Host "============================================"
           Write-Host "SMOKE TEST: launching komapaint.exe directly"
@@ -375,8 +421,10 @@ jobs:
           $p = Start-Process -FilePath $exe -WorkingDirectory $bin -PassThru
           Write-Host ">>> Started PID $($p.Id) at $(Get-Date -Format o)"
 
-          # Wait up to 5 seconds. If it's still alive after that the event loop
-          # started successfully; close the window.
+          # A process that exits within 5 seconds crashed on start-up; one that
+          # is still alive has a running event loop. The main window is waited
+          # for separately, below, because a shared runner can be slow to show
+          # it.
           $deadline = (Get-Date).AddSeconds(5)
           $exitedEarly = $false
           while ((Get-Date) -lt $deadline) {
@@ -393,16 +441,36 @@ jobs:
             Write-Host ">>> Process alive after 5s - event loop is running."
 
             # Prove that the packaged process created its actual native main
-            # window, rather than merely keeping a process alive.
+            # window, rather than merely keeping a process alive. A shared
+            # runner can be slow to put the window on screen (cold file cache,
+            # virus scanning, first paint), so wait generously instead of
+            # asserting a five-second limit: a build that never shows a window
+            # still fails, and how long it took is recorded either way.
+            $windowWait = [System.Diagnostics.Stopwatch]::StartNew()
+            while ($windowWait.Elapsed.TotalSeconds -lt 45) {
+              $p.Refresh()
+              if ($p.HasExited) { break }
+              if ($p.MainWindowHandle -ne [IntPtr]::Zero) { break }
+              Start-Sleep -Milliseconds 250
+            }
             $p.Refresh()
             $mainWindowHandle = $p.MainWindowHandle
             $mainWindowTitle = $p.MainWindowTitle
-            Write-Host ">>> MainWindowHandle: $mainWindowHandle"
+            $windowSeconds = [math]::Round($windowWait.Elapsed.TotalSeconds, 1)
+            Write-Host ">>> MainWindowHandle: $mainWindowHandle (after $windowSeconds s)"
             Write-Host ">>> MainWindowTitle:  '$mainWindowTitle'"
             if ($mainWindowHandle -eq [IntPtr]::Zero) {
-              $p.Kill()
-              $p.WaitForExit()
-              Fail-Smoke "process is alive after 5s but has no native main-window handle (title: '$mainWindowTitle')."
+              if (-not $p.HasExited) { $p.Kill(); $p.WaitForExit() }
+              $diag = if (Test-Path $env:KOMAPAINT_SMOKE_LOG) { Get-Content $env:KOMAPAINT_SMOKE_LOG -Raw } else { 'no Qt startup log' }
+              # Keep the observation and initialization milestones in separate
+              # annotations: Fail-Smoke truncates long messages to 1500 chars.
+              $milestones = if (Test-Path $env:KOMAPAINT_SMOKE_LOG) {
+                (Get-Content $env:KOMAPAINT_SMOKE_LOG | Where-Object { $_ -match 'main\(\): entry|Constructing QApplication|QApplication constructed|calling m_engine.load|m_engine.load\(\) returned|main window created|entering app.exec' }) -join ' || '
+              } else { 'no Qt startup milestones' }
+              if ($milestones.Length -gt 1200) { $milestones = $milestones.Substring(0, 1200) }
+              Write-Host "::notice title=Smoke startup milestones::$milestones"
+              if ($diag.Length -gt 700) { $diag = $diag.Substring($diag.Length - 700) }
+              Fail-Smoke "no native main-window handle after $windowSeconds s (title: '$mainWindowTitle'); startup log tail: $diag"
             }
             if ($mainWindowTitle -notlike "KomaPaint *") {
               $p.Kill()
@@ -427,27 +495,10 @@ jobs:
               Fail-Smoke "process exited with non-zero code $($p.ExitCode) after WM_CLOSE."
             }
             Write-Host "=== Smoke test PASSED ==="
+            Write-Host "::notice title=Packaged smoke test::extracted ZIP launched from a clean PATH with no Qt on it; native window '$mainWindowTitle' appeared after $windowSeconds s; PE subsystem $peSubsystem (Windows GUI); closed with WM_CLOSE; exit code 0"
           } else {
             Fail-Smoke "komapaint.exe exited prematurely with code $($p.ExitCode) (expected the event loop to run; check for a startup crash or a QML load failure)."
           }
-
-      - name: Package into ZIP
-        shell: pwsh
-        run: |
-          # Ship the per-user .koma file-association helper next to the exe.
-          # It simply calls "komapaint.exe --associate" / "--unassociate";
-          # registration is per-user (HKCU) and needs no admin rights.
-          Copy-Item "${{ github.workspace }}\packaging\Register_koma_file_association.cmd" "${{ env.STAGE_DIR }}\Register_koma_file_association.cmd" -Force
-          $zip = "${{ github.workspace }}\KomaPaint-Windows-x64.zip"
-          if (Test-Path $zip) { Remove-Item $zip -Force }
-          # Zip the staged folder so the archive contains a single top-level
-          # "KomaPaint" directory with the exe and its dependencies.
-          Compress-Archive -Path "${{ env.STAGE_DIR }}" -DestinationPath $zip -CompressionLevel Optimal
-          if (!(Test-Path $zip)) {
-            Write-Error "Packaging failed; zip not produced."
-            exit 1
-          }
-          Get-Item $zip | Format-List Name,Length
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

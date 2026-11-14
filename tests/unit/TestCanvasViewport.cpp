@@ -1,9 +1,11 @@
 #include <QtTest/QtTest>
 #include "app/CanvasViewport.h"
 #include "app/WorkspaceState.h"
+#include "app/DockModel.h"
 #include "app/PanelManager.h"
 #include "core/ApplicationConfig.h"
 #include "core/Settings.h"
+#include "core/NewProjectSettings.h"
 #include <QQmlEngine>
 #include <QQmlContext>
 #include <QQmlComponent>
@@ -14,12 +16,29 @@
 #include <cmath>
 
 using namespace komapaint;
+namespace {
+
+// Panels live inside the docking workspace, which creates them from Loaders, so
+// they are found through the visual tree rather than through QObject parents.
+QQuickItem* findVisual(QQuickItem* from, const QString& name)
+{
+    if (!from) return nullptr;
+    if (from->objectName() == name) return from;
+    for (auto* child : from->childItems())
+        if (auto* found = findVisual(child, name)) return found;
+    return nullptr;
+}
+
+}  // namespace
+
 class TestCanvasViewport : public QObject {
     Q_OBJECT
 private slots:
     void navigationAndVisibleTiles();
     void dirtyAndLayers();
     void brushInputAndLayerRules();
+    void strokeFailureDiagnostics();
+    void compositeCacheAccounting();
     void qmlMouseStroke();
     void actualWindowShortcuts();
 };
@@ -139,6 +158,62 @@ void TestCanvasViewport::brushInputAndLayerRules()
     view.cancelStroke();
     QCOMPARE(layer->tiles().pixel({325, 220}).value(), beforeCancel);
 }
+void TestCanvasViewport::strokeFailureDiagnostics()
+{
+    CanvasDocument doc;
+    doc.setSize(QSize(600, 400));
+    doc.setModified(false); // setup is the saved baseline for rollback
+    UndoStack history;
+    CanvasViewport view;
+    view.setWidth(500); view.setHeight(300);
+    view.setHistory(&history); view.setDocument(&doc); view.refreshNow();
+    BrushSettings brush;
+    brush.setSize(8);
+    QSignalSpy errors(&view, &CanvasViewport::strokeError);
+    const auto first = view.documentToViewport(100, 100);
+    const auto second = view.documentToViewport(300, 100);
+    const auto originalFrame = view.frameSnapshot();
+    auto budget = doc.layers()->documentBudget();
+    QVERIFY(budget->setLimit(budget->usedBytes() + 2 * doc.layers()->layerAt(0)->tiles().tileBytes()));
+    QVERIFY(view.beginStroke(first.x(), first.y(), 1, &brush, Qt::red));
+    view.refreshNow(); // acknowledge dirties and populate cache during the stroke
+    QVERIFY(view.frameSnapshot().pixelColor(qRound(first.x()), qRound(first.y())) !=
+            originalFrame.pixelColor(qRound(first.x()), qRound(first.y())));
+    view.continueStroke(second.x(), second.y(), 1);
+    QCOMPARE(errors.size(), 1);
+    const auto message = errors.takeFirst().at(0).toString();
+    QVERIFY2(message.contains(QStringLiteral("available memory")), qPrintable(message));
+    QVERIFY(!history.canUndo());
+    QVERIFY(message.contains(QStringLiteral("rolled back")));
+    auto& store = doc.layers()->layerAt(0)->tiles();
+    QCOMPARE(store.pixel({100, 100}).value(), 0U);
+    QCOMPARE(store.pixel({300, 100}).value(), 0U);
+    QCOMPARE(store.allocatedTiles(), std::size_t(0));
+    QVERIFY(!doc.isModified());
+    view.refreshNow();
+    QCOMPARE(view.frameSnapshot().pixelColor(qRound(first.x()), qRound(first.y())),
+             originalFrame.pixelColor(qRound(first.x()), qRound(first.y())));
+}
+
+void TestCanvasViewport::compositeCacheAccounting()
+{
+    CanvasDocument doc;
+    doc.setSize(QSize(600, 400));
+    auto budget = doc.layers()->documentBudget();
+    {
+        CanvasViewport view;
+        view.setWidth(320); view.setHeight(240); view.setDocument(&doc); view.refreshNow();
+        QVERIFY(budget->cacheBytes() > 0);
+        const auto before = budget->cacheBytes();
+        QVERIFY(budget->usedBytes() >= before);
+        view.setDocument(nullptr);
+        QCOMPARE(budget->cacheBytes(), size_t(0));
+        view.setDocument(&doc); view.refreshNow();
+        QVERIFY(budget->cacheBytes() > 0);
+    }
+    QCOMPARE(budget->cacheBytes(), size_t(0));
+}
+
 void TestCanvasViewport::qmlMouseStroke()
 {
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
@@ -185,11 +260,14 @@ void TestCanvasViewport::actualWindowShortcuts()
     ApplicationConfig config;
     Settings settings(QStringLiteral("KomaPaintTests"), QStringLiteral("UndoWindow"));
     PanelManager panels;
+    NewProjectSettings newProject;
     QQmlEngine engine; engine.addImportPath(QStringLiteral("qrc:/"));
     engine.rootContext()->setContextProperty(QStringLiteral("Workspace"), &workspace);
     engine.rootContext()->setContextProperty(QStringLiteral("Settings"), &settings);
     engine.rootContext()->setContextProperty(QStringLiteral("App"), &config);
     engine.rootContext()->setContextProperty(QStringLiteral("Panels"), &panels);
+    engine.rootContext()->setContextProperty(QStringLiteral("Dock"), panels.dockModel());
+    engine.rootContext()->setContextProperty(QStringLiteral("NewProject"), &newProject);
     QQmlComponent component(&engine, QUrl(QStringLiteral("qrc:/workspaces/MainWindow.qml")));
     QObject* object = component.create();
     QVERIFY2(object, qPrintable(component.errorString()));
@@ -239,7 +317,7 @@ void TestCanvasViewport::actualWindowShortcuts()
     QCoreApplication::processEvents();
     QVERIFY(!workspace.history()->canRedo());
     QCOMPARE(tiles.pixel(secondPixel).value(), 0U);
-    auto* title = object->findChild<QQuickItem*>(QStringLiteral("documentTitleField")); QVERIFY(title);
+    auto* title = findVisual(window->contentItem(), QStringLiteral("documentTitleField")); QVERIFY(title);
     title->forceActiveFocus(); QTest::qWait(20);
     QTest::keyClick(window, Qt::Key_X);
     QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);

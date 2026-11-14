@@ -1,0 +1,417 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick.Dialogs
+import "../themes"
+
+// New Project dialog — replaces the temporary "New Document" dialog.
+//
+// Collects illustration creation settings (name, size, units, DPI, background)
+// and submits them to Workspace.newProject(). The dialog closes only after
+// successful project creation; failures are reported in the status banner.
+//
+// The canonical physical size lives in NewProject (inches), so switching
+// units never drifts; pixels are derived at the last moment via
+// round(inches * dpi).
+KpDialog {
+    id: newProjectDialog
+    objectName: "newProjectDialog"
+    heading: qsTr("New Project")
+    bodyWidth: 520
+    readonly property int dimensionScale: unitCombo.currentText === "px" ? 1 : 100
+    function updateDimensionInputs() {
+        widthInput.value = Math.round(NewProject.widthInUnit(NewProject.units) * dimensionScale)
+        heightInput.value = Math.round(NewProject.heightInUnit(NewProject.units) * dimensionScale)
+    }
+
+
+    // Diagnostic log: Documents/KomaPaint/NewProjectDiagnostic.log
+    // Written by WorkspaceState::writeDiagnosticLog().
+
+    onOpened: {
+        Workspace.clearDiagnosticLog()
+        Workspace.writeDiagnosticLog("=== New Project dialog opened ===")
+
+        NewProject.resetToDefaults()
+        nameInput.text = NewProject.name
+        unitCombo.currentIndex = NewProject.availableUnits().indexOf(NewProject.units)
+        updateDimensionInputs()
+        dpiInput.value = NewProject.dpi
+        transparentInput.checked = NewProject.transparentBackground
+
+        creationStatus.text = qsTr("Ready to create project.")
+        creationStatus.color = KP.textMuted
+        summaryError.text = ""
+
+        Workspace.writeDiagnosticLog("name=" + NewProject.name)
+        Workspace.writeDiagnosticLog("units=" + NewProject.units)
+        Workspace.writeDiagnosticLog("widthPixels=" + NewProject.widthPixels)
+        Workspace.writeDiagnosticLog("heightPixels=" + NewProject.heightPixels)
+        Workspace.writeDiagnosticLog("dpi=" + NewProject.dpi)
+        Workspace.writeDiagnosticLog("transparent=" + NewProject.transparentBackground)
+        Workspace.writeDiagnosticLog("bgColor=" + NewProject.backgroundColor)
+        Workspace.writeDiagnosticLog("isValid=" + NewProject.valid)
+    }
+
+    // Reflect creation errors from the C++ service into the UI.
+    Connections {
+        target: Workspace
+        function onCreationErrorChanged() {
+            if (Workspace.creationError) {
+                creationStatus.text = qsTr("Creation failed: %1").arg(Workspace.creationError)
+                creationStatus.color = KP.error
+                summaryError.text = Workspace.creationError
+            } else {
+                creationStatus.text = qsTr("Ready to create project.")
+                creationStatus.color = KP.textMuted
+                summaryError.text = ""
+            }
+        }
+    }
+
+    body: [
+        // ------------------------------------------------------------- Modes
+        Label { text: qsTr("Project type"); font.pixelSize: KP.fontS; color: KP.textMuted },
+        // Only Illustration projects can be created so far. The other types
+        // are shown so the choice is visible, but cannot be selected.
+        RowLayout {
+            objectName: "projectTypeRow"
+            Layout.fillWidth: true
+            Repeater {
+                model: [
+                    { id: "illustration", icon: "project-types/illustration", label: qsTr("Illustration"), available: true },
+                    { id: "comic-page", icon: "project-types/comic-page", label: qsTr("Comic Page"), available: false },
+                    { id: "multi-page-comic", icon: "project-types/multi-page-comic", label: qsTr("Multi-page Comic"), available: false },
+                    { id: "animation", icon: "project-types/animation", label: qsTr("Animation"), available: false }
+                ]
+                AbstractButton {
+                    id: typeTile
+                    required property var modelData
+                    readonly property bool current: modelData.id === "illustration"
+                    objectName: "projectType_" + modelData.id
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 110
+                    implicitHeight: 92
+                    hoverEnabled: true
+                    focusPolicy: Qt.NoFocus
+                    Accessible.name: modelData.label
+                    ToolTip.text: qsTr("%1 — not available yet").arg(modelData.label)
+                    ToolTip.visible: hovered && !modelData.available
+                    ToolTip.delay: 500
+                    background: Rectangle {
+                        radius: KP.radiusM
+                        color: typeTile.current ? KP.toolActive
+                             : (typeTile.hovered && typeTile.modelData.available ? KP.buttonBgHover : KP.paneBgAlt)
+                        border.width: 1
+                        border.color: typeTile.current ? KP.accent : KP.border
+                    }
+                    contentItem: Item {
+                        // The project-type artwork is a finished illustration,
+                        // not a single-colour glyph: it keeps its own colours
+                        // (KpIcon.tinted is false) and is never recoloured by
+                        // the icon theme. It sits on a paper-coloured preview
+                        // card so it reads on the dark and on the light theme
+                        // alike; availability is shown by dimming the card.
+                        Rectangle {
+                            id: previewCard
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.topMargin: 8
+                            width: 52
+                            height: 52
+                            radius: KP.radiusS
+                            color: typeTile.current ? KP.canvasPaper : KP.previewPaper
+                            border.width: 1
+                            border.color: typeTile.current ? KP.accent : KP.borderLight
+                            // The card itself stays solid in both themes, so the
+                            // artwork always sits on paper; only the drawing
+                            // itself is faded when the type cannot be used yet.
+                            KpIcon {
+                                id: typeIcon
+                                anchors.centerIn: parent
+                                name: typeTile.modelData.icon
+                                size: 44
+                                tinted: false
+                                opacity: typeTile.modelData.available ? 1 : (typeTile.hovered ? 0.75 : 0.6)
+                            }
+                        }
+                        Label {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 6
+                            width: parent.width - 8
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
+                            text: typeTile.modelData.label
+                            color: !typeTile.modelData.available ? KP.textSubtle
+                                 : typeTile.current ? KP.textOnActive : KP.text
+                            font.family: KP.fontUi
+                            font.pixelSize: KP.fontS
+                        }
+                    }
+                }
+            }
+        },
+        // ------------------------------------------------------------- Illustration settings
+        Rectangle {
+            Layout.fillWidth: true
+            color: KP.paneBgAlt
+            border.color: KP.border
+            radius: KP.radiusS
+            implicitHeight: settingsContent.implicitHeight + 2 * KP.gapM
+            ColumnLayout {
+                id: settingsContent
+                anchors.fill: parent
+                anchors.leftMargin: KP.gapM
+                anchors.rightMargin: KP.gapM
+                anchors.topMargin: KP.gapM
+                anchors.bottomMargin: KP.gapM
+
+                TextField {
+                    id: nameInput
+                    objectName: "projectNameInput"
+                    placeholderText: qsTr("Project name")
+                    text: NewProject.name
+                    onTextEdited: NewProject.name = text
+                    Layout.fillWidth: true
+                }
+
+                RowLayout {
+                    spacing: KP.gapS
+                    Label { text: qsTr("Width"); Layout.preferredWidth: 60 }
+                    KpSpinBox {
+                        id: widthInput
+                        objectName: "projectWidthInput"
+                        from: 1
+                        to: NewProject.maxDimension() * newProjectDialog.dimensionScale
+                        textFromValue: function(value, locale) {
+                            return Number(value / newProjectDialog.dimensionScale).toLocaleString(locale, "f", newProjectDialog.dimensionScale === 1 ? 0 : 2)
+                        }
+                        valueFromText: function(text, locale) {
+                            return Math.round(Number.fromLocaleString(locale, text) * newProjectDialog.dimensionScale)
+                        }
+                        validator: DoubleValidator { bottom: 1 / newProjectDialog.dimensionScale; top: NewProject.maxDimension(); decimals: newProjectDialog.dimensionScale === 1 ? 0 : 2 }
+                        value: 1600
+                        editable: true
+                        Layout.fillWidth: true
+                        onValueModified: {
+                            NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value / newProjectDialog.dimensionScale, heightInput.value / newProjectDialog.dimensionScale)
+                        }
+                    }
+                    ComboBox {
+                        id: unitCombo
+                        objectName: "projectUnitInput"
+                        model: NewProject.availableUnits()
+                        currentIndex: NewProject.availableUnits().indexOf(NewProject.units)
+                        onActivated: {
+                            NewProject.units = unitCombo.currentText
+                            newProjectDialog.updateDimensionInputs()
+                        }
+                    }
+                }
+
+                RowLayout {
+                    spacing: KP.gapS
+                    Label { text: qsTr("Height"); Layout.preferredWidth: 60 }
+                    KpSpinBox {
+                        id: heightInput
+                        objectName: "projectHeightInput"
+                        from: 1
+                        to: NewProject.maxDimension() * newProjectDialog.dimensionScale
+                        textFromValue: function(value, locale) {
+                            return Number(value / newProjectDialog.dimensionScale).toLocaleString(locale, "f", newProjectDialog.dimensionScale === 1 ? 0 : 2)
+                        }
+                        valueFromText: function(text, locale) {
+                            return Math.round(Number.fromLocaleString(locale, text) * newProjectDialog.dimensionScale)
+                        }
+                        validator: DoubleValidator { bottom: 1 / newProjectDialog.dimensionScale; top: NewProject.maxDimension(); decimals: newProjectDialog.dimensionScale === 1 ? 0 : 2 }
+                        value: 1200
+                        editable: true
+                        Layout.fillWidth: true
+                        onValueModified: {
+                            NewProject.setSizeInUnit(unitCombo.currentText, widthInput.value / newProjectDialog.dimensionScale, heightInput.value / newProjectDialog.dimensionScale)
+                        }
+                    }
+                }
+
+                RowLayout {
+                    spacing: KP.gapS
+                    Label { text: qsTr("Resolution"); Layout.preferredWidth: 60 }
+                    KpSpinBox {
+                        id: dpiInput
+                        objectName: "projectDpiInput"
+                        from: 1
+                        to: 1200
+                        value: 300
+                        editable: true
+                        Layout.fillWidth: true
+                        onValueModified: { NewProject.dpi = value; newProjectDialog.updateDimensionInputs() }
+                    }
+                    Label { text: qsTr("dpi"); color: KP.textMuted; font.pixelSize: KP.fontS }
+                }
+
+                RowLayout {
+                    spacing: KP.gapS
+                    CheckBox {
+                        id: transparentInput
+                        objectName: "projectTransparentInput"
+                        text: qsTr("Transparent background")
+                        checked: NewProject.transparentBackground
+                        onCheckedChanged: NewProject.transparentBackground = checked
+                    }
+                }
+
+                RowLayout {
+                    spacing: KP.gapS
+                    enabled: !transparentInput.checked
+                    Button {
+                        objectName: "projectBackgroundButton"
+                        text: qsTr("Background colour…")
+                        onClicked: backgroundPicker.open()
+                    }
+                    Rectangle {
+                        width: 30
+                        height: 30
+                        color: NewProject.backgroundColor
+                        border.color: KP.border
+                    }
+                }
+            }
+        },
+        // ------------------------------------------------------------- Summary
+        Rectangle {
+            Layout.fillWidth: true
+            color: KP.inputBg
+            border.color: KP.border
+            radius: KP.radiusS
+            implicitHeight: summaryContent.implicitHeight + 2 * KP.gapS
+            ColumnLayout {
+                id: summaryContent
+                anchors.fill: parent
+                anchors.leftMargin: KP.gapM
+                anchors.rightMargin: KP.gapM
+                anchors.topMargin: KP.gapS
+                anchors.bottomMargin: KP.gapS
+                spacing: KP.gapXS
+                Label {
+                    text: qsTr("%1 × %2 px  •  %3 dpi  •  %4 × %5 inches")
+                    .arg(NewProject.widthPixels)
+                    .arg(NewProject.heightPixels)
+                    .arg(Math.round(NewProject.dpi))
+                    .arg(Number(NewProject.widthInUnit("inches")).toFixed(2))
+                    .arg(Number(NewProject.heightInUnit("inches")).toFixed(2))
+                    color: KP.text
+                    font.family: KP.fontMono
+                    font.pixelSize: KP.fontS
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    id: summaryError
+                    color: KP.error
+                    font.pixelSize: KP.fontXS
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+        },
+        // ------------------------------------------------------------- Creation status
+        Rectangle {
+            Layout.fillWidth: true
+            color: "#2d2d2d"
+            border.color: KP.border
+            radius: KP.radiusS
+            implicitHeight: statusContent.implicitHeight + 2 * KP.gapS
+            ColumnLayout {
+                id: statusContent
+                anchors.fill: parent
+                anchors.leftMargin: KP.gapM
+                anchors.rightMargin: KP.gapM
+                anchors.topMargin: KP.gapS
+                anchors.bottomMargin: KP.gapS
+                spacing: KP.gapXS
+                Label {
+                    id: creationStatus
+                    text: qsTr("Ready to create project.")
+                    color: KP.textMuted
+                    font.pixelSize: KP.fontS
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                Label {
+                    text: qsTr("Diagnostic log: Documents/KomaPaint/NewProjectDiagnostic.log")
+                    color: KP.textMuted
+                    font.pixelSize: KP.fontXS
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+        }
+    ]
+
+    actions: [
+        KpButton {
+            label: qsTr("Cancel")
+            onClicked: newProjectDialog.reject()
+        },
+        KpButton {
+            objectName: "createProjectButton"
+            // The one affirmative action of the dialog, so it carries the
+            // accent while Cancel and the diagnostic log stay quiet.
+            label: qsTr("Create")
+            variant: "primary"
+            enabled: NewProject.valid
+            onClicked: {
+                Workspace.writeDiagnosticLog("=== Create button clicked ===")
+                Workspace.writeDiagnosticLog("name=" + nameInput.text.trim())
+                Workspace.writeDiagnosticLog("widthPixels=" + NewProject.widthPixels)
+                Workspace.writeDiagnosticLog("heightPixels=" + NewProject.heightPixels)
+                Workspace.writeDiagnosticLog("transparent=" + NewProject.transparentBackground)
+                Workspace.writeDiagnosticLog("bgColor=" + NewProject.backgroundColor)
+                Workspace.writeDiagnosticLog("dpi=" + NewProject.dpi)
+                Workspace.writeDiagnosticLog("isValid=" + NewProject.valid)
+
+                creationStatus.text = qsTr("Creating project...")
+                creationStatus.color = KP.textMuted
+
+                const ok = Workspace.newProject(nameInput.text.trim(),
+                                                NewProject.widthPixels,
+                                                NewProject.heightPixels,
+                                                NewProject.transparentBackground,
+                                                NewProject.backgroundColor,
+                                                NewProject.dpi)
+                Workspace.writeDiagnosticLog("Workspace.newProject() returned: " + ok)
+
+                if (ok) {
+                    Workspace.writeDiagnosticLog("Creation succeeded, closing dialog")
+                    creationStatus.text = qsTr("Project created successfully.")
+                    creationStatus.color = "#4caf50"
+                    newProjectDialog.accept()
+                } else {
+                    Workspace.writeDiagnosticLog("Creation FAILED — dialog stays open")
+                    // creationStatus is updated via onCreationErrorChanged
+                }
+            }
+        },
+        KpButton {
+            label: qsTr("Open Diagnostic Log")
+            onClicked: {
+                const path = Workspace.diagnosticLogPath()
+                Workspace.writeDiagnosticLog("Opening diagnostic log: " + path)
+                const opened = Qt.openUrlExternally(path)
+                Workspace.writeDiagnosticLog("Log opened: " + opened)
+            }
+        }
+    ]
+
+
+    ColorDialog {
+        id: backgroundPicker
+        objectName: "projectColorDialog"
+        title: qsTr("Background colour")
+        selectedColor: NewProject.backgroundColor
+        onAccepted: {
+            NewProject.backgroundColor = selectedColor.toString()
+        }
+    }
+}

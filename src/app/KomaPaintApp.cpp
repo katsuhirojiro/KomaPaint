@@ -9,6 +9,8 @@
 #include <QFont>
 #include <QFontDatabase>
 #include <QQuickWindow>
+#include <QStandardPaths>
+#include <QDir>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlError>
@@ -31,6 +33,7 @@ KomaPaintApp::~KomaPaintApp() = default;
 void KomaPaintApp::registerTypes()
 {
     qRegisterMetaType<PanelManager*>();
+    qRegisterMetaType<DockModel*>();
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
 }
 
@@ -39,10 +42,16 @@ void KomaPaintApp::loadStyles() {}
 void KomaPaintApp::loadUi()
 {
     auto* ctx = m_engine.rootContext();
-    ctx->setContextProperty(QStringLiteral("App"),       &m_config);
-    ctx->setContextProperty(QStringLiteral("Settings"),  &m_settings);
-    ctx->setContextProperty(QStringLiteral("Panels"),    &m_panels);
-    ctx->setContextProperty(QStringLiteral("Workspace"), &m_workspace);
+    ctx->setContextProperty("App",       &m_config);
+    ctx->setContextProperty("Settings",  &m_settings);
+    // The docking workspace: the shared layout model that every panel lives
+    // in. "Panels" stays as the compatibility façade over the same model.
+    m_dock.setSettings(&m_settings);
+    m_panels.setDockModel(&m_dock);
+    ctx->setContextProperty("Dock",      &m_dock);
+    ctx->setContextProperty("Panels",    &m_panels);
+    ctx->setContextProperty("Workspace", &m_workspace);
+    ctx->setContextProperty("NewProject", &m_newProject);
 
     qInfo("[KomaPaint] loadUi(): setting up QML context properties");
 
@@ -119,9 +128,20 @@ int KomaPaintApp::run()
         if (QFontDatabase::hasFamily(name)) { app->setFont(QFont(name, 10)); break; }
     }
 
+    const QDir appData(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+    const bool recoveryReady = m_workspace.initializeRecovery(appData.filePath(QStringLiteral("recovery")));
+    if (!recoveryReady) qWarning("[KomaPaint] Workspace recovery is unavailable (directory or lock failure).");
+    // The session (open tabs, per-project view, window layout) is its own
+    // small file next to the recovery folder. Only the instance that holds
+    // the recovery lock owns the session, so a second running copy cannot
+    // overwrite the first one's tab list.
+    if (recoveryReady) m_workspace.initializeSession(appData.filePath(QStringLiteral("session.json")));
     registerTypes();
     loadStyles();
     loadUi();
+    if (!recoveryReady) QTimer::singleShot(0, &m_workspace, [this] {
+        emit m_workspace.fileErrorOccurred(QStringLiteral("Workspace recovery is unavailable. Automatic recovery and workspace restoration will not run in this instance."));
+    });
 
     if (!m_fileToOpen.isEmpty()) {
         qInfo("[KomaPaint] run(): opening command-line file %s", qUtf8Printable(m_fileToOpen));

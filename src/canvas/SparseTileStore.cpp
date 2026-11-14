@@ -2,10 +2,32 @@
 #include <functional>
 #include <algorithm>
 #include <new>
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
 namespace komapaint {
+namespace {
+// Release an uncommitted pixel-buffer reservation on every exit path.
+class PixelReservation {
+public:
+    PixelReservation(DocumentMemoryBudget* budget, DocumentMemoryBudget::Category category, std::size_t bytes)
+        : m_budget(budget), m_category(category), m_bytes(bytes),
+          m_ok(!budget || budget->reserve(category, bytes)) {}
+    ~PixelReservation() { if (m_budget && m_ok && !m_committed) m_budget->release(m_category, m_bytes); }
+    bool ok() const noexcept { return m_ok; }
+    void commitArtwork() noexcept {
+        if (m_budget && m_category == DocumentMemoryBudget::Category::RestoreStaging)
+            m_budget->transferToArtwork(m_bytes);
+        m_committed = true;
+    }
+private:
+    DocumentMemoryBudget* m_budget;
+    DocumentMemoryBudget::Category m_category;
+    std::size_t m_bytes;
+    bool m_ok, m_committed = false;
+};
+}
 std::size_t SparseTileStore::Hash::operator()(const TilePoint& p) const noexcept
 {
     auto a = std::hash<std::int64_t>{}(p.x);
@@ -16,19 +38,29 @@ SparseTileStore::SparseTileStore(std::int64_t w, std::int64_t h, int size, std::
     : m_geometry(w, h, size), m_dirty(m_geometry), m_tileSizeValid(size > 0 && size <= 4096),
       m_tileBytes(m_tileSizeValid ? static_cast<std::size_t>(size) * static_cast<std::size_t>(size) * sizeof(std::uint32_t) : 0),
       m_pixelBudget(budget) {}
+SparseTileStore::~SparseTileStore()
+{
+    if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, allocatedPixelBytes());
+}
+bool SparseTileStore::setDocumentBudget(std::shared_ptr<DocumentMemoryBudget> budget) noexcept
+{
+    if (!m_tiles.empty() || m_beforeChange || m_batchDepth || m_recordedStroke) return false;
+    m_documentBudget = std::move(budget);
+    return true;
+}
 
 std::vector<TilePoint> SparseTileStore::allocatedTilePoints() const
 {
     std::vector<TilePoint> result;
     result.reserve(m_tiles.size());
-    for (const auto& entry : m_tiles) result.push_back(entry.first);
+    for (const auto& entry : m_tiles) if (entry.second.nonzero) result.push_back(entry.first);
     return result;
 }
 
 std::span<const std::uint32_t> SparseTileStore::tilePixels(TilePoint tile) const noexcept
 {
     const auto it = m_tiles.find(tile);
-    if (it == m_tiles.end()) return {};
+    if (it == m_tiles.end() || it->second.nonzero == 0) return {};
     return it->second.pixels;
 }
 
@@ -45,6 +77,14 @@ std::optional<std::uint32_t> SparseTileStore::pixel(TilePoint point) const
 
 SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uint32_t value)
 {
+    if (m_recordedStroke && m_recordedFailure) return WriteResult::HistoryLimit;
+    const auto result = setPixelImpl(point, value);
+    if (m_recordedStroke && result != WriteResult::Changed && result != WriteResult::Unchanged)
+        m_recordedFailure = true;
+    return result;
+}
+SparseTileStore::WriteResult SparseTileStore::setPixelImpl(TilePoint point, std::uint32_t value)
+{
     if (!isValid()) return WriteResult::OutOfBounds;
     auto a = m_geometry.address(point);
     if (!a) return WriteResult::OutOfBounds;
@@ -53,6 +93,10 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
         return WriteResult::InvalidPixel;
     auto it = m_tiles.find(a->tile);
     bool created = false;
+    const bool needsTile = it == m_tiles.end() && value != 0;
+    PixelReservation reservation(m_documentBudget.get(), DocumentMemoryBudget::Category::Artwork,
+                                 needsTile ? m_tileBytes : 0);
+    if (!reservation.ok()) return WriteResult::DocumentMemoryLimit;
     if (it == m_tiles.end()) {
         if (value == 0) return WriteResult::Unchanged;
         if (m_tileBytes > m_pixelBudget || allocatedPixelBytes() > m_pixelBudget - m_tileBytes)
@@ -68,10 +112,15 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
     auto index = static_cast<std::size_t>(a->local.y) * static_cast<std::size_t>(m_geometry.tileSize()) + static_cast<std::size_t>(a->local.x);
     auto& old = it->second.pixels[index];
     if (old == value) return WriteResult::Unchanged;
-    if (m_beforeChange && !m_beforeChange(m_beforeContext, a->tile, !created,
-                                           created ? std::span<const std::uint32_t>{} : std::span<const std::uint32_t>{it->second.pixels})) {
-        if (created) m_tiles.erase(it);
-        return WriteResult::HistoryLimit;
+    if (m_beforeChange) {
+        const auto capture = m_beforeChange(m_beforeContext, a->tile, !created,
+            created ? std::span<const std::uint32_t>{} : std::span<const std::uint32_t>{it->second.pixels});
+        if (capture != CaptureResult::Ready) {
+            if (created) m_tiles.erase(it);
+            if (capture == CaptureResult::Limit) return WriteResult::HistoryLimit;
+            if (capture == CaptureResult::DocumentLimit) return WriteResult::DocumentMemoryLimit;
+            return WriteResult::HistoryAllocationFailed;
+        }
     }
     const auto dirty = m_dirty.mark({point.x, point.y, point.x + 1, point.y + 1});
     if (dirty != DirtyTileTracker::Result::Marked) {
@@ -82,25 +131,45 @@ SparseTileStore::WriteResult SparseTileStore::setPixel(TilePoint point, std::uin
     if (old == 0) ++it->second.nonzero;
     if (value == 0) --it->second.nonzero;
     old = value;
-    if (it->second.nonzero == 0) m_tiles.erase(it);
+    if (it->second.nonzero == 0 && !m_recordedStroke) {
+        m_tiles.erase(it);
+        if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, m_tileBytes);
+    }
+    reservation.commitArtwork();
     if (m_batchDepth) {
         if (!m_batchChanged) { m_batchFirst = m_batchLast = a->tile; m_batchChanged = true; }
         else {
             m_batchFirst.x = std::min(m_batchFirst.x, a->tile.x); m_batchFirst.y = std::min(m_batchFirst.y, a->tile.y);
             m_batchLast.x = std::max(m_batchLast.x, a->tile.x); m_batchLast.y = std::max(m_batchLast.y, a->tile.y);
         }
-    } else if (m_callback) m_callback(m_callbackContext, a->tile);
+    } else if (m_callback) {
+        const bool wasNotifying = m_notifying;
+        m_notifying = true;
+        m_callback(m_callbackContext, a->tile);
+        m_notifying = wasNotifying;
+    }
     return WriteResult::Changed;
 }
-SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<TileSnapshot>& snapshots)
+SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<TileSnapshot>& snapshots, bool notify)
 {
-    if (!isValid() || m_beforeChange || m_batchDepth) return WriteResult::InvalidPixel;
+    if (!isValid() || m_beforeChange || m_batchDepth || m_recordedStroke) return WriteResult::InvalidPixel;
+    std::size_t stagedBytes = 0;
+    for (const auto& snapshot : snapshots) {
+        if (!snapshot.pixels.empty()) {
+            if (snapshot.pixels.size() != m_tileBytes / sizeof(std::uint32_t)) return WriteResult::InvalidPixel;
+            if (stagedBytes > std::numeric_limits<std::size_t>::max() - m_tileBytes) return WriteResult::AllocationFailed;
+            stagedBytes += m_tileBytes;
+        }
+    }
+    PixelReservation reservation(m_documentBudget.get(), DocumentMemoryBudget::Category::RestoreStaging, stagedBytes);
+    if (!reservation.ok()) return WriteResult::DocumentMemoryLimit;
     try {
         // All allocations and dirty tracking happen before changing artwork.
         auto dirty = m_dirty;
         std::unordered_map<TilePoint, Tile, Hash> staged;
         staged.reserve(snapshots.size());
         std::size_t count = m_tiles.size();
+        std::size_t replacedBytes = 0;
         for (const auto& snapshot : snapshots) {
             auto bounds = m_geometry.tileBounds(snapshot.tile);
             if (!bounds || staged.find(snapshot.tile) != staged.end()) return WriteResult::InvalidPixel;
@@ -121,9 +190,12 @@ SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<Til
                 if (!tile.nonzero) return WriteResult::InvalidPixel;
             }
             const bool exists = m_tiles.find(snapshot.tile) != m_tiles.end();
+            if (exists) replacedBytes += m_tileBytes;
             if (exists && tile.pixels.empty()) --count;
             if (!exists && !tile.pixels.empty()) ++count;
-            if (dirty.mark(*bounds) != DirtyTileTracker::Result::Marked) return WriteResult::TrackingLimit;
+            const auto mark = dirty.mark(*bounds);
+            if (mark != DirtyTileTracker::Result::Marked)
+                return mark == DirtyTileTracker::Result::AllocationFailed ? WriteResult::AllocationFailed : WriteResult::TrackingLimit;
             staged.emplace(snapshot.tile, std::move(tile));
         }
         if (count > m_pixelBudget / m_tileBytes) return WriteResult::MemoryLimit;
@@ -141,11 +213,66 @@ SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<Til
                 m_tiles.insert(std::move(incoming));
             }
         }
-        if (m_callback) for (const auto& snapshot : snapshots) m_callback(m_callbackContext, snapshot.tile);
+        if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, replacedBytes);
+        reservation.commitArtwork();
+        if (notify && m_callback) for (const auto& snapshot : snapshots) m_callback(m_callbackContext, snapshot.tile);
         return WriteResult::Changed;
     } catch (const std::bad_alloc&) { return WriteResult::AllocationFailed; }
       catch (const std::length_error&) { return WriteResult::AllocationFailed; }
 }
+bool SparseTileStore::beginRecordedStroke() noexcept
+{
+    if (m_recordedStroke || m_batchDepth || m_beforeChange) return false;
+    try { m_recordedDirty.emplace(m_dirty); }
+    catch (const std::bad_alloc&) { return false; }
+    catch (const std::length_error&) { return false; }
+    m_recordedStroke = true;
+    m_recordedFailure = false;
+    return true;
+}
+void SparseTileStore::commitRecordedStroke() noexcept
+{
+    if (!m_recordedStroke) return;
+    for (auto it = m_tiles.begin(); it != m_tiles.end();) {
+        if (it->second.nonzero == 0) {
+            it = m_tiles.erase(it);
+            if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, m_tileBytes);
+        } else ++it;
+    }
+    m_recordedDirty.reset();
+    m_recordedStroke = false;
+    m_recordedFailure = false;
+}
+bool SparseTileStore::rollbackRecordedStroke(const std::vector<TileSnapshot>& before) noexcept
+{
+    if (!m_recordedStroke || !m_recordedDirty || m_batchDepth || m_beforeChange) return false;
+    // Verify preconditions before touching anything. Existing tile nodes are
+    // retained even when emptied, so restoring their pixels cannot allocate.
+    for (const auto& snapshot : before) {
+        const auto it = m_tiles.find(snapshot.tile);
+        if (!snapshot.pixels.empty() && (it == m_tiles.end() || snapshot.pixels.size() != it->second.pixels.size())) return false;
+    }
+    for (const auto& snapshot : before) {
+        auto it = m_tiles.find(snapshot.tile);
+        if (snapshot.pixels.empty()) {
+            if (it != m_tiles.end()) {
+                m_tiles.erase(it);
+                if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, m_tileBytes);
+            }
+        } else {
+            std::copy(snapshot.pixels.begin(), snapshot.pixels.end(), it->second.pixels.begin());
+            it->second.nonzero = static_cast<std::size_t>(std::count_if(snapshot.pixels.begin(), snapshot.pixels.end(), [](std::uint32_t p) { return p != 0; }));
+        }
+    }
+    m_dirty = std::move(*m_recordedDirty);
+    m_recordedDirty.reset();
+    m_recordedStroke = false;
+    m_recordedFailure = false;
+    // The consumer must invalidate its composite cache on strokeRolledBack;
+    // dirty entries may already have been acknowledged while painting.
+    return true;
+}
+
 void SparseTileStore::beginBatch() noexcept { ++m_batchDepth; }
 void SparseTileStore::endBatch() noexcept
 {
@@ -153,6 +280,8 @@ void SparseTileStore::endBatch() noexcept
     const auto first = m_batchFirst, last = m_batchLast;
     m_batchChanged = false;
     if (!m_callback) return;
+    const bool wasNotifying = m_notifying;
+    m_notifying = true;
     for (auto y = first.y;; ++y) {
         for (auto x = first.x;; ++x) {
             m_callback(m_callbackContext, {x, y});
@@ -160,11 +289,12 @@ void SparseTileStore::endBatch() noexcept
         }
         if (y == last.y) break;
     }
+    m_notifying = wasNotifying;
 }
 bool SparseTileStore::resizeEmpty(std::int64_t width, std::int64_t height)
 {
     TileGeometry replacement(width, height, m_geometry.tileSize());
-    if (!m_tiles.empty() || !m_dirty.regions().empty() || !replacement.isValid() || !m_tileSizeValid) return false;
+    if (!m_tiles.empty() || !m_dirty.regions().empty() || m_recordedStroke || !replacement.isValid() || !m_tileSizeValid) return false;
     if (!m_dirty.resetGeometry(replacement)) return false;
     m_geometry = replacement;
     return true;

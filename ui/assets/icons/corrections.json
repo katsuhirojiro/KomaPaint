@@ -1,0 +1,1564 @@
+[
+ {
+  "category": "tools",
+  "upload": "airbrush.png",
+  "file": "airbrush.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 265,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   8,
+   14,
+   114,
+   98
+  ],
+  "original_padding": {
+   "left": 8,
+   "top": 14,
+   "right": 14,
+   "bottom": 30
+  },
+  "scale": 0.954,
+  "final_bounds": [
+   12,
+   27,
+   113,
+   107
+  ],
+  "final_padding": {
+   "left": 12,
+   "top": 27,
+   "right": 15,
+   "bottom": 21
+  },
+  "optical_shift": [
+   -3.2,
+   2.7
+  ],
+  "colour": "#242423"
+ },
+ {
+  "category": "tools",
+  "upload": "circle.png",
+  "file": "circle.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 193,
+  "haze_max_alpha": 2,
+  "original_bounds": [
+   20,
+   28,
+   104,
+   94
+  ],
+  "original_padding": {
+   "left": 20,
+   "top": 28,
+   "right": 24,
+   "bottom": 34
+  },
+  "scale": 1.209,
+  "final_bounds": [
+   14,
+   24,
+   115,
+   104
+  ],
+  "final_padding": {
+   "left": 14,
+   "top": 24,
+   "right": 13,
+   "bottom": 24
+  },
+  "optical_shift": [
+   -0.1,
+   -0.2
+  ],
+  "colour": "#252424"
+ },
+ {
+  "category": "tools",
+  "upload": "curveline.png",
+  "file": "curveline.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 491,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   11,
+   31,
+   111,
+   106
+  ],
+  "original_padding": {
+   "left": 11,
+   "top": 31,
+   "right": 17,
+   "bottom": 22
+  },
+  "scale": 1.039,
+  "final_bounds": [
+   12,
+   30,
+   116,
+   106
+  ],
+  "final_padding": {
+   "left": 12,
+   "top": 30,
+   "right": 12,
+   "bottom": 22
+  },
+  "optical_shift": [
+   3.8,
+   3.8
+  ],
+  "colour": "#242424"
+ },
+ {
+  "category": "tools",
+  "upload": "eraser.png",
+  "file": "eraser.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 183,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   19,
+   21,
+   103,
+   106
+  ],
+  "original_padding": {
+   "left": 19,
+   "top": 21,
+   "right": 25,
+   "bottom": 22
+  },
+  "scale": 1.065,
+  "final_bounds": [
+   16,
+   22,
+   106,
+   113
+  ],
+  "final_padding": {
+   "left": 16,
+   "top": 22,
+   "right": 22,
+   "bottom": 15
+  },
+  "optical_shift": [
+   -3.4,
+   3.4
+  ],
+  "colour": "#252525"
+ },
+ {
+  "category": "tools",
+  "upload": "eyedropper.png",
+  "file": "eyedropper.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 73,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   27,
+   18,
+   101,
+   111
+  ],
+  "original_padding": {
+   "left": 27,
+   "top": 18,
+   "right": 27,
+   "bottom": 17
+  },
+  "scale": 1.085,
+  "final_bounds": [
+   22,
+   16,
+   103,
+   116
+  ],
+  "final_padding": {
+   "left": 22,
+   "top": 16,
+   "right": 25,
+   "bottom": 12
+  },
+  "optical_shift": [
+   -1.5,
+   3.8
+  ],
+  "colour": "#242424"
+ },
+ {
+  "category": "tools",
+  "upload": "fill.png",
+  "file": "fill.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 24,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   10,
+   26,
+   109,
+   107
+  ],
+  "original_padding": {
+   "left": 10,
+   "top": 26,
+   "right": 19,
+   "bottom": 21
+  },
+  "scale": 1.005,
+  "final_bounds": [
+   16,
+   22,
+   116,
+   103
+  ],
+  "final_padding": {
+   "left": 16,
+   "top": 22,
+   "right": 12,
+   "bottom": 25
+  },
+  "optical_shift": [
+   2.6,
+   -1.7
+  ],
+  "colour": "#252524"
+ },
+ {
+  "category": "tools",
+  "upload": "gradient.png",
+  "file": "gradient.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [
+   "shading moved into transparency (68% of the drawing)"
+  ],
+  "haze_pixels": 494,
+  "haze_max_alpha": 13,
+  "original_bounds": [
+   20,
+   35,
+   100,
+   96
+  ],
+  "original_padding": {
+   "left": 20,
+   "top": 35,
+   "right": 28,
+   "bottom": 32
+  },
+  "scale": 1.288,
+  "final_bounds": [
+   13,
+   26,
+   116,
+   106
+  ],
+  "final_padding": {
+   "left": 13,
+   "top": 26,
+   "right": 12,
+   "bottom": 22
+  },
+  "optical_shift": [
+   3.2,
+   2.0
+  ],
+  "colour": "#262525"
+ },
+ {
+  "category": "tools",
+  "upload": "hand.png",
+  "file": "hand.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 168,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   23,
+   23,
+   96,
+   104
+  ],
+  "original_padding": {
+   "left": 23,
+   "top": 23,
+   "right": 32,
+   "bottom": 24
+  },
+  "scale": 1.17,
+  "final_bounds": [
+   18,
+   16,
+   104,
+   110
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 16,
+   "right": 24,
+   "bottom": 18
+  },
+  "optical_shift": [
+   -3.2,
+   -1.5
+  ],
+  "colour": "#252424"
+ },
+ {
+  "category": "tools",
+  "upload": "lasso.png",
+  "file": "lasso.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 214,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   27,
+   18,
+   105,
+   108
+  ],
+  "original_padding": {
+   "left": 27,
+   "top": 18,
+   "right": 23,
+   "bottom": 20
+  },
+  "scale": 1.074,
+  "final_bounds": [
+   24,
+   18,
+   108,
+   114
+  ],
+  "final_padding": {
+   "left": 24,
+   "top": 18,
+   "right": 20,
+   "bottom": 14
+  },
+  "optical_shift": [
+   1.9,
+   2.1
+  ],
+  "colour": "#252524"
+ },
+ {
+  "category": "tools",
+  "upload": "line.png",
+  "file": "line.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 104,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   24,
+   21,
+   105,
+   102
+  ],
+  "original_padding": {
+   "left": 24,
+   "top": 21,
+   "right": 23,
+   "bottom": 26
+  },
+  "scale": 1.111,
+  "final_bounds": [
+   19,
+   19,
+   110,
+   110
+  ],
+  "final_padding": {
+   "left": 19,
+   "top": 19,
+   "right": 18,
+   "bottom": 18
+  },
+  "optical_shift": [
+   0.2,
+   -0.1
+  ],
+  "colour": "#252524"
+ },
+ {
+  "category": "tools",
+  "upload": "move.png",
+  "file": "move.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 125,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   13,
+   16,
+   106,
+   109
+  ],
+  "original_padding": {
+   "left": 13,
+   "top": 16,
+   "right": 22,
+   "bottom": 19
+  },
+  "scale": 0.968,
+  "final_bounds": [
+   19,
+   19,
+   109,
+   109
+  ],
+  "final_padding": {
+   "left": 19,
+   "top": 19,
+   "right": 19,
+   "bottom": 19
+  },
+  "optical_shift": [
+   -0.1,
+   -0.1
+  ],
+  "colour": "#242424"
+ },
+ {
+  "category": "tools",
+  "upload": "paint.png",
+  "file": "brush.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 42,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   20,
+   19,
+   103,
+   105
+  ],
+  "original_padding": {
+   "left": 20,
+   "top": 19,
+   "right": 25,
+   "bottom": 23
+  },
+  "scale": 1.065,
+  "final_bounds": [
+   21,
+   16,
+   108,
+   108
+  ],
+  "final_padding": {
+   "left": 21,
+   "top": 16,
+   "right": 20,
+   "bottom": 20
+  },
+  "optical_shift": [
+   0.2,
+   -2.0
+  ],
+  "colour": "#252524"
+ },
+ {
+  "category": "tools",
+  "upload": "pen.png",
+  "file": "pen.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 147,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   25,
+   18,
+   111,
+   107
+  ],
+  "original_padding": {
+   "left": 25,
+   "top": 18,
+   "right": 17,
+   "bottom": 21
+  },
+  "scale": 1.029,
+  "final_bounds": [
+   21,
+   18,
+   109,
+   110
+  ],
+  "final_padding": {
+   "left": 21,
+   "top": 18,
+   "right": 19,
+   "bottom": 18
+  },
+  "optical_shift": [
+   0.1,
+   0.0
+  ],
+  "colour": "#252424"
+ },
+ {
+  "category": "tools",
+  "upload": "pencil.png",
+  "file": "pencil.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 145,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   20,
+   17,
+   111,
+   110
+  ],
+  "original_padding": {
+   "left": 20,
+   "top": 17,
+   "right": 17,
+   "bottom": 18
+  },
+  "scale": 0.978,
+  "final_bounds": [
+   19,
+   19,
+   108,
+   110
+  ],
+  "final_padding": {
+   "left": 19,
+   "top": 19,
+   "right": 20,
+   "bottom": 18
+  },
+  "optical_shift": [
+   -0.5,
+   0.7
+  ],
+  "colour": "#252424"
+ },
+ {
+  "category": "tools",
+  "upload": "rectangle.png",
+  "file": "rectangle.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 528,
+  "haze_max_alpha": 2,
+  "original_bounds": [
+   20,
+   32,
+   105,
+   96
+  ],
+  "original_padding": {
+   "left": 20,
+   "top": 32,
+   "right": 23,
+   "bottom": 32
+  },
+  "scale": 1.22,
+  "final_bounds": [
+   13,
+   25,
+   116,
+   103
+  ],
+  "final_padding": {
+   "left": 13,
+   "top": 25,
+   "right": 12,
+   "bottom": 25
+  },
+  "optical_shift": [
+   0.1,
+   0.2
+  ],
+  "colour": "#242323"
+ },
+ {
+  "category": "tools",
+  "upload": "selection.png",
+  "file": "selection.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 214,
+  "haze_max_alpha": 2,
+  "original_bounds": [
+   20,
+   24,
+   103,
+   103
+  ],
+  "original_padding": {
+   "left": 20,
+   "top": 24,
+   "right": 25,
+   "bottom": 25
+  },
+  "scale": 1.111,
+  "final_bounds": [
+   18,
+   20,
+   110,
+   107
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 20,
+   "right": 18,
+   "bottom": 21
+  },
+  "optical_shift": [
+   0.3,
+   0.3
+  ],
+  "colour": "#242424"
+ },
+ {
+  "category": "tools",
+  "upload": "smudge.png",
+  "file": "smudge.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [
+   "shading moved into transparency (29% of the drawing)"
+  ],
+  "haze_pixels": 453,
+  "haze_max_alpha": 11,
+  "original_bounds": [
+   24,
+   16,
+   106,
+   113
+  ],
+  "original_padding": {
+   "left": 24,
+   "top": 16,
+   "right": 22,
+   "bottom": 15
+  },
+  "scale": 1.009,
+  "final_bounds": [
+   22,
+   16,
+   105,
+   114
+  ],
+  "final_padding": {
+   "left": 22,
+   "top": 16,
+   "right": 23,
+   "bottom": 14
+  },
+  "optical_shift": [
+   -0.8,
+   1.2
+  ],
+  "colour": "#242424"
+ },
+ {
+  "category": "tools",
+  "upload": "text.png",
+  "file": "text.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 194,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   22,
+   27,
+   104,
+   104
+  ],
+  "original_padding": {
+   "left": 22,
+   "top": 27,
+   "right": 24,
+   "bottom": 24
+  },
+  "scale": 1.133,
+  "final_bounds": [
+   18,
+   24,
+   110,
+   112
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 24,
+   "right": 18,
+   "bottom": 16
+  },
+  "optical_shift": [
+   0.1,
+   3.8
+  ],
+  "colour": "#242323"
+ },
+ {
+  "category": "tools",
+  "upload": "transform.png",
+  "file": "transform.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 316,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   13,
+   18,
+   109,
+   112
+  ],
+  "original_padding": {
+   "left": 13,
+   "top": 18,
+   "right": 19,
+   "bottom": 16
+  },
+  "scale": 0.947,
+  "final_bounds": [
+   18,
+   20,
+   109,
+   109
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 20,
+   "right": 19,
+   "bottom": 19
+  },
+  "optical_shift": [
+   -0.7,
+   0.1
+  ],
+  "colour": "#242423"
+ },
+ {
+  "category": "tools",
+  "upload": "wand.png",
+  "file": "wand.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 139,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   28,
+   16,
+   105,
+   101
+  ],
+  "original_padding": {
+   "left": 28,
+   "top": 16,
+   "right": 23,
+   "bottom": 27
+  },
+  "scale": 1.112,
+  "final_bounds": [
+   24,
+   17,
+   108,
+   112
+  ],
+  "final_padding": {
+   "left": 24,
+   "top": 17,
+   "right": 20,
+   "bottom": 16
+  },
+  "optical_shift": [
+   1.7,
+   0.5
+  ],
+  "colour": "#252524"
+ },
+ {
+  "category": "tools",
+  "upload": "zoom.png",
+  "file": "zoom.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 163,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   19,
+   18,
+   102,
+   102
+  ],
+  "original_padding": {
+   "left": 19,
+   "top": 18,
+   "right": 26,
+   "bottom": 26
+  },
+  "scale": 1.078,
+  "final_bounds": [
+   19,
+   19,
+   109,
+   110
+  ],
+  "final_padding": {
+   "left": 19,
+   "top": 19,
+   "right": 19,
+   "bottom": 18
+  },
+  "optical_shift": [
+   0.3,
+   0.5
+  ],
+  "colour": "#252424"
+ },
+ {
+  "category": "layers",
+  "upload": "Raster.png",
+  "file": "new-raster.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 38,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   16,
+   27,
+   107,
+   101
+  ],
+  "original_padding": {
+   "left": 16,
+   "top": 27,
+   "right": 21,
+   "bottom": 27
+  },
+  "scale": 1.011,
+  "final_bounds": [
+   18,
+   28,
+   110,
+   103
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 28,
+   "right": 18,
+   "bottom": 25
+  },
+  "optical_shift": [
+   0.2,
+   1.1
+  ],
+  "colour": "#323131"
+ },
+ {
+  "category": "layers",
+  "upload": "Vector.png",
+  "file": "new-vector.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 152,
+  "haze_max_alpha": 2,
+  "original_bounds": [
+   15,
+   21,
+   108,
+   99
+  ],
+  "original_padding": {
+   "left": 15,
+   "top": 21,
+   "right": 20,
+   "bottom": 29
+  },
+  "scale": 0.989,
+  "final_bounds": [
+   18,
+   26,
+   110,
+   103
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 26,
+   "right": 18,
+   "bottom": 25
+  },
+  "optical_shift": [
+   0.1,
+   0.2
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "layers",
+  "upload": "Folder.png",
+  "file": "folder.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 81,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   15,
+   23,
+   106,
+   90
+  ],
+  "original_padding": {
+   "left": 15,
+   "top": 23,
+   "right": 22,
+   "bottom": 38
+  },
+  "scale": 1.011,
+  "final_bounds": [
+   19,
+   28,
+   111,
+   96
+  ],
+  "final_padding": {
+   "left": 19,
+   "top": 28,
+   "right": 17,
+   "bottom": 32
+  },
+  "optical_shift": [
+   1.4,
+   -1.9
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "layers",
+  "upload": "Adjlayer.png",
+  "file": "adjustment-layer.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 4,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   23,
+   24,
+   97,
+   94
+  ],
+  "original_padding": {
+   "left": 23,
+   "top": 24,
+   "right": 31,
+   "bottom": 34
+  },
+  "scale": 1.243,
+  "final_bounds": [
+   17,
+   19,
+   109,
+   107
+  ],
+  "final_padding": {
+   "left": 17,
+   "top": 19,
+   "right": 19,
+   "bottom": 21
+  },
+  "optical_shift": [
+   -0.5,
+   -0.5
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "layers",
+  "upload": "Mask.png",
+  "file": "mask.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 121,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   18,
+   26,
+   106,
+   101
+  ],
+  "original_padding": {
+   "left": 18,
+   "top": 26,
+   "right": 22,
+   "bottom": 27
+  },
+  "scale": 1.045,
+  "final_bounds": [
+   18,
+   24,
+   110,
+   102
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 24,
+   "right": 18,
+   "bottom": 26
+  },
+  "optical_shift": [
+   -0.0,
+   -0.4
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "layers",
+  "upload": "Referencelayer.png",
+  "file": "reference.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 24,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   26,
+   32,
+   95,
+   94
+  ],
+  "original_padding": {
+   "left": 26,
+   "top": 32,
+   "right": 33,
+   "bottom": 34
+  },
+  "scale": 1.333,
+  "final_bounds": [
+   19,
+   23,
+   109,
+   106
+  ],
+  "final_padding": {
+   "left": 19,
+   "top": 23,
+   "right": 19,
+   "bottom": 22
+  },
+  "optical_shift": [
+   -0.1,
+   0.2
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "layers",
+  "upload": "Alphalock.png",
+  "file": "lock.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 43,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   19,
+   18,
+   105,
+   98
+  ],
+  "original_padding": {
+   "left": 19,
+   "top": 18,
+   "right": 23,
+   "bottom": 30
+  },
+  "scale": 1.07,
+  "final_bounds": [
+   18,
+   21,
+   110,
+   106
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 21,
+   "right": 18,
+   "bottom": 22
+  },
+  "optical_shift": [
+   0.1,
+   -1.0
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "layers",
+  "upload": "Transparencylock.png",
+  "file": "lock-transparency.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 56,
+  "haze_max_alpha": 2,
+  "original_bounds": [
+   16,
+   22,
+   108,
+   102
+  ],
+  "original_padding": {
+   "left": 16,
+   "top": 22,
+   "right": 20,
+   "bottom": 26
+  },
+  "scale": 1.0,
+  "final_bounds": [
+   18,
+   24,
+   110,
+   104
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 24,
+   "right": 18,
+   "bottom": 24
+  },
+  "optical_shift": [
+   0.1,
+   0.2
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "layers",
+  "upload": "Layermove.png",
+  "file": "move.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 29,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   23,
+   20,
+   95,
+   98
+  ],
+  "original_padding": {
+   "left": 23,
+   "top": 20,
+   "right": 33,
+   "bottom": 30
+  },
+  "scale": 1.231,
+  "final_bounds": [
+   20,
+   14,
+   108,
+   109
+  ],
+  "final_padding": {
+   "left": 20,
+   "top": 14,
+   "right": 20,
+   "bottom": 19
+  },
+  "optical_shift": [
+   -0.1,
+   -2.3
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "layers",
+  "upload": "Merge.png",
+  "file": "merge-down.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 35,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   12,
+   13,
+   105,
+   101
+  ],
+  "original_padding": {
+   "left": 12,
+   "top": 13,
+   "right": 23,
+   "bottom": 27
+  },
+  "scale": 0.989,
+  "final_bounds": [
+   18,
+   18,
+   110,
+   105
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 18,
+   "right": 18,
+   "bottom": 23
+  },
+  "optical_shift": [
+   0.1,
+   -2.0
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "layers",
+  "upload": "Layerdelete.png",
+  "file": "delete.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 66,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   19,
+   24,
+   99,
+   103
+  ],
+  "original_padding": {
+   "left": 19,
+   "top": 24,
+   "right": 29,
+   "bottom": 25
+  },
+  "scale": 1.15,
+  "final_bounds": [
+   18,
+   19,
+   110,
+   110
+  ],
+  "final_padding": {
+   "left": 18,
+   "top": 19,
+   "right": 18,
+   "bottom": 18
+  },
+  "optical_shift": [
+   -0.1,
+   -0.3
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "layers",
+  "upload": "Layervis.png",
+  "file": "visible.png",
+  "size": [
+   128,
+   128
+  ],
+  "notes": [],
+  "haze_pixels": 3,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   21,
+   38,
+   105,
+   86
+  ],
+  "original_padding": {
+   "left": 21,
+   "top": 38,
+   "right": 23,
+   "bottom": 42
+  },
+  "scale": 1.095,
+  "final_bounds": [
+   19,
+   38,
+   110,
+   90
+  ],
+  "final_padding": {
+   "left": 19,
+   "top": 38,
+   "right": 18,
+   "bottom": 38
+  },
+  "optical_shift": [
+   -0.0,
+   -0.0
+  ],
+  "colour": "#313131"
+ },
+ {
+  "category": "project-types",
+  "upload": "Illustration.png",
+  "file": "illustration.png",
+  "size": [
+   256,
+   256
+  ],
+  "notes": [],
+  "haze_pixels": 13,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   50,
+   32,
+   227,
+   225
+  ],
+  "original_padding": {
+   "left": 50,
+   "top": 32,
+   "right": 29,
+   "bottom": 31
+  },
+  "scale": 1.036,
+  "final_bounds": [
+   38,
+   26,
+   222,
+   225
+  ],
+  "final_padding": {
+   "left": 38,
+   "top": 26,
+   "right": 34,
+   "bottom": 31
+  },
+  "optical_shift": [
+   2.3,
+   -2.5
+  ],
+  "colour": "#30302f"
+ },
+ {
+  "category": "project-types",
+  "upload": "Comic.png",
+  "file": "comic-page.png",
+  "size": [
+   256,
+   256
+  ],
+  "notes": [
+   "removed a 184 px fragment of a neighbouring drawing at the canvas edge (x 252-255, y 132-206)"
+  ],
+  "haze_pixels": 75,
+  "haze_max_alpha": 19,
+  "original_bounds": [
+   53,
+   32,
+   199,
+   215
+  ],
+  "original_padding": {
+   "left": 53,
+   "top": 32,
+   "right": 57,
+   "bottom": 41
+  },
+  "scale": 1.093,
+  "final_bounds": [
+   48,
+   27,
+   207,
+   227
+  ],
+  "final_padding": {
+   "left": 48,
+   "top": 27,
+   "right": 49,
+   "bottom": 29
+  },
+  "optical_shift": [
+   -0.6,
+   -0.7
+  ],
+  "colour": "#2f2f2e"
+ },
+ {
+  "category": "project-types",
+  "upload": "Multicomic.png",
+  "file": "multi-page-comic.png",
+  "size": [
+   256,
+   256
+  ],
+  "notes": [
+   "removed a 188 px fragment of a neighbouring drawing at the canvas edge (x 0-2, y 23-114)"
+  ],
+  "haze_pixels": 40,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   59,
+   14,
+   238,
+   202
+  ],
+  "original_padding": {
+   "left": 59,
+   "top": 14,
+   "right": 18,
+   "bottom": 54
+  },
+  "scale": 1.047,
+  "final_bounds": [
+   35,
+   31,
+   221,
+   228
+  ],
+  "final_padding": {
+   "left": 35,
+   "top": 31,
+   "right": 35,
+   "bottom": 28
+  },
+  "optical_shift": [
+   0.0,
+   1.6
+  ],
+  "colour": "#2f2f2e"
+ },
+ {
+  "category": "project-types",
+  "upload": "Animation.png",
+  "file": "animation.png",
+  "size": [
+   256,
+   256
+  ],
+  "notes": [],
+  "haze_pixels": 127,
+  "haze_max_alpha": 1,
+  "original_bounds": [
+   27,
+   13,
+   236,
+   198
+  ],
+  "original_padding": {
+   "left": 27,
+   "top": 13,
+   "right": 20,
+   "bottom": 58
+  },
+  "scale": 0.957,
+  "final_bounds": [
+   28,
+   37,
+   228,
+   215
+  ],
+  "final_padding": {
+   "left": 28,
+   "top": 37,
+   "right": 28,
+   "bottom": 41
+  },
+  "optical_shift": [
+   -0.4,
+   -2.8
+  ],
+  "colour": "#2f2f2e"
+ }
+]

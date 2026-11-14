@@ -26,9 +26,18 @@ public:
     explicit CanvasDocument(QObject* parent = nullptr);
 
     static constexpr int MaxDimension = 32768;
+    // Stable recovery type ids. The workspace uses these to associate a
+    // recovery snapshot with the document type that wrote it. New native
+    // document types set their own id instead of reusing the illustration id.
+    static constexpr const char* IllustrationTypeId = "illustration";
     static bool validSize(const QSize& size);
 
     static CanvasDocument* createDefault(QObject* parent = nullptr);
+
+    // Document type identity used by the shared recovery system. It is not
+    // written into the .koma file, so the file format stays unchanged.
+    QString documentType() const { return m_documentType; }
+    void setDocumentType(const QString& type) { m_documentType = type; }
 
     bool isModified() const { return m_modified; }
     // Marks the document as unmodified (after saving) or modified. Not
@@ -68,6 +77,7 @@ private:
     QSize   m_size  = QSize(1600, 1200);
     qreal   m_dpi   = 300.0;
     bool    m_transparent = true;
+    QString m_documentType = QString::fromLatin1(IllustrationTypeId);
 };
 
 }  // namespace komapaint

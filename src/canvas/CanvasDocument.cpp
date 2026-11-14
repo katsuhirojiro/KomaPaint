@@ -6,6 +6,15 @@ CanvasDocument::CanvasDocument(QObject* parent) : QObject(parent), m_layers(new 
 {
     connect(m_layers, &QAbstractItemModel::rowsInserted, this, [this] { connectArtworkSignals(); });
     connectArtworkSignals();
+    auto markModified = [this] { setModified(true); };
+    connect(this, &CanvasDocument::titleChanged, this, markModified);
+    connect(this, &CanvasDocument::sizeChanged, this, markModified);
+    connect(this, &CanvasDocument::dpiChanged, this, markModified);
+    connect(this, &CanvasDocument::backgroundChanged, this, markModified);
+    connect(m_layers, &QAbstractItemModel::rowsInserted, this, markModified);
+    connect(m_layers, &QAbstractItemModel::rowsRemoved, this, markModified);
+    connect(m_layers, &QAbstractItemModel::rowsMoved, this, markModified);
+    connect(m_layers, &QAbstractItemModel::dataChanged, this, markModified);
 }
 void CanvasDocument::connectArtworkSignals()
 {

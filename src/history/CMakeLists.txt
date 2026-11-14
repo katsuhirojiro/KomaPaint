@@ -2,6 +2,10 @@
 add_library(komapaint_history STATIC
     UndoStack.h
     UndoStack.cpp
+    HistoryTileCodec.h
+    HistoryTileCodec.cpp
+    HistoryJournal.h
+    HistoryJournal.cpp
 )
 target_include_directories(komapaint_history PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/..)

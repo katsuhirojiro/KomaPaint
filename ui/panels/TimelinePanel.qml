@@ -4,138 +4,187 @@ import QtQuick.Layouts
 import "../components"
 import "../themes"
 
+// The animation rail.
+//
+// Playback is not implemented by the engine yet, so this panel shows only what
+// is real: the frame count and rate the document reports, the current frame, and
+// a rail you can scrub. The controls that would do nothing (step to end, onion
+// skin, recording) are simply absent rather than greyed out as decoration.
 Rectangle {
-    id: timeline
+    id: panel
     color: KP.paneBg
-    border.color: KP.border
-    border.width: 1
+
+    readonly property var timeline: Workspace.timeline
+
+    component RailRule: Rectangle {
+        width: 1
+        height: 16
+        color: KP.hairline
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
-        PanelHeader {
-            Layout.fillWidth: true
-            title: "Timeline"
-            onCloseClicked: Panels.setVisible("timeline", false)
-        }
 
-        RowLayout {
+        // ---- Transport
+        Item {
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 0
-            // Left playback / layers column
-            Rectangle {
-                width: 140
-                Layout.fillHeight: true
-                color: KP.paneHeaderBg
-                border.color: KP.border
-                border.width: 1
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 6
-                    spacing: 4
-                    // Playback controls
-                    Row {
-                        spacing: 2
-                        ToolbarButton {
-                            iconText: "⏮"
-                            fontPx: 11
-                            onClicked: Workspace.timeline.stop()
-                        }
-                        ToolbarButton {
-                            iconText: Workspace.timeline.playing ? "⏸" : "▶"
-                            fontPx: 11
-                            onClicked: Workspace.timeline.playing = !Workspace.timeline.playing
-                        }
-                        ToolbarButton {
-                            iconText: "⏭"
-                            fontPx: 11
-                            enabled: false
-                        }
-                    }
-                    Label {
-                        text: "Frame " + (Workspace.timeline.currentFrame + 1) + " / " + Workspace.timeline.frameCount
-                        color: KP.text
-                        font.family: KP.fontMono
-                        font.pixelSize: KP.fontS
-                    }
-                    Label {
-                        text: Workspace.timeline.fps + " fps"
-                        color: KP.textSubtle
-                        font.family: KP.fontMono
-                        font.pixelSize: KP.fontXS
-                    }
-                    Item {
-                        Layout.fillHeight: true
-                    }
-                    Label {
-                        text: "Animation support is not implemented yet. This area is reserved for the timeline, exposure sheet and playback controls."
-                        color: KP.textSubtle
-                        wrapMode: Text.WordWrap
-                        font.pixelSize: KP.fontXS
-                        font.family: KP.fontUi
-                    }
+            implicitHeight: 30
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: KP.gapM
+                anchors.rightMargin: KP.gapM
+                spacing: KP.gapXS
+
+                IconButton {
+                    objectName: "timelineStopButton"
+                    glyph: "stop"
+                    iconSize: 13
+                    cell: 22
+                    tooltip: qsTr("Return to the first frame")
+                    onActivated: panel.timeline.stop()
+                }
+                IconButton {
+                    objectName: "timelinePlayButton"
+                    glyph: panel.timeline.playing ? "pause" : "play"
+                    iconSize: 13
+                    cell: 22
+                    selected: panel.timeline.playing
+                    accentBar: true
+                    tooltip: panel.timeline.playing ? qsTr("Pause") : qsTr("Play")
+                    onActivated: panel.timeline.playing = !panel.timeline.playing
+                }
+
+                RailRule { }
+
+                Text {
+                    text: qsTr("FRAME")
+                    color: KP.textSectionLabel
+                    font.pixelSize: KP.fontMicro
+                    font.letterSpacing: KP.trackingMicro
+                }
+                Text {
+                    text: (panel.timeline.currentFrame + 1) + " / " + panel.timeline.frameCount
+                    color: KP.text
+                    font.pixelSize: KP.fontS + 1
+                    font.family: KP.fontMono
+                }
+                RailRule { }
+                Text {
+                    text: panel.timeline.fps + " fps"
+                    color: KP.textMuted
+                    font.pixelSize: KP.fontXS
+                    font.family: KP.fontMono
+                }
+                Item { Layout.fillWidth: true }
+                Text {
+                    text: qsTr("Frame timing is not editable yet")
+                    color: KP.textSubtle
+                    font.pixelSize: KP.fontXS
                 }
             }
-            // Frame cells area
-            Flickable {
-                id: frameFlick
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                contentWidth: frameRow.width
-                contentHeight: frameRow.height + ruler.height + 6
-                boundsBehavior: Flickable.DragOverBounds
-                Column {
-                    id: ruler
-                    width: Math.max(frameFlick.width, frameRow.width)
-                    height: 18
-                    Repeater {
-                        model: Workspace.timeline.frameCount
-                        Label {
-                            x: model.index * 26 + 8
-                            width: 24
-                            height: 18
-                            text: (model.index + 1)
-                            color: (model.index === Workspace.timeline.currentFrame) ? KP.textAccent : KP.textSubtle
-                            font.family: KP.fontMono
-                            font.pixelSize: KP.fontXS
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignBottom
-                        }
-                    }
-                }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: KP.hairline
+            }
+        }
+
+        // ---- Frames
+        Flickable {
+            id: frameFlick
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            contentWidth: Math.max(width, frameRow.width + 2 * KP.gapM)
+            contentHeight: height
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.horizontal: KpScrollBar {
+                policy: frameFlick.contentWidth > frameFlick.width ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+            }
+
+            Item {
+                id: frameRow
+                x: KP.gapM
+                width: panel.timeline.frameCount * 26 + 8
+                height: frameFlick.height
+
+                // Number rail
                 Row {
-                    id: frameRow
-                    y: ruler.height + 2
-                    height: 36
+                    id: numbers
+                    y: KP.gapS
                     Repeater {
-                        model: Workspace.timeline.frameCount
-                        Rectangle {
+                        model: panel.timeline.frameCount
+                        Text {
+                            required property int index
+                            width: 26
+                            height: 14
+                            text: index + 1
+                            color: index === panel.timeline.currentFrame ? KP.textAccent : KP.textSubtle
+                            font.pixelSize: KP.fontMicro
+                            font.family: KP.fontMono
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+
+                // Cells: the first frame holds the drawing in this build, and
+                // every cell is a real target for the current-frame value.
+                Row {
+                    id: cells
+                    y: KP.gapS + 18
+                    Repeater {
+                        model: panel.timeline.frameCount
+                        AbstractButton {
+                            id: cell
+                            required property int index
                             width: 24
-                            height: 36
-                            x: model.index * 26 + 4
-                            color: model.index === Workspace.timeline.currentFrame ? KP.toolActive : (model.index % 2 === 0 ? KP.paneBgAlt : KP.paneBg)
-                            border.color: KP.border
-                            radius: KP.radiusS
-                            Text {
-                                anchors.centerIn: parent
-                                text: model.index === 0 ? "●" : ""
-                                font.pixelSize: 12
-                                color: KP.textMuted
+                            height: Math.max(24, frameFlick.height - KP.gapS - 26)
+                            hoverEnabled: true
+                            focusPolicy: Qt.NoFocus
+                            Accessible.name: qsTr("Frame %1").arg(index + 1)
+                            onClicked: panel.timeline.currentFrame = index
+
+                            background: Rectangle {
+                                color: "transparent"
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.rightMargin: 2
+                                    radius: KP.radiusS
+                                    color: cell.index === panel.timeline.currentFrame ? KP.rowSelected
+                                         : cell.hovered ? KP.hoverOverlay
+                                         : (cell.index % 2 === 0 ? KP.paneBgAlt : "transparent")
+                                    border.width: cell.index === panel.timeline.currentFrame ? 1 : 0
+                                    border.color: KP.ember
+                                }
                             }
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: Workspace.timeline.currentFrame = model.index
+                            contentItem: Item {
+                                Rectangle {
+                                    visible: cell.index === 0
+                                    anchors.centerIn: parent
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: cell.index === panel.timeline.currentFrame ? KP.text : KP.textMuted
+                                }
                             }
                         }
                     }
                 }
-                // Playhead indicator
+
+                // Playhead
                 Rectangle {
-                    x: 4 + Workspace.timeline.currentFrame * 26 + 8 - 1
-                    y: ruler.height
-                    width: 2
-                    height: 36 + 4
-                    color: KP.accent
+                    x: panel.timeline.currentFrame * 26
+                    y: KP.gapS - 2
+                    width: 1
+                    height: frameFlick.height - KP.gapS
+                    color: KP.ember
+                    opacity: 0.85
                 }
             }
         }

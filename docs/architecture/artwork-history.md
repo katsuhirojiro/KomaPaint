@@ -11,20 +11,25 @@ Undo and redo stage all replacement tiles and dirty invalidations before
 committing any pixel changes. If staging, tracking or a layer pixel budget fails,
 artwork and the history cursor remain unchanged and the user is notified. Tile
 notifications invalidate the viewport after commit. A stroke may hit the
-history or tile limit after applying earlier pixels: those pixels remain as one
-undoable command and the user is notified. If cancellation cannot be staged,
-the partial stroke is likewise kept as an undoable command instead of silently
-losing its history. Painting is not atomic as a whole; undo/redo restoration is.
+history or tile limit after applying earlier pixels: the recorded stroke is
+rolled back and the user is notified. The tested rollback restores captured
+pixels, tile existence and dirty state without allocating; it is not a proof
+of safety for every callback or platform allocation failure. See
+`stage-2-resource-foundation.md` for current boundaries.
 
 ## Memory and lifecycle
 
-The initial history budget is 64 MiB. It conservatively charges two full tile
-buffers plus 512 bytes per touched tile, even if a tile was initially absent.
-This bounds recorded data but not all allocator overhead or temporary buffers
-needed while staging undo/redo. The storage limit remains 256 MiB **per layer**,
-not a document-wide limit. Composite caches, the viewport, undo staging, other
-layers and Qt allocations are not accounted together. A shared document-wide
-budget remains required before production use. If the history is full, drawing
+There is no fixed history byte or step limit. Before painting, the recorder
+reserves the touched tile's rollback and redo pixel buffers. At commit it tries
+compact lossless records; if optional encoding cannot be admitted or allocated,
+the already-reserved snapshots remain valid as a fallback. Major reservations
+consult current system memory availability and the existing shared document
+budget. A failed admission or allocation cancels the affected stroke rather
+than dropping retained history. On Windows the check uses available physical
+and commit memory and the OS low-memory signal; Linux uses available memory and,
+when visible, the cgroup-v2 root limit. This check is advisory, not a guarantee
+that an allocation will succeed, and cannot account for all memory. The existing
+256 MiB per-layer pixel safeguard remains. If resources are exhausted, drawing
 stops rather than silently dropping undo; the Edit menu offers an explicit,
 confirmed clear-history action which preserves artwork. Redo entries continue
 to count until a new stroke commits or history is cleared.
@@ -41,3 +46,5 @@ untracked mutation of artwork can make older tile snapshots inappropriate.
 Artwork can be saved and reopened as a `.koma` illustration (see
 file-format.md); history is never serialized and always starts empty after
 opening. There is no crash-recovery journal.
+
+The codec integration, limit audit, accounting caveats and remaining gates are described in `compact-history-experiment.md`.
