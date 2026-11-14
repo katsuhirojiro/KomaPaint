@@ -355,7 +355,7 @@ KpDialog {
                 // On failure the dialog stays open and the status box below the
                 // form shows Workspace.creationError (see onCreationErrorChanged).
             }
-        },
+        }
     ]
 
 
