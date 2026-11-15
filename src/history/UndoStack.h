@@ -1,5 +1,6 @@
 #pragma once
 #include "../canvas/SparseTileStore.h"
+#include "../material/MaterialTileStore.h"
 #include "HistoryTileCodec.h"
 #include <QObject>
 #include <QPointer>
