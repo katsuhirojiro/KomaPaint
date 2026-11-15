@@ -76,6 +76,9 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     round.releaseRate = 0.075;
     round.pressureTransfer = 0.62;
     round.waterSpread = 0.14;
+    round.pickupRate = 0.08;
+    round.paintLiftability = 0.24;
+    round.rewetting = 0.18;
     round.toothResponse = 0.12;
     result.push_back(round);
 
@@ -86,6 +89,7 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     dry.releaseRate = 0.034;
     dry.pressureTransfer = 0.78;
     dry.waterSpread = 0.04;
+    dry.pickupRate = 0.025;
     dry.toothResponse = 0.88;
     dry.edgeAccumulation = 0.12;
     result.push_back(dry);
@@ -95,6 +99,9 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     tiny.releaseRate = 0.028;
     tiny.pressureTransfer = 0.82;
     tiny.waterSpread = 0.08;
+    tiny.pickupRate = 0.05;
+    tiny.paintLiftability = 0.2;
+    tiny.rewetting = 0.12;
     tiny.toothResponse = 0.05;
     result.push_back(tiny);
 
@@ -104,6 +111,9 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     watercolorRound.pressureTransfer = 0.68;
     watercolorRound.waterSpread = 0.82;
     watercolorRound.pigmentDiffusion = 0.74;
+    watercolorRound.pickupRate = 0.18;
+    watercolorRound.paintLiftability = 0.42;
+    watercolorRound.rewetting = 0.36;
     watercolorRound.edgeAccumulation = 0.25;
     watercolorRound.granulationResponse = 0.15;
     result.push_back(watercolorRound);
@@ -115,6 +125,9 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     mop.pressureTransfer = 0.55;
     mop.waterSpread = 0.95;
     mop.pigmentDiffusion = 0.90;
+    mop.pickupRate = 0.18;
+    mop.paintLiftability = 0.38;
+    mop.rewetting = 0.28;
     result.push_back(mop);
 
     auto granulatingBrush = brush("granulating-watercolour", "Granulating Watercolour",
@@ -123,6 +136,9 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     granulatingBrush.waterSpread = 0.88;
     granulatingBrush.pigmentDiffusion = 0.82;
     granulatingBrush.granulationResponse = 0.92;
+    granulatingBrush.pickupRate = 0.08;
+    granulatingBrush.paintLiftability = 0.18;
+    granulatingBrush.rewetting = 0.12;
     granulatingBrush.toothResponse = 0.74;
     result.push_back(granulatingBrush);
 

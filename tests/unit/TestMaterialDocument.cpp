@@ -88,7 +88,11 @@ void TestMaterialDocument::nativeSaveOpenRetainsMaterialAndDigitalPlane()
     QCOMPARE(layer->tiles().setPixel({1, 1}, 0xff17385aU), SparseTileStore::WriteResult::Changed);
 
     PaintBatch first = makeResidualPaint(0xffa54b35U, 0.8, 0.3, 0.2, "gouache");
+    first.drying = 0.37;
+    first.settling = 0.61;
     PaintBatch second = first;
+    second.drying = 0.82;
+    second.settling = 0.13;
     second.pigments.front().mass -= 1e-8;
     QVERIFY(second.addPigment("PY3", 1e-8));
     QCOMPARE(layer->materialTiles().setBatch({25, 20}, first), MaterialTileStore::Result::Changed);
@@ -131,6 +135,10 @@ void TestMaterialDocument::nativeSaveOpenRetainsMaterialAndDigitalPlane()
     QCOMPARE(firstBatch->pigments.size(), std::size_t(1));
     QCOMPARE(secondBatch->pigments.size(), std::size_t(2));
     QVERIFY(firstBatch->mediumId == "gouache");
+    QCOMPARE(firstBatch->drying, first.drying);
+    QCOMPARE(firstBatch->settling, first.settling);
+    QCOMPARE(secondBatch->drying, second.drying);
+    QCOMPARE(secondBatch->settling, second.settling);
     QVERIFY(secondBatch->pigments[1].pigmentId == "PY3");
     QVERIFY(!reopened->isModified());
 }

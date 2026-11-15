@@ -175,8 +175,15 @@ const MediumProfile kInk{
     "ink", "Ink", 0.31, 0.58, 0.80, 0.62,
     0.52, 0.42, 0.82, 0.35, 0.24, 0.91, 0.12
 };
-const SurfaceProfile kPaper{"absorbent-paper", 0.82, 0.62, 0.18, 0.0};
-const SurfaceProfile kPalette{"non-absorbent-palette", 0.02, 0.15, 0.02, 0.98};
+const SurfaceProfile kHotPressed{"hot-press", 0.34, 0.14, 0.08, 0.0,
+    0.32, 0.78, 0.98, 0.94, 0.78, 0.82, 0.08, 0.42};
+const SurfaceProfile kColdPressed{"cold-press", 0.62, 0.58, 0.42, 0.0,
+    0.56, 0.62, 0.92, 0.91, 0.54, 1.0, 0.28, 0.58};
+const SurfaceProfile kRoughPaper{"rough-paper", 0.82, 0.9, 0.82, 0.0,
+    0.84, 0.46, 0.84, 0.86, 0.36, 1.28, 0.48, 0.46};
+const SurfaceProfile kPaper = kColdPressed;
+const SurfaceProfile kPalette{"non-absorbent-palette", 0.02, 0.15, 0.02, 0.98,
+    0.01, 0.96, 0.98, 0.99, 0.94, 0.18, 0.02, 0.9};
 
 std::uint32_t blendPremultiplied(std::uint32_t dst, std::uint32_t srcStraight,
                                  double alpha) noexcept
@@ -268,7 +275,18 @@ const PigmentDefinition* PigmentLibrary::find(const std::string& id) const noexc
 const MediumProfile& gouacheProfile() noexcept { return kGouache; }
 const MediumProfile& watercolourProfile() noexcept { return kWatercolour; }
 const MediumProfile& inkProfile() noexcept { return kInk; }
+
+const MediumProfile* findMediumProfile(const std::string& id) noexcept
+{
+    if (id == kGouache.id) return &kGouache;
+    if (id == kWatercolour.id) return &kWatercolour;
+    if (id == kInk.id) return &kInk;
+    return nullptr;
+}
 const SurfaceProfile& absorbentPaper() noexcept { return kPaper; }
+const SurfaceProfile& hotPressedPaper() noexcept { return kHotPressed; }
+const SurfaceProfile& coldPressedPaper() noexcept { return kColdPressed; }
+const SurfaceProfile& roughPaper() noexcept { return kRoughPaper; }
 const SurfaceProfile& nonAbsorbentPalette() noexcept { return kPalette; }
 
 double PaintBatch::pigmentMass() const noexcept
@@ -295,7 +313,9 @@ bool PaintBatch::valid() const noexcept
 {
     if (mediumId.empty() || !finiteNonnegative(water) || !finiteNonnegative(binder)
         || !finiteNonnegative(filler) || !std::isfinite(wetness) || wetness < 0 || wetness > 1
-        || !std::isfinite(consistency) || consistency < 0 || consistency > 1) return false;
+        || !std::isfinite(consistency) || consistency < 0 || consistency > 1
+        || !std::isfinite(drying) || drying < 0 || drying > 1
+        || !std::isfinite(settling) || settling < 0 || settling > 1) return false;
     for (const auto& p : pigments)
         if (!finiteNonnegative(p.mass) || p.mass == 0 || (p.pigmentId.empty() && p.residualArgb == 0)) return false;
     return true;
@@ -303,7 +323,16 @@ bool PaintBatch::valid() const noexcept
 
 void PaintBatch::addWater(double quantity)
 {
-    if (finiteNonnegative(quantity)) { water += quantity; refreshBatchState(*this); }
+    if (finiteNonnegative(quantity)) {
+        const double solids = pigmentMass() + binder + filler;
+        if (quantity > 0.0 && solids > 0.0) {
+            const double rewet = clamp01(quantity / (solids + quantity));
+            drying *= 1.0 - rewet * 0.65;
+            settling *= 1.0 - rewet * 0.25;
+        }
+        water += quantity;
+        refreshBatchState(*this);
+    }
 }
 void PaintBatch::addBinder(double quantity)
 {
@@ -366,6 +395,9 @@ PaintBatch mix(const PaintBatch& a, const PaintBatch& b, const std::string& resu
         / std::max(1e-12, a.totalMass() + b.totalMass());
     result.consistency = (a.consistency * a.totalMass() + b.consistency * b.totalMass())
         / std::max(1e-12, a.totalMass() + b.totalMass());
+    const double total = std::max(1e-12, a.totalMass() + b.totalMass());
+    result.drying = clamp01((a.drying * a.totalMass() + b.drying * b.totalMass()) / total);
+    result.settling = clamp01((a.settling * a.totalMass() + b.settling * b.totalMass()) / total);
     refreshBatchState(result);
     return result;
 }
@@ -571,12 +603,17 @@ OpticalResult MaterialEngine::opticalResult(const PaintBatch& paint,
     for (int c = 0; c < 3; ++c) rgb[c] = norms[c] > 0 ? rgb[c] / norms[c] : 1.0;
     const double concentration = clamp01(pigmentMass / totalMass);
     const double binderRatio = clamp01(paint.binder / totalMass);
+    const double waterFraction = clamp01(paint.water / totalMass);
+    const double wetTransparency = 1.0 - waterFraction * clamp01(medium.waterSpread) * 0.34;
+    const double dryFilmDensity = 0.82 + clamp01(paint.drying) * 0.18;
     const double thickness = std::max(0.0, filmMass) * (0.25 + concentration * 2.2)
         * (0.65 + clamp01(medium.viscosity) * 0.55)
-        * (0.7 + clamp01(paint.consistency) * 0.45);
+        * (0.7 + clamp01(paint.consistency) * 0.45) * wetTransparency * dryFilmDensity;
     const double mediumFactor = (0.18 + clamp01(medium.hidingPower) * 1.8)
         * (0.72 + binderRatio * clamp01(medium.binderResponse));
-    const double substrateRetention = 0.55 + clamp01(surface.absorbency) * 0.8;
+    const double substrateRetention = (0.55 + clamp01(surface.absorbency) * 0.8)
+        * (0.72 + clamp01(surface.pigmentRetention) * 0.28)
+        * (0.96 - clamp01(surface.porosity) * 0.08);
     const double alpha = 1.0 - std::exp(-thickness * mediumFactor * substrateRetention);
     out.straightArgb = packStraight(rgb[0], rgb[1], rgb[2], 1.0);
     out.alpha = clamp01(alpha);
@@ -586,8 +623,9 @@ OpticalResult MaterialEngine::opticalResult(const PaintBatch& paint,
             weightedGranulation += p->granulation * component.mass;
     }
     out.granulation = clamp01(weightedGranulation / pigmentMass
-                              * (0.35 + surface.tooth * 0.65)
-                              * (0.35 + medium.pigmentSuspension * 0.65));
+                              * (0.25 + surface.tooth * 0.55 + surface.roughness * 0.20)
+                              * (0.35 + medium.pigmentSuspension * 0.65)
+                              * (1.0 + clamp01(paint.settling) * 0.45));
     return out;
 }
 
@@ -605,6 +643,167 @@ std::uint32_t MaterialEngine::composite(std::uint32_t destinationPremultiplied,
     const double effectiveAlpha = optical.alpha * clamp01(coverage) * contact
         * (0.42 + surfaceRetention * 0.58);
     return blendPremultiplied(destinationPremultiplied, optical.straightArgb, effectiveAlpha);
+}
+
+MaterialSimulationStats MaterialEngine::advanceWetMaterial(MaterialTileStore& store,
+                                                            double elapsedSeconds,
+                                                            const SurfaceProfile& surface) const
+{
+    MaterialSimulationStats stats;
+    if (!store.isValid() || !std::isfinite(elapsedSeconds) || elapsedSeconds < 0.0) {
+        stats.failed = true;
+        return stats;
+    }
+    const double dt = std::min(elapsedSeconds, 60.0);
+    if (dt <= 0.0) return stats;
+    try {
+        const auto activeTiles = store.activeTilePoints();
+        stats.activeTiles = activeTiles.size();
+        for (const TilePoint tile : activeTiles) {
+            const auto view = store.tileEntries(tile);
+            const std::vector<MaterialEntry> entries(view.begin(), view.end());
+            store.beginBatch();
+            struct BatchEnd { MaterialTileStore& store; ~BatchEnd() { store.endBatch(); } } batchEnd{store};
+            const auto& geometry = store.geometry();
+            const auto tileSize = static_cast<std::int64_t>(geometry.tileSize());
+            for (const auto& entry : entries) {
+                if (entry.cell.water <= 1.0e-7F || entry.cell.drying >= 0.9999F) continue;
+                if (entry.localIndex >= static_cast<std::size_t>(geometry.tileSize())
+                        * static_cast<std::size_t>(geometry.tileSize())) continue;
+                const TilePoint point{
+                    tile.x * tileSize + static_cast<std::int64_t>(entry.localIndex % static_cast<std::size_t>(geometry.tileSize())),
+                    tile.y * tileSize + static_cast<std::int64_t>(entry.localIndex / static_cast<std::size_t>(geometry.tileSize()))};
+                auto maybeBatch = store.batchAt(point);
+                if (!maybeBatch || !maybeBatch->valid()) { stats.failed = true; return stats; }
+                PaintBatch batch = std::move(*maybeBatch);
+                const double originalWater = batch.water;
+                if (originalWater <= 1.0e-7 || batch.totalMass() <= 1.0e-12) continue;
+                ++stats.cellsVisited;
+                const MediumProfile* medium = findMediumProfile(batch.mediumId);
+                if (!medium) medium = &gouacheProfile();
+                const double porousAbsorption = clamp01(surface.absorbency) * clamp01(surface.porosity);
+                // Two distinct sinks act on water: absorption into porous stock
+                // and evaporation from the exposed film. Exponential integration
+                // is stable for large lazy catch-up intervals.
+                const double evaporationRate = std::max(0.0, medium->dryingRate)
+                    * (0.008 + clamp01(surface.dryingAcceleration) * 0.010
+                       + clamp01(surface.roughness) * 0.004);
+                const double absorptionRate = porousAbsorption
+                    * (0.012 + clamp01(medium->absorption) * 0.015);
+                const double waterSurvival = std::exp(-(evaporationRate + absorptionRate) * dt);
+                batch.water = originalWater * waterSurvival;
+                stats.waterEvaporated += originalWater * (1.0 - std::exp(-evaporationRate * dt));
+                const double cureRate = evaporationRate * (0.35 + clamp01(surface.dryingAcceleration) * 0.4)
+                    + absorptionRate * 0.22;
+                batch.drying = clamp01(1.0 - (1.0 - batch.drying) * std::exp(-cureRate * dt));
+
+                double settlingTendency = 0.0;
+                const double pigmentMass = batch.pigmentMass();
+                if (pigmentMass > 1.0e-12) {
+                    for (const auto& component : batch.pigments) {
+                        const auto* pigment = component.pigmentId.empty()
+                            ? nullptr : m_pigments.find(component.pigmentId);
+                        settlingTendency += component.mass * (pigment ? pigment->settling : 0.25);
+                    }
+                    settlingTendency = clamp01(settlingTendency / pigmentMass);
+                }
+                const double liquidFraction = clamp01(originalWater / std::max(1.0e-12, batch.totalMass()));
+                const double settleRate = settlingTendency * (1.0 - clamp01(medium->pigmentSuspension))
+                    * liquidFraction * (0.008 + clamp01(surface.tooth) * 0.016);
+                batch.settling = clamp01(1.0 - (1.0 - batch.settling) * std::exp(-settleRate * dt));
+                if (batch.water <= std::max(1.0e-6, (pigmentMass + batch.binder + batch.filler) * 1.0e-5)) {
+                    batch.water = 0.0;
+                    batch.drying = 1.0;
+                }
+                refreshBatchState(batch);
+                if (batch.water != originalWater || batch.drying != entry.cell.drying
+                    || batch.settling != entry.cell.settling) {
+                    const auto result = store.setBatch(point, batch);
+                    if (result != MaterialTileStore::Result::Changed
+                        && result != MaterialTileStore::Result::Unchanged) {
+                        stats.failed = true;
+                        return stats;
+                    }
+                    if (result == MaterialTileStore::Result::Changed) ++stats.cellsChanged;
+                }
+            }
+        }
+
+        // Conservative pairwise flow over sparse active cells. The cell list is
+        // tile-local and already sorted; only its right and lower neighbours are
+        // visited, so each edge is handled once and tile boundaries work the
+        // same as interior boundaries. Wetness drives spreading; vertical
+        // settling and paper edge response bias suspended pigment transport.
+        for (const TilePoint tile : activeTiles) {
+            const auto view = store.tileEntries(tile);
+            const std::vector<MaterialEntry> entries(view.begin(), view.end());
+            store.beginBatch();
+            struct BatchEnd { MaterialTileStore& store; ~BatchEnd() { store.endBatch(); } } batchEnd{store};
+            const auto& geometry = store.geometry();
+            const auto tileSize = static_cast<std::int64_t>(geometry.tileSize());
+            for (const auto& entry : entries) {
+                if (entry.cell.water <= 1.0e-7F || entry.cell.drying >= 0.9999F) continue;
+                const TilePoint point{
+                    tile.x * tileSize + static_cast<std::int64_t>(entry.localIndex % static_cast<std::size_t>(geometry.tileSize())),
+                    tile.y * tileSize + static_cast<std::int64_t>(entry.localIndex / static_cast<std::size_t>(geometry.tileSize()))};
+                const auto source = store.batchAt(point);
+                if (!source || source->water <= 1.0e-7 || source->drying >= 0.9999) continue;
+                const MediumProfile* medium = findMediumProfile(source->mediumId);
+                if (!medium) medium = &gouacheProfile();
+                const double sourcePotential = source->wetness * (0.25 + clamp01(medium->waterSpread))
+                    * (1.0 - clamp01(surface.flowResistance)) * (1.0 - source->drying);
+                for (const TilePoint offset : {TilePoint{1, 0}, TilePoint{0, 1}}) {
+                    const TilePoint neighbour{point.x + offset.x, point.y + offset.y};
+                    if (!geometry.address(neighbour)) continue;
+                    const auto target = store.batchAt(neighbour);
+                    if (!target) { stats.failed = true; return stats; }
+                    const MediumProfile* targetMedium = findMediumProfile(target->mediumId);
+                    if (!targetMedium) targetMedium = medium;
+                    const double targetPotential = target->totalMass() > 0.0
+                        ? target->wetness * (0.25 + clamp01(targetMedium->waterSpread))
+                            * (1.0 - clamp01(surface.flowResistance)) * (1.0 - target->drying)
+                        : 0.0;
+                    double gradient = sourcePotential - targetPotential;
+                    if (offset.y > 0)
+                        gradient += source->settling * 0.12 * (1.0 - clamp01(medium->pigmentSuspension));
+                    if (std::abs(gradient) <= 1.0e-5) continue;
+                    const bool sourceDonor = gradient > 0.0;
+                    const TilePoint donorPoint = sourceDonor ? point : neighbour;
+                    const TilePoint receiverPoint = sourceDonor ? neighbour : point;
+                    const PaintBatch& donor = sourceDonor ? *source : *target;
+                    const double mobility = clamp01(1.0 - donor.drying);
+                    const double edgeBoost = 1.0 + clamp01(surface.edgeAccumulation) * std::abs(gradient) * 1.5;
+                    const double fraction = std::min(0.12, std::abs(gradient) * dt
+                        * (0.025 + clamp01(medium->waterSpread) * 0.05)
+                        * mobility * edgeBoost);
+                    const double movedMass = donor.totalMass() * fraction;
+                    if (movedMass <= 1.0e-8) continue;
+                    PaintBatch moved;
+                    const auto removed = store.take(donorPoint, movedMass, &moved);
+                    if (removed != MaterialTileStore::Result::Changed) continue;
+                    const auto deposited = store.deposit(receiverPoint, moved);
+                    if (deposited != MaterialTileStore::Result::Changed
+                        && deposited != MaterialTileStore::Result::Unchanged) {
+                        // Keep a failed transfer conservative. The source cell
+                        // is still allocated, so put its batch back before
+                        // reporting that this simulation tick was incomplete.
+                        store.deposit(donorPoint, moved);
+                        stats.failed = true;
+                        return stats;
+                    }
+                    if (deposited == MaterialTileStore::Result::Changed) {
+                        ++stats.transfers;
+                        stats.materialMoved += movedMass;
+                    }
+                }
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        stats.failed = true;
+    } catch (const std::length_error&) {
+        stats.failed = true;
+    }
+    return stats;
 }
 
 SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
@@ -772,11 +971,84 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
     for (auto y = top; y < bottom; ++y)
         for (auto x = left; x < right; ++x) contactWeight += contactAt(x, y).first;
     if (contactWeight <= 0.0) return Result::Unchanged;
+    store.beginBatch();
+    struct BatchEnd { MaterialTileStore& store; ~BatchEnd() { store.endBatch(); } } batchEnd{store};
+    bool pickedUp = false;
+    const double brushMass = reservoir.quantity();
+    const double brushWaterFraction = brushMass > 0.0 ? reservoir.batch().water / brushMass : 0.0;
+    const double pickupBudget = std::min(reservoir.remainingCapacity(),
+        brush.pickupRate * (contactWeight / 64.0) * 0.12 * (0.2 + brushWaterFraction));
+    if (pickupBudget > 1.0e-9) {
+        double distributed = 0.0;
+        for (auto y = top; y < bottom; ++y) {
+            for (auto x = left; x < right; ++x) {
+                const double dx = double(x) + 0.5 - centerX;
+                const double dy = double(y) + 0.5 - centerY;
+                const double u = (ca * dx + sa * dy) / std::max(0.5, rx);
+                const double v = (-sa * dx + ca * dy) / std::max(0.5, ry);
+                const double radial = u * u + v * v;
+                if (radial > 1.0) continue;
+                double contact = clamp01(1.0 - radial);
+                if (brush.tip == TipGeometry::Flat || brush.tip == TipGeometry::Spatula)
+                    contact = clamp01((1.0 - std::abs(v)) * 2.0) * clamp01((1.1 - std::abs(u)) * 2.0);
+                else if (brush.tip == TipGeometry::Bristle && brush.bristleCount > 0) {
+                    const double spacing = 2.0 / double(brush.bristleCount);
+                    const double nearest = std::abs(std::remainder(u + 1.0, spacing));
+                    const double bristleWidth = std::max(0.02, spacing * (0.32 + brush.bristleSpread * 0.4));
+                    contact *= nearest < bristleWidth ? clamp01(1.0 - nearest / bristleWidth * 0.2) : 0.08;
+                } else if (brush.tip == TipGeometry::Mop) {
+                    contact = std::sqrt(std::max(0.0, contact));
+                }
+                if (contact <= 0.0) continue;
+                const TilePoint point{static_cast<std::int64_t>(x), static_cast<std::int64_t>(y)};
+                const auto prior = store.batchAt(point);
+                if (!prior || prior->totalMass() <= 1.0e-9) continue;
+                const MediumProfile* priorMedium = findMediumProfile(prior->mediumId);
+                if (!priorMedium) priorMedium = &m_medium;
+                double staining = 0.0;
+                const double priorPigment = prior->pigmentMass();
+                if (priorPigment > 1.0e-12) {
+                    for (const auto& component : prior->pigments) {
+                        const auto* pigment = component.pigmentId.empty()
+                            ? nullptr : m_engine.pigments().find(component.pigmentId);
+                        staining += component.mass * (pigment ? pigment->staining : 0.5);
+                    }
+                    staining = clamp01(staining / priorPigment);
+                }
+                const double wetMobility = prior->wetness * priorMedium->waterSpread
+                    * (1.0 - prior->drying) * (1.0 - m_surface.flowResistance);
+                const double rewetMobility = brushWaterFraction * brush.rewetting
+                    * priorMedium->rewetting * m_surface.rewetting
+                    * brush.paintLiftability * (1.0 - brush.staining)
+                    * (1.0 - staining) * (0.15 + prior->drying);
+                const double mobility = clamp01(std::max(wetMobility, rewetMobility));
+                if (mobility <= 1.0e-5) continue;
+                const double amount = std::min(prior->totalMass() * 0.35,
+                    pickupBudget * (contact / contactWeight) * mobility * (0.25 + input.pressure));
+                if (amount <= 1.0e-9) continue;
+                PaintBatch lifted;
+                const auto takeResult = store.take(point, amount, &lifted);
+                if (takeResult == MaterialTileStore::Result::Changed) {
+                    const double liftedMass = lifted.totalMass();
+                    if (reservoir.pickup(lifted, liftedMass)) {
+                        pickedUp = true;
+                        distributed += liftedMass;
+                    } else {
+                        store.deposit(point, lifted);
+                    }
+                } else if (takeResult != MaterialTileStore::Result::Unchanged) {
+                    return Result::AllocationFailed;
+                }
+            }
+        }
+        (void)distributed;
+    }
+
     const double requested = reservoir.transferredAmount(brush, input, contactWeight / 64.0);
-    if (requested <= 0.0) return Result::Unchanged;
+    if (requested <= 0.0) return pickedUp ? Result::Changed : Result::Unchanged;
     PaintBatch transferred = reservoir.withdraw(requested);
     const double transferredMass = transferred.totalMass();
-    if (transferredMass <= 0.0) return Result::Unchanged;
+    if (transferredMass <= 0.0) return pickedUp ? Result::Changed : Result::Unchanged;
 
     const double particleGranulation = m_engine.opticalResult(transferred, m_medium, m_surface).granulation;
     const auto weightAt = [&](std::int64_t x, std::int64_t y, double contact, double radial) {
@@ -802,9 +1074,7 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
         return Result::InvalidPixel;
     }
 
-    store.beginBatch();
-    struct BatchEnd { MaterialTileStore& store; ~BatchEnd() { store.endBatch(); } } batchEnd{store};
-    bool changed = false;
+    bool changed = pickedUp;
     Result failure = Result::Unchanged;
     for (auto y = top; y < bottom; ++y) {
         for (auto x = left; x < right; ++x) {
@@ -813,7 +1083,34 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
             if (weight <= 0.0) continue;
             PaintBatch part = transferred;
             part.scale(weight / totalWeight);
-            const auto result = store.deposit({x, y}, part);
+            // Absorption into a porous sheet removes liquid from the paint
+            // phase; pigment and binder retention independently control what
+            // remains in the material cell.
+            const double absorption = clamp01(m_surface.absorbency)
+                * clamp01(m_surface.porosity) * clamp01(m_medium.absorption);
+            part.water *= clamp01(m_surface.waterRetention) * (1.0 - 0.45 * absorption);
+            const double pigmentRetained = clamp01(m_surface.pigmentRetention)
+                * (1.0 - clamp01(m_surface.porosity) * 0.08);
+            for (auto& pigment : part.pigments) pigment.mass *= pigmentRetained;
+            part.binder *= clamp01(m_surface.binderRetention);
+            part.filler *= clamp01(m_surface.pigmentRetention);
+            refreshBatchState(part);
+            const TilePoint point{static_cast<std::int64_t>(x), static_cast<std::int64_t>(y)};
+            const auto prior = store.batchAt(point);
+            if (prior && prior->totalMass() > 0.0 && part.water > 0.0) {
+                PaintBatch reworked = *prior;
+                const double wetting = clamp01((part.water / std::max(1.0e-12, part.totalMass()))
+                    * m_medium.rewetting * brush.rewetting * m_surface.rewetting);
+                reworked.drying *= 1.0 - wetting;
+                reworked.settling *= 1.0 - wetting * 0.35;
+                const auto stateResult = store.setBatch(point, reworked);
+                if (stateResult != MaterialTileStore::Result::Changed
+                    && stateResult != MaterialTileStore::Result::Unchanged) {
+                    failure = Result::AllocationFailed;
+                    break;
+                }
+            }
+            const auto result = store.deposit(point, part);
             if (result == MaterialTileStore::Result::Changed) changed = true;
             else if (result != MaterialTileStore::Result::Unchanged) {
                 switch (result) {

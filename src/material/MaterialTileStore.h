@@ -27,6 +27,8 @@ struct MaterialCell {
     float filler = 0.0F;
     float wetness = 0.0F;
     float consistency = 0.0F;
+    float drying = 1.0F;
+    float settling = 0.0F;
     bool empty() const noexcept;
     bool operator==(const MaterialCell&) const = default;
 };
@@ -72,7 +74,11 @@ public:
     bool acknowledgeDirty(TilePoint tile, std::uint64_t version) noexcept { return m_dirty.acknowledge(tile, version); }
     std::size_t allocatedTiles() const noexcept { return m_tiles.size(); }
     std::vector<TilePoint> allocatedTilePoints() const;
-    std::size_t allocatedBytes() const noexcept { return m_allocatedBytes + m_compositionBytes; }
+    std::vector<TilePoint> activeTilePoints() const;
+    std::size_t allocatedBytes() const noexcept {
+        return m_allocatedBytes + m_compositionBytes
+            + m_activeTileBytes;
+    }
     std::shared_ptr<DocumentMemoryBudget> documentBudget() const noexcept { return m_budget; }
     bool setDocumentBudget(std::shared_ptr<DocumentMemoryBudget> budget) noexcept;
     bool resizeEmpty(std::int64_t width, std::int64_t height) noexcept;
@@ -87,6 +93,10 @@ public:
     Result setBatch(TilePoint point, const PaintBatch& paint);
     Result scaleCell(TilePoint point, double factor);
     Result erase(TilePoint point);
+    // Remove up to amount of the local material while preserving its complete
+    // pigment composition and medium identity in removed. Used for brush pickup
+    // and conservative wet-flow transfers.
+    Result take(TilePoint point, double amount, PaintBatch* removed);
     MaterialTileSnapshot snapshot(TilePoint tile) const;
     Result restoreTiles(std::span<const MaterialTileSnapshot> snapshots, bool notify = true);
     // Import only into an empty store before material tile data. Composition
@@ -101,7 +111,11 @@ public:
 
 private:
     struct Hash { std::size_t operator()(TilePoint p) const noexcept; };
-    struct Tile { std::vector<MaterialEntry> entries; std::size_t chargedBytes = 0; };
+    struct Tile {
+        std::vector<MaterialEntry> entries;
+        std::size_t chargedBytes = 0;
+        std::size_t activeCells = 0;
+    };
     std::optional<std::size_t> intern(const PaintBatch& paint, bool* inserted);
     Result write(TilePoint point, const PaintBatch& paint, bool combine);
     Result writeCell(TilePoint point, const MaterialCell& cell);
@@ -117,6 +131,10 @@ private:
     DirtyTileTracker m_dirty;
     std::shared_ptr<DocumentMemoryBudget> m_budget;
     std::unordered_map<TilePoint, Tile, Hash> m_tiles;
+    // Sorted active tile list: timer ticks visit wet tiles only and do not scan
+    // the whole allocated-tile map or any dry regions.
+    std::vector<TilePoint> m_activeTiles;
+    std::size_t m_activeTileBytes = 0;
     std::vector<MaterialComposition> m_compositions; // index zero is the empty sentinel
     std::vector<std::size_t> m_compositionHashes;
     std::unordered_multimap<std::size_t, std::size_t> m_compositionIndex;

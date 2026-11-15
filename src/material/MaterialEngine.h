@@ -61,6 +61,7 @@ struct MediumProfile {
 const MediumProfile& gouacheProfile() noexcept;
 const MediumProfile& watercolourProfile() noexcept;
 const MediumProfile& inkProfile() noexcept;
+const MediumProfile* findMediumProfile(const std::string& id) noexcept;
 
 // An identified component has a pigmentId and no residual colour. An
 // arbitrary RGB colour uses an empty id plus residualArgb, explicitly marking
@@ -79,6 +80,10 @@ struct PaintBatch {
     double filler = 0.0;
     double wetness = 1.0;
     double consistency = 0.5;
+    // Persistent process state: drying progresses from wet (0) to equilibrated
+    // dry film (1); settling records the suspended-pigment fraction deposited.
+    double drying = 0.0;
+    double settling = 0.0;
 
     double pigmentMass() const noexcept;
     double totalMass() const noexcept;
@@ -159,6 +164,7 @@ public:
     explicit BrushReservoir(double capacity = 1.0);
     double capacity() const noexcept { return m_capacity; }
     double quantity() const noexcept { return m_batch.totalMass(); }
+    double remainingCapacity() const noexcept { const double remaining = m_capacity - quantity(); return remaining > 0.0 ? remaining : 0.0; }
     double fillRatio() const noexcept;
     double availablePigment() const noexcept { return m_batch.pigmentMass(); }
     const PaintBatch& batch() const noexcept { return m_batch; }
@@ -184,9 +190,20 @@ struct SurfaceProfile {
     double tooth = 0.5;
     double roughness = 0.0;
     double paletteNonAbsorbency = 0.0;
+    double porosity = 0.5;
+    double waterRetention = 0.7;
+    double pigmentRetention = 0.9;
+    double binderRetention = 0.9;
+    double flowResistance = 0.5;
+    double dryingAcceleration = 1.0;
+    double edgeAccumulation = 0.2;
+    double rewetting = 0.5;
 };
 
 const SurfaceProfile& absorbentPaper() noexcept;
+const SurfaceProfile& hotPressedPaper() noexcept;
+const SurfaceProfile& coldPressedPaper() noexcept;
+const SurfaceProfile& roughPaper() noexcept;
 const SurfaceProfile& nonAbsorbentPalette() noexcept;
 
 struct OpticalResult {
@@ -195,9 +212,20 @@ struct OpticalResult {
     double granulation = 0.0;
 };
 
+struct MaterialSimulationStats {
+    std::size_t activeTiles = 0;
+    std::size_t cellsVisited = 0;
+    std::size_t cellsChanged = 0;
+    std::size_t transfers = 0;
+    double waterEvaporated = 0.0;
+    double materialMoved = 0.0;
+    bool failed = false;
+};
+
 class MaterialEngine {
 public:
     explicit MaterialEngine(const PigmentLibrary& pigments) : m_pigments(pigments) {}
+    const PigmentLibrary& pigments() const noexcept { return m_pigments; }
     Spectrum reflectance(const PaintBatch& paint, double filmMass = 1.0) const noexcept;
     OpticalResult opticalResult(const PaintBatch& paint, const MediumProfile& medium,
                                 const SurfaceProfile& surface,
@@ -207,6 +235,12 @@ public:
                             const SurfaceProfile& surface, double coverage,
                             double filmMass = 1.0,
                             double toothContact = 1.0) const noexcept;
+    // Advance only tiles containing mobile material. Dry cells remain sparse
+    // and unchanged; elapsed time is integrated analytically for stable lazy
+    // catch-up after a tile has been inactive.
+    MaterialSimulationStats advanceWetMaterial(MaterialTileStore& store,
+                                                double elapsedSeconds,
+                                                const SurfaceProfile& surface) const;
 private:
     const PigmentLibrary& m_pigments;
 };

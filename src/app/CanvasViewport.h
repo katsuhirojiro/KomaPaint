@@ -7,11 +7,14 @@
 #include <QQuickPaintedItem>
 #include <QColor>
 #include <QImage>
+#include <QElapsedTimer>
 #include <QMutex>
 #include <QPointer>
 #include <QRectF>
 #include <QVariant>
 #include <map>
+
+class QTimer;
 
 namespace komapaint {
 class CanvasDocument;
@@ -88,6 +91,8 @@ private:
     void eraseCacheTile(TilePoint tile) noexcept;
     void invalidateAll();
     void changedTile(qint64 x, qint64 y);
+    void refreshMaterialSimulation();
+    void tickMaterialSimulation();
     void reportStrokeFailure(SparseTileStore::WriteResult reason, bool rolledBack, std::size_t tileBytes, std::size_t tileBudget);
     void schedule(const QRectF& region);
     std::vector<CompositeLayer> layers() const;
@@ -98,6 +103,9 @@ private:
     std::unique_ptr<BrushStroke> m_stroke;
     std::unique_ptr<material::MaterialStroke> m_materialStroke;
     std::unique_ptr<material::BrushReservoir> m_materialReservoir;
+    QTimer* m_materialTimer = nullptr;
+    QElapsedTimer m_materialClock;
+    qint64 m_lastMaterialTick = 0;
     StrokeStabilizer m_stabilizer;
     CompositeInvalidation m_invalidation;
     std::map<TilePoint, CacheEntry, TilePointLess> m_cache;

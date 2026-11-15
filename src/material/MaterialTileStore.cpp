@@ -22,6 +22,11 @@ bool finiteFloat(double value) noexcept
         && value <= static_cast<double>(std::numeric_limits<float>::max());
 }
 
+bool mobileCell(const MaterialCell& cell) noexcept
+{
+    return !cell.empty() && cell.water > 1.0e-5F && cell.drying < 0.9999F;
+}
+
 bool emptyComposition(const MaterialComposition& composition) noexcept
 {
     return composition.mediumId.empty() && composition.pigments.empty();
@@ -70,15 +75,22 @@ MaterialTileStore::~MaterialTileStore() { releaseAll(); }
 
 void MaterialTileStore::releaseAll() noexcept
 {
-    if (!m_budget) return;
-    m_budget->release(DocumentMemoryBudget::Category::Artwork, m_allocatedBytes + m_compositionBytes);
+    if (m_budget) m_budget->release(DocumentMemoryBudget::Category::Artwork,
+                                    m_allocatedBytes + m_compositionBytes + m_activeTileBytes);
     m_allocatedBytes = 0;
     m_compositionBytes = 0;
+    m_activeTileBytes = 0;
+    m_activeTiles.clear();
 }
 
 bool MaterialTileStore::setDocumentBudget(std::shared_ptr<DocumentMemoryBudget> budget) noexcept
 {
     if (!m_tiles.empty() || m_compositions.size() > 1 || m_beforeChange || m_batchDepth) return false;
+    if (budget == m_budget) return true;
+    if (budget && m_activeTileBytes
+        && !budget->reserve(DocumentMemoryBudget::Category::Artwork, m_activeTileBytes)) return false;
+    if (m_budget && m_activeTileBytes)
+        m_budget->release(DocumentMemoryBudget::Category::Artwork, m_activeTileBytes);
     m_budget = std::move(budget);
     return true;
 }
@@ -100,6 +112,11 @@ std::vector<TilePoint> MaterialTileStore::allocatedTilePoints() const
     for (const auto& entry : m_tiles)
         if (!entry.second.entries.empty()) result.push_back(entry.first);
     return result;
+}
+
+std::vector<TilePoint> MaterialTileStore::activeTilePoints() const
+{
+    return m_activeTiles;
 }
 
 std::span<const MaterialEntry> MaterialTileStore::tileEntries(TilePoint tile) const noexcept
@@ -141,6 +158,8 @@ std::optional<PaintBatch> MaterialTileStore::expand(const MaterialCell& cell) co
     result.filler = cell.filler;
     result.wetness = cell.wetness;
     result.consistency = cell.consistency;
+    result.drying = cell.drying;
+    result.settling = cell.settling;
     for (const auto& pigment : recipe->pigments) {
         const double mass = pigment.mass * static_cast<double>(cell.pigmentMass);
         const bool added = pigment.pigmentId.empty()
@@ -249,6 +268,8 @@ bool MaterialTileStore::validateCell(const MaterialCell& cell) const noexcept
         && std::isfinite(cell.filler) && cell.filler >= 0.0F
         && std::isfinite(cell.wetness) && cell.wetness >= 0.0F && cell.wetness <= 1.0F
         && std::isfinite(cell.consistency) && cell.consistency >= 0.0F && cell.consistency <= 1.0F
+        && std::isfinite(cell.drying) && cell.drying >= 0.0F && cell.drying <= 1.0F
+        && std::isfinite(cell.settling) && cell.settling >= 0.0F && cell.settling <= 1.0F
         && (!m_compositions[cell.compositionId].pigments.empty() || cell.pigmentMass == 0.0F)
         && (cell.pigmentMass > 0.0F || cell.water > 0.0F || cell.binder > 0.0F || cell.filler > 0.0F);
 }
@@ -292,6 +313,8 @@ MaterialTileStore::Result MaterialTileStore::writeCell(TilePoint point, const Ma
     if (old == cell) return Result::Unchanged;
 
     const TilePoint tilePoint = address->tile;
+    const bool wasActive = mobileCell(old);
+    const bool isActive = mobileCell(cell);
     const auto beforeEntries = hadTile
         ? std::span<const MaterialEntry>(tileIt->second.entries)
         : std::span<const MaterialEntry>{};
@@ -299,6 +322,47 @@ MaterialTileStore::Result MaterialTileStore::writeCell(TilePoint point, const Ma
         return Result::AllocationFailed;
     const auto bounds = m_geometry.tileBounds(tilePoint);
     if (!bounds) return Result::OutOfBounds;
+    const bool activateTile = !wasActive && isActive
+        && (!hadTile || tileIt->second.activeCells == 0);
+    std::vector<TilePoint> stagedActive;
+    std::size_t activeStagingBytes = 0;
+    bool activeStageCommitted = false;
+    struct ActiveStageRelease {
+        std::shared_ptr<DocumentMemoryBudget> budget;
+        std::size_t bytes = 0;
+        bool* committed = nullptr;
+        ~ActiveStageRelease() {
+            if (budget && bytes && committed && !*committed)
+                budget->release(DocumentMemoryBudget::Category::RestoreStaging, bytes);
+        }
+    } activeStage{m_budget, 0, &activeStageCommitted};
+    if (activateTile && m_activeTiles.size() == m_activeTiles.capacity()) {
+        const std::size_t currentCapacity = m_activeTiles.capacity();
+        const std::size_t nextCapacity = currentCapacity == 0 ? std::size_t{8}
+            : currentCapacity > std::numeric_limits<std::size_t>::max() / 2
+                ? m_activeTiles.max_size() : currentCapacity * 2;
+        if (nextCapacity <= currentCapacity || nextCapacity > m_activeTiles.max_size()
+            || nextCapacity > std::numeric_limits<std::size_t>::max() / sizeof(TilePoint))
+            return Result::AllocationFailed;
+        activeStagingBytes = nextCapacity * sizeof(TilePoint);
+        if (m_budget && !m_budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, activeStagingBytes))
+            return Result::DocumentMemoryLimit;
+        activeStage.bytes = activeStagingBytes;
+        try {
+            stagedActive.reserve(nextCapacity);
+            stagedActive.insert(stagedActive.end(), m_activeTiles.begin(), m_activeTiles.end());
+            stagedActive.insert(std::lower_bound(stagedActive.begin(), stagedActive.end(), tilePoint, TilePointLess{}), tilePoint);
+            const std::size_t actualBytes = stagedActive.capacity() * sizeof(TilePoint);
+            if (actualBytes > activeStagingBytes) {
+                const std::size_t extra = actualBytes - activeStagingBytes;
+                if (m_budget && !m_budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, extra))
+                    return Result::DocumentMemoryLimit;
+                activeStagingBytes += extra;
+                activeStage.bytes = activeStagingBytes;
+            }
+        } catch (const std::bad_alloc&) { return Result::AllocationFailed; }
+          catch (const std::length_error&) { return Result::AllocationFailed; }
+    }
     const auto marked = m_dirty.mark(*bounds);
     if (marked != DirtyTileTracker::Result::Marked)
         return marked == DirtyTileTracker::Result::AllocationFailed ? Result::AllocationFailed : Result::TrackingLimit;
@@ -391,6 +455,31 @@ MaterialTileStore::Result MaterialTileStore::writeCell(TilePoint point, const Ma
         }
         return Result::AllocationFailed;
     }
+    auto updatedTile = m_tiles.find(tilePoint);
+    if (activateTile && !stagedActive.empty()) {
+        const std::size_t oldActiveBytes = m_activeTileBytes;
+        m_activeTiles.swap(stagedActive);
+        m_activeTileBytes = m_activeTiles.capacity() * sizeof(TilePoint);
+        if (m_budget) {
+            if (oldActiveBytes) m_budget->release(DocumentMemoryBudget::Category::Artwork, oldActiveBytes);
+            m_budget->transferToArtwork(activeStage.bytes);
+        }
+        activeStageCommitted = true;
+    }
+    if (updatedTile != m_tiles.end()) {
+        if (wasActive && !isActive && updatedTile->second.activeCells > 0)
+            --updatedTile->second.activeCells;
+        else if (!wasActive && isActive)
+            ++updatedTile->second.activeCells;
+    }
+    auto activePosition = std::lower_bound(m_activeTiles.begin(), m_activeTiles.end(),
+                                           tilePoint, TilePointLess{});
+    const bool activeListed = activePosition != m_activeTiles.end() && *activePosition == tilePoint;
+    const bool activeAfter = updatedTile != m_tiles.end() && updatedTile->second.activeCells != 0;
+    if (activeAfter && !activeListed)
+        m_activeTiles.insert(activePosition, tilePoint); // capacity reserved before changing the cell
+    else if (!activeAfter && activeListed)
+        m_activeTiles.erase(activePosition);
     notify(tilePoint);
     return Result::Changed;
 }
@@ -419,7 +508,8 @@ MaterialTileStore::Result MaterialTileStore::write(TilePoint point, const PaintB
     if (!id) return Result::DocumentMemoryLimit;
     const MaterialCell cell{*id, static_cast<float>(pigmentMass), static_cast<float>(value.water),
         static_cast<float>(value.binder), static_cast<float>(value.filler),
-        static_cast<float>(value.wetness), static_cast<float>(value.consistency)};
+        static_cast<float>(value.wetness), static_cast<float>(value.consistency),
+        static_cast<float>(value.drying), static_cast<float>(value.settling)};
     const auto result = writeCell(point, cell);
     if (result != Result::Changed && inserted) eraseUnreferencedComposition(*id);
     return result;
@@ -457,6 +547,26 @@ MaterialTileStore::Result MaterialTileStore::scaleCell(TilePoint point, double f
 MaterialTileStore::Result MaterialTileStore::erase(TilePoint point)
 {
     return writeCell(point, MaterialCell{});
+}
+
+MaterialTileStore::Result MaterialTileStore::take(TilePoint point, double amount, PaintBatch* removed)
+{
+    if (!removed || !std::isfinite(amount) || amount < 0.0) return Result::InvalidData;
+    *removed = PaintBatch{};
+    const auto current = batchAt(point);
+    if (!current) return Result::InvalidData;
+    const double total = current->totalMass();
+    if (total <= 0.0 || amount <= 0.0) return Result::Unchanged;
+    const double takenMass = std::min(amount, total);
+    const double fraction = takenMass / total;
+    PaintBatch remainder = *current;
+    PaintBatch taken = *current;
+    taken.scale(fraction);
+    remainder.scale(1.0 - fraction);
+    const Result result = remainder.totalMass() <= 1.0e-12
+        ? erase(point) : setBatch(point, remainder);
+    if (result == Result::Changed || result == Result::Unchanged) *removed = std::move(taken);
+    return result;
 }
 
 void MaterialTileStore::eraseUnreferencedComposition(std::size_t id) noexcept
@@ -514,6 +624,8 @@ MaterialTileStore::Result MaterialTileStore::restoreTiles(std::span<const Materi
             tile.entries.reserve(snapshot.entries.size());
             tile.entries = snapshot.entries;
             tile.chargedBytes = tile.entries.capacity() * sizeof(MaterialEntry);
+            tile.activeCells = static_cast<std::size_t>(std::count_if(tile.entries.begin(), tile.entries.end(),
+                [](const MaterialEntry& entry) { return mobileCell(entry.cell); }));
             if (tile.chargedBytes > std::numeric_limits<std::size_t>::max() - stagedBytes)
                 return Result::AllocationFailed;
             stagedBytes += tile.chargedBytes;
@@ -533,6 +645,35 @@ MaterialTileStore::Result MaterialTileStore::restoreTiles(std::span<const Materi
                 budget->release(DocumentMemoryBudget::Category::RestoreStaging, bytes);
             }
         } staging{m_budget, stagedBytes};
+        if (staged.size() > std::numeric_limits<std::size_t>::max() - m_activeTiles.size())
+            return Result::AllocationFailed;
+        std::vector<TilePoint> stagedActiveTiles;
+        stagedActiveTiles.reserve(m_activeTiles.size() + staged.size());
+        for (const TilePoint activeTile : m_activeTiles) {
+            const bool replaced = std::any_of(snapshots.begin(), snapshots.end(),
+                [activeTile](const MaterialTileSnapshot& snapshot) { return snapshot.tile == activeTile; });
+            if (!replaced) stagedActiveTiles.push_back(activeTile);
+        }
+        for (const auto& snapshot : snapshots) {
+            const auto replacement = staged.find(snapshot.tile);
+            if (replacement != staged.end() && replacement->second.activeCells != 0)
+                stagedActiveTiles.push_back(snapshot.tile);
+        }
+        std::sort(stagedActiveTiles.begin(), stagedActiveTiles.end(), TilePointLess{});
+        std::size_t activeStagingBytes = stagedActiveTiles.capacity() * sizeof(TilePoint);
+        if (m_budget && activeStagingBytes
+            && !m_budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, activeStagingBytes))
+            return Result::DocumentMemoryLimit;
+        bool activeCommitted = false;
+        struct ActiveRestoreRelease {
+            std::shared_ptr<DocumentMemoryBudget> budget;
+            std::size_t bytes;
+            bool* committed;
+            ~ActiveRestoreRelease() {
+                if (budget && bytes && !*committed)
+                    budget->release(DocumentMemoryBudget::Category::RestoreStaging, bytes);
+            }
+        } activeRelease{m_budget, activeStagingBytes, &activeCommitted};
         m_tiles.reserve(m_tiles.size() + staged.size());
         m_dirty = std::move(dirty);
         for (const auto& snapshot : snapshots) {
@@ -551,7 +692,15 @@ MaterialTileStore::Result MaterialTileStore::restoreTiles(std::span<const Materi
                 m_tiles.insert(std::move(incoming));
             }
         }
-        if (m_budget && stagedBytes) m_budget->transferToArtwork(stagedBytes);
+        const std::size_t oldActiveBytes = m_activeTileBytes;
+        m_activeTiles.swap(stagedActiveTiles);
+        m_activeTileBytes = m_activeTiles.capacity() * sizeof(TilePoint);
+        if (m_budget) {
+            if (oldActiveBytes) m_budget->release(DocumentMemoryBudget::Category::Artwork, oldActiveBytes);
+            if (activeStagingBytes) m_budget->transferToArtwork(activeStagingBytes);
+            if (stagedBytes) m_budget->transferToArtwork(stagedBytes);
+        }
+        activeCommitted = true;
         staging.committed = true;
         if (notifyChanges) for (const auto& snapshot : snapshots) notify(snapshot.tile);
         return Result::Changed;

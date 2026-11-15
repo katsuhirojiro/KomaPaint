@@ -33,7 +33,7 @@ constexpr qsizetype MagicSize = 9;
 constexpr qsizetype MinFileBytes = 48;
 
 // Versions 1 and 2 share a flat illustration payload. Version 3 extends
-// the v2 layer records with metadata; version 4 adds material cell records.
+// the v2 layer records with metadata; v4 adds material cells and v5 lifecycle state.
 
 // ---- little-endian writers ---------------------------------------------------
 
@@ -214,7 +214,7 @@ public:
         m_pos += size;
         return true;
     }
-    // Offset of the next unread byte (for the v2-v4 document-length record).
+    // Offset of the next unread byte (for the v2-v5 document-length record).
     qsizetype position() const { return m_pos; }
 
 private:
@@ -249,7 +249,7 @@ struct LayerRecord {
 };
 // The illustration document payload: the exact byte body that existed as
 // "the format" in version 1 and that is embedded inside the version 2
-// project envelope. Shared by the v1 (legacy) reader and the v2-v4 envelope
+// project envelope. Shared by the v1 (legacy) reader and the v2-v5 envelope
 // reader. Note: this build never stores nor reads the tile size; artwork
 // is always document-space rectangles of premultiplied ARGB pixels.
 struct IllustrationPayload {
@@ -356,7 +356,7 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
             rect.pixels = payloadBytes;
             record.rects.push_back(rect);
         }
-        if (version >= DocumentFile::FormatVersion) {
+        if (version >= DocumentFile::MaterialVersion) {
             quint64 compositionCount = 0;
             if (!reader.readU64(compositionCount) || compositionCount == 0
                 || compositionCount > static_cast<quint64>(reader.remaining() / 12))
@@ -401,7 +401,9 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
                 record.materialCompositions.push_back(std::move(composition));
             }
             quint64 materialPixelCount = 0;
-            if (!reader.readU64(materialPixelCount) || materialPixelCount > static_cast<quint64>(reader.remaining() / 48))
+            const qsizetype materialRecordSize = version >= DocumentFile::FormatVersion ? 56 : 48;
+            if (!reader.readU64(materialPixelCount)
+                || materialPixelCount > static_cast<quint64>(reader.remaining() / materialRecordSize))
                 return fail(QStringLiteral("\"%1\" has an invalid material pixel count.").arg(path));
             record.materialPixels.reserve(static_cast<std::size_t>(materialPixelCount));
             std::pair<quint64, quint64> previous{};
@@ -415,6 +417,13 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
                     || !reader.readFloat(pixel.cell.binder) || !reader.readFloat(pixel.cell.filler)
                     || !reader.readFloat(pixel.cell.wetness) || !reader.readFloat(pixel.cell.consistency))
                     return fail(QStringLiteral("\"%1\" has a truncated material pixel.").arg(path));
+                if (version >= DocumentFile::FormatVersion) {
+                    if (!reader.readFloat(pixel.cell.drying) || !reader.readFloat(pixel.cell.settling))
+                        return fail(QStringLiteral("\"%1\" has truncated material lifecycle state.").arg(path));
+                } else {
+                    pixel.cell.drying = 1.0F - pixel.cell.wetness;
+                    pixel.cell.settling = 0.0F;
+                }
                 if (pixel.x >= docWidth || pixel.y >= docHeight
                     || !std::isfinite(pixel.cell.pigmentMass) || pixel.cell.pigmentMass < 0.0F
                     || !std::isfinite(pixel.cell.water) || pixel.cell.water < 0.0F
@@ -422,6 +431,8 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
                     || !std::isfinite(pixel.cell.filler) || pixel.cell.filler < 0.0F
                     || !std::isfinite(pixel.cell.wetness) || pixel.cell.wetness < 0.0F || pixel.cell.wetness > 1.0F
                     || !std::isfinite(pixel.cell.consistency) || pixel.cell.consistency < 0.0F || pixel.cell.consistency > 1.0F
+                    || !std::isfinite(pixel.cell.drying) || pixel.cell.drying < 0.0F || pixel.cell.drying > 1.0F
+                    || !std::isfinite(pixel.cell.settling) || pixel.cell.settling < 0.0F || pixel.cell.settling > 1.0F
                     || (pixel.cell.pigmentMass == 0.0F && pixel.cell.water == 0.0F
                         && pixel.cell.binder == 0.0F && pixel.cell.filler == 0.0F)
                     || (record.materialCompositions[static_cast<std::size_t>(compositionId)].pigments.empty()
@@ -453,7 +464,7 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
 }
 
 // Serializes the illustration document body exactly as a v1 file stores it
-// (and as the digital portion of a v2-v4 illustration payload stores it). Returns false only on
+// (and as the digital portion of a v2-v5 illustration payload stores it). Returns false only on
 // internal inconsistency (which the caller must treat as a save failure).
 bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, QByteArray* out, QString* error)
 {
@@ -632,9 +643,11 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
                     || !std::isfinite(cell.filler) || cell.filler < 0.0F
                     || !std::isfinite(cell.wetness) || cell.wetness < 0.0F || cell.wetness > 1.0F
                     || !std::isfinite(cell.consistency) || cell.consistency < 0.0F || cell.consistency > 1.0F
+                    || !std::isfinite(cell.drying) || cell.drying < 0.0F || cell.drying > 1.0F
+                    || !std::isfinite(cell.settling) || cell.settling < 0.0F || cell.settling > 1.0F
                     || (!first && (item.y < previousY || (item.y == previousY && item.x <= previousX))))
                     return fail(QStringLiteral("A layer contains invalid or unordered material pixels. The file was not changed."));
-                constexpr quint64 pixelRecordBytes = 48;
+                constexpr quint64 pixelRecordBytes = 56;
                 if (static_cast<quint64>(buffer.size()) > DocumentFile::MaxFileBytes - 32 - pixelRecordBytes)
                     return fail(QStringLiteral("The material content is too large for the native file format. The file was not changed."));
                 putU64(buffer, item.x);
@@ -646,6 +659,8 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
                 putFloat(buffer, cell.filler);
                 putFloat(buffer, cell.wetness);
                 putFloat(buffer, cell.consistency);
+                putFloat(buffer, cell.drying);
+                putFloat(buffer, cell.settling);
                 ++written;
                 previousX = item.x;
                 previousY = item.y;
@@ -663,7 +678,7 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
 }
 
 // Builds the detached document from a validated payload. Shared by the v1
-// and v2-v4 readers. Returns nullptr only if the restored artwork exceeds the
+// and v2-v5 readers. Returns nullptr only if the restored artwork exceeds the
 // memory limit or cannot be restored.
 CanvasDocument* buildDocument(const IllustrationPayload& payload, const QString& path, QString* error)
 {
@@ -855,8 +870,8 @@ bool DocumentFile::save(const CanvasDocument& document, const QString& path, QSt
         return false;
     };
 
-    // Version 2-4 envelope: one document, empty asset section and CRC.
-    // Version 3 adds layer metadata; version 4 adds authoritative materials.
+    // Version 2-5 envelope: one document, empty asset section and CRC.
+    // Version 3 adds layer metadata; v4 adds material composition; v5 stores drying and settling state.
     QByteArray header;
     header.reserve(64);
     header.append(Magic, MagicSize);
@@ -929,8 +944,9 @@ CanvasDocument* DocumentFile::open(const QString& path, QString* error) try
         const qsizetype payloadBegin = MagicSize + 2;
         if (!parseIllustrationPayload(data, payloadBegin, contentEnd, version, path, &payload, error))
             return nullptr;
-    } else if (version == FlatEnvelopeVersion || version == LayerMetadataVersion || version == FormatVersion) {
-        // Versions 2-4: unified project envelope.
+    } else if (version == FlatEnvelopeVersion || version == LayerMetadataVersion
+               || version == MaterialVersion || version == FormatVersion) {
+        // Versions 2-5: unified project envelope.
         quint32 documentCount = 0;
         if (!head.readU32(documentCount)) return fail(QStringLiteral("\"%1\" is truncated.").arg(path));
         if (documentCount == 0 || documentCount > MaxDocuments)

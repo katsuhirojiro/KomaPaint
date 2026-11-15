@@ -24,6 +24,52 @@ const material::MaterialEngine& canvasMaterialEngine()
     return engine;
 }
 
+bool materialBatchFromMap(const QVariantMap& value, material::PaintBatch* output)
+{
+    if (!output) return false;
+    const QString mediumName = value.value(QStringLiteral("mediumId")).toString();
+    const QByteArray mediumBytes = mediumName.toUtf8();
+    material::PaintBatch batch;
+    batch.mediumId.assign(mediumBytes.constData(), static_cast<std::size_t>(mediumBytes.size()));
+    if (!material::findMediumProfile(batch.mediumId)) return false;
+    const QVariantList components = value.value(QStringLiteral("pigments")).toList();
+    for (const QVariant& item : components) {
+        const QVariantMap component = item.toMap();
+        const QString pigmentName = component.value(QStringLiteral("pigmentId")).toString();
+        const QByteArray pigmentBytes = pigmentName.toUtf8();
+        const std::string pigmentId(pigmentBytes.constData(), static_cast<std::size_t>(pigmentBytes.size()));
+        bool massOk = false;
+        const double mass = component.value(QStringLiteral("mass")).toDouble(&massOk);
+        if (!massOk || !std::isfinite(mass) || mass <= 0.0) return false;
+        if (pigmentId.empty()) {
+            bool colourOk = false;
+            const auto colour = static_cast<std::uint32_t>(
+                component.value(QStringLiteral("residualArgb")).toULongLong(&colourOk));
+            if (!colourOk || (colour >> 24U) != 0xffU || !batch.addResidual(colour, mass)) return false;
+        } else {
+            if (!canvasMaterialEngine().pigments().find(pigmentId)
+                || !batch.addPigment(pigmentId, mass)) return false;
+        }
+    }
+    bool waterOk = false, binderOk = false, fillerOk = false;
+    batch.water = value.value(QStringLiteral("water")).toDouble(&waterOk);
+    batch.binder = value.value(QStringLiteral("binder")).toDouble(&binderOk);
+    batch.filler = value.value(QStringLiteral("filler")).toDouble(&fillerOk);
+    if (!waterOk || !binderOk || !fillerOk) return false;
+    bool stateOk = true;
+    if (value.contains(QStringLiteral("drying"))) batch.drying = value.value(QStringLiteral("drying")).toDouble(&stateOk);
+    if (!stateOk) return false;
+    if (value.contains(QStringLiteral("settling"))) batch.settling = value.value(QStringLiteral("settling")).toDouble(&stateOk);
+    if (!stateOk) return false;
+    const double total = batch.totalMass();
+    batch.wetness = total > 0.0 ? std::clamp(batch.water / total, 0.0, 1.0) : 0.0;
+    batch.consistency = total > 0.0
+        ? std::clamp((batch.pigmentMass() + batch.binder + batch.filler) / total, 0.0, 1.0) : 0.0;
+    if (!batch.valid() || total <= 0.0) return false;
+    *output = std::move(batch);
+    return true;
+}
+
 const material::MaterialRenderer& canvasMaterialRenderer()
 {
     static const material::MaterialRenderer renderer(canvasMaterialEngine());
@@ -62,6 +108,10 @@ CanvasViewport::CanvasViewport(QQuickItem* parent) : QQuickPaintedItem(parent)
 {
     setOpaquePainting(true);
     setAntialiasing(false);
+    m_materialClock.start();
+    m_materialTimer = new QTimer(this);
+    m_materialTimer->setInterval(200);
+    connect(m_materialTimer, &QTimer::timeout, this, &CanvasViewport::tickMaterialSimulation);
 }
 CanvasViewport::~CanvasViewport() { clearCache(); }
 void CanvasViewport::clearCache() noexcept
@@ -116,6 +166,7 @@ void CanvasViewport::setDocument(QObject* object)
         for (int i = 0; i < m_document->layers()->rowCount(); ++i)
             disconnect(m_document->layers()->layerAt(i), nullptr, this, nullptr);
     }
+    if (m_materialTimer) m_materialTimer->stop();
     cancelStroke();
     m_document = doc;
     m_invalidation.reset();
@@ -146,6 +197,7 @@ void CanvasViewport::setDocument(QObject* object)
     qDebug() << "[CanvasViewport] setDocument: emitting documentChanged(), calling invalidateAll()";
     emit documentChanged();
     invalidateAll();
+    refreshMaterialSimulation();
     qDebug() << "[CanvasViewport] setDocument: done";
 }
 void CanvasViewport::reconnectLayers()
@@ -158,6 +210,51 @@ void CanvasViewport::reconnectLayers()
     }
 }
 void CanvasViewport::invalidateAll() { schedule(QRectF(0, 0, width(), height())); }
+
+void CanvasViewport::refreshMaterialSimulation()
+{
+    if (!m_materialTimer) return;
+    bool active = false;
+    if (m_document) {
+        const auto* model = m_document->layers();
+        for (int row = 0; row < model->rowCount(); ++row) {
+            if (!model->layerAt(row)->materialTiles().activeTilePoints().empty()) {
+                active = true;
+                break;
+            }
+        }
+    }
+    if (!active) {
+        m_materialTimer->stop();
+        return;
+    }
+    m_lastMaterialTick = m_materialClock.elapsed();
+    if (!m_materialTimer->isActive()) m_materialTimer->start();
+}
+
+void CanvasViewport::tickMaterialSimulation()
+{
+    if (!m_document || m_materialStroke) {
+        m_lastMaterialTick = m_materialClock.elapsed();
+        if (!m_document) m_materialTimer->stop();
+        return;
+    }
+    const qint64 now = m_materialClock.elapsed();
+    const double elapsed = std::clamp(double(now - m_lastMaterialTick) / 1000.0, 0.0, 5.0);
+    m_lastMaterialTick = now;
+    bool active = false;
+    auto* model = m_document->layers();
+    for (int row = 0; row < model->rowCount(); ++row) {
+        auto* layer = model->layerAt(row);
+        if (layer->materialTiles().activeTilePoints().empty()) continue;
+        active = true;
+        const auto result = canvasMaterialEngine().advanceWetMaterial(
+            layer->materialTiles(), elapsed, material::coldPressedPaper());
+        if (result.failed)
+            qWarning() << "[CanvasViewport] wet material update stopped early on layer" << row;
+    }
+    if (!active) m_materialTimer->stop();
+}
 
 void CanvasViewport::setDeskColour(const QColor& colour)
 {
@@ -411,15 +508,43 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
         }
         try {
             auto presets = material::defaultBrushDefinitions();
-            const auto preset = std::find_if(presets.begin(), presets.end(), [](const auto& item) {
-                return item.id == "gouache-round";
-            });
+            material::PaintBatch mixerPaint;
+            bool mixerPaintLoaded = false;
+            if (!brush->erase() && !brush->materialMixture().isEmpty()) {
+                if (!materialBatchFromMap(brush->materialMixture(), &mixerPaint)) {
+                    m_history->cancelStroke();
+                    emit strokeError(QStringLiteral("The mixer batch has an invalid medium or pigment composition."));
+                    return false;
+                }
+                mixerPaintLoaded = true;
+            }
+            auto preset = std::find_if(presets.begin(), presets.end(),
+                [mixerPaintLoaded, &mixerPaint](const auto& item) {
+                    if (!mixerPaintLoaded) return item.id == "gouache-round";
+                    return item.mediumId == mixerPaint.mediumId
+                        && item.tip == material::TipGeometry::Round;
+                });
+            if (preset == presets.end()) {
+                preset = std::find_if(presets.begin(), presets.end(), [](const auto& item) {
+                    return item.id == "gouache-round";
+                });
+            }
             if (preset == presets.end()) {
                 m_history->cancelStroke();
-                emit strokeError(QStringLiteral("The default gouache material brush is unavailable."));
+                emit strokeError(QStringLiteral("The default material brush is unavailable."));
                 return false;
             }
             material::BrushDefinition definition = *preset;
+            if (mixerPaintLoaded) {
+                definition.initialPaint = std::move(mixerPaint);
+                definition.mediumId = definition.initialPaint.mediumId;
+            }
+            const material::MediumProfile* selectedMedium = material::findMediumProfile(definition.mediumId);
+            if (!selectedMedium) {
+                m_history->cancelStroke();
+                emit strokeError(QStringLiteral("The selected material medium is unavailable."));
+                return false;
+            }
             definition.size = brush->size();
             definition.hardness = brush->hardness() / 100.0;
             definition.spacingRatio = brush->spacing() / 100.0;
@@ -433,9 +558,11 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             }
             m_materialReservoir = std::make_unique<material::BrushReservoir>(definition.reservoirCapacity);
             if (!brush->erase()) {
-                const double alpha = color.alphaF();
-                definition.initialPaint = material::makeResidualPaint(
-                    color.rgba(), alpha, 0.3 * alpha, 0.2 * alpha, definition.mediumId);
+                if (!mixerPaintLoaded) {
+                    const double alpha = color.alphaF();
+                    definition.initialPaint = material::makeResidualPaint(
+                        color.rgba(), alpha, 0.3 * alpha, 0.2 * alpha, definition.mediumId);
+                }
                 if (!m_materialReservoir->load(definition.initialPaint, definition.initialPaint.totalMass())) {
                     m_materialReservoir.reset();
                     m_history->cancelStroke();
@@ -445,7 +572,7 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             }
             m_materialStroke = std::make_unique<material::MaterialStroke>(layer->materialTiles(),
                 std::move(definition), *m_materialReservoir, canvasMaterialEngine(),
-                material::gouacheProfile(), material::absorbentPaper(), brush->erase());
+                *selectedMedium, material::coldPressedPaper(), brush->erase());
             m_strokeLayer = layer;
             const auto point = viewportToDocument(x, y);
             m_stabilizer = StrokeStabilizer(brush->stabilization());
@@ -557,6 +684,11 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
     if (!ok) {
         const bool rolledBack = m_history && m_history->cancelStroke();
         reportStrokeFailure(reason, rolledBack, tileBytes, tileBudget);
+        m_stroke.reset();
+        m_materialStroke.reset();
+        m_materialReservoir.reset();
+        m_strokeLayer = nullptr;
+        refreshMaterialSimulation();
         return;
     }
     m_stroke.reset();
@@ -568,6 +700,7 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
         m_strokeLayer = nullptr;
         emit strokeError(QStringLiteral("Could not commit stroke history."));
     } else m_strokeLayer = nullptr;
+    refreshMaterialSimulation();
     qDebug() << "[CanvasViewport] endStroke: stroke ended, ok=" << ok;
 }
 void CanvasViewport::cancelStroke() {

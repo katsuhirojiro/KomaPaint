@@ -11,6 +11,7 @@
 #include <QQmlComponent>
 #include <QQuickWindow>
 #include <QSGRendererInterface>
+#include <algorithm>
 #include "canvas/CanvasDocument.h"
 #include "layers/Layer.h"
 #include <cmath>
@@ -240,6 +241,37 @@ void TestCanvasViewport::traditionalMediaStrokeRendersAndUsesMaterialHistory()
     const auto materialAfterUndo = layer->materialTiles().batchAt({100, 100});
     QVERIFY(materialAfterUndo);
     QVERIFY(std::abs(materialAfterUndo->pigmentMass() - materialBeforeErase->pigmentMass()) < 1e-6);
+
+    BrushSettings mixerBrush;
+    mixerBrush.setTraditionalMedia(true);
+    QVariantList components;
+    components.push_back(QVariantMap{{QStringLiteral("pigmentId"), QStringLiteral("PY3")},
+                                     {QStringLiteral("mass"), 0.25}});
+    components.push_back(QVariantMap{{QStringLiteral("pigmentId"), QStringLiteral("PB15")},
+                                     {QStringLiteral("mass"), 0.75}});
+    const QVariantMap mixture{{QStringLiteral("mediumId"), QStringLiteral("watercolour")},
+                              {QStringLiteral("pigments"), components},
+                              {QStringLiteral("water"), 2.0},
+                              {QStringLiteral("binder"), 0.12},
+                              {QStringLiteral("filler"), 0.0},
+                              {QStringLiteral("drying"), 0.0},
+                              {QStringLiteral("settling"), 0.0}};
+    QVERIFY(mixerBrush.loadMaterialMixture(mixture));
+    QCOMPARE(mixerBrush.materialMixture(), mixture);
+    const QPointF mixturePoint = view.documentToViewport(160, 160);
+    QVERIFY(view.beginStroke(mixturePoint.x(), mixturePoint.y(), 1.0, &mixerBrush, QColor(Qt::green)));
+    view.endStroke(mixturePoint.x(), mixturePoint.y(), 1.0);
+    const auto loadedPaint = layer->materialTiles().batchAt({160, 160});
+    QVERIFY(loadedPaint);
+    QCOMPARE(loadedPaint->mediumId, std::string("watercolour"));
+    QVERIFY(loadedPaint->pigments.size() == 2);
+    const auto namedA = std::find_if(loadedPaint->pigments.begin(), loadedPaint->pigments.end(),
+        [](const auto& pigment) { return pigment.pigmentId == "PY3"; });
+    const auto namedB = std::find_if(loadedPaint->pigments.begin(), loadedPaint->pigments.end(),
+        [](const auto& pigment) { return pigment.pigmentId == "PB15"; });
+    QVERIFY(namedA != loadedPaint->pigments.end() && namedB != loadedPaint->pigments.end());
+    if (namedA != loadedPaint->pigments.end() && namedB != loadedPaint->pigments.end())
+        QVERIFY(std::abs(namedA->mass / namedB->mass - 1.0 / 3.0) < 1e-5);
 }
 
 void TestCanvasViewport::strokeFailureDiagnostics()

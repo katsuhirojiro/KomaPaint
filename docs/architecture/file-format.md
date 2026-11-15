@@ -36,7 +36,8 @@ Design goals, in order:
 | 1 | legacy, read-only | Flat illustration layout: magic + version + illustration body + CRC. Written by KomaPaint ≤ the format milestone. |
 | 2 | read/write | Unified project envelope: magic + version + one typed document + asset section + CRC. Used when all layers have default blend and label. |
 | 3 | read/write | Same envelope, with per-layer blend mode and colour label bytes. Required when either value is non-default. |
-| 4 | read/write | Adds a per-layer sparse material composition table and material-pixel records. Required when material-painted content exists. |
+| 4 | read/write | Adds a per-layer sparse material composition table and material-pixel records (six per-cell values). |
+| 5 | read/write | Adds persistent drying and settling state to material-pixel records (eight per-cell values). Written when material-painted content exists. |
 
 **Extension rule.** Only `.koma` is ever used. The extension is purely a
 convention for the operating system and the file dialogs — serialization
@@ -110,7 +111,8 @@ silently discarding metadata.
 
 Version 4 retains the version 3 envelope, layer metadata and digital ARGB
 rectangles. After each layer's digital rectangles it stores a composition table
-and a sparse list of material pixels. Digital pixels and material cells remain
+and a sparse list of material pixels. Version 5 retains this layout and extends
+each pixel record with two floats for material lifecycle state. Digital pixels and material cells remain
 separate document planes: RGB is never used to reconstruct a paint composition.
 
 The per-layer material records are independent of in-memory tile size:
@@ -128,16 +130,20 @@ quint64 material pixel count
 per material pixel, sorted by document y then x:
     quint64 document x, quint64 document y
     quint64 composition ID (nonzero, indexing this layer's table)
-    six IEEE-754 floats: pigment mass, water, binder, filler, wetness, consistency
+    v4: six IEEE-754 floats: pigment mass, water, binder, filler, wetness, consistency
+    v5: those six floats, then drying progress and settling fraction
 ```
 
 The material pixel coordinates are document-space integers. Reopening may
 retile them using the current build's sparse tile size without changing their
 composition. The composition table is immutable during a store lifetime and
-shared by cells through IDs; the six per-cell values retain quantities and
-medium state. Rendered display pixels are disposable outputs and are not
-serialized as a substitute for these records. Versions 1-3 contain no material
-plane and migrate losslessly as digital-only layers.
+shared by cells through IDs. The per-cell values retain distinct pigment, water,
+binder and filler quantities plus wetness/consistency; v5 also persists drying
+progress and pigment settling so save/open does not reset a wet or dried film.
+A v4 cell is loaded with drying inferred as `1 - wetness` and zero settling.
+Rendered display pixels are disposable outputs and are not serialized as a
+substitute for these records. Versions 1-3 contain no material plane and
+migrate losslessly as digital-only layers.
 
 ### Version 1 (legacy) layout
 
@@ -151,20 +157,20 @@ offset  size    field
 
 ## Compatibility and migration
 
-* **Opening.** This build reads version 1, 2, 3 and 4 files
+* **Opening.** This build reads version 1, 2, 3, 4 and 5 files
   transparently. Version 1 files were produced by earlier KomaPaint builds
   and use the same extension, the same magic and the same illustration
   payload; opening them is lossless and changes nothing on disk.
 * **Saving.** Default digital-only layer metadata is written as version 2;
   non-default blend or label metadata requires version 3; material-painted
-  content requires version 4. Saving an older file migrates it to the required
+  content requires version 5. Saving an older file migrates it to the required
   version **in place** —
   the file is never renamed or left in a half-written state (see *Save
   safety* below), and the artwork round-trips exactly.
 * **No competing extensions.** There is no legacy/temporary extension to
   support: `.koma` has been the only native extension since the first
   persisted build. Older files are the version 1 files described here.
-* **Unknown versions.** A file with a version other than 1, 2, 3 or 4 is
+* **Unknown versions.** A file with a version other than 1, 2, 3, 4 or 5 is
   rejected with a clear error before any construction happens. A file that
   uses reserved document kinds (comic page / comic project) or declares a
   non-empty shared asset section is rejected as *"uses features this

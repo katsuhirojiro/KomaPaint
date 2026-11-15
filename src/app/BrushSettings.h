@@ -1,5 +1,6 @@
 #pragma once
 #include <QObject>
+#include <QVariantMap>
 
 namespace komapaint {
 // The settings of the brush that paints the next stroke. Every property is
@@ -18,6 +19,9 @@ class BrushSettings : public QObject {
     // True while an eraser is selected: strokes remove paint from the layer.
     Q_PROPERTY(bool erase READ erase WRITE setErase NOTIFY changed)
     Q_PROPERTY(bool traditionalMedia READ traditionalMedia WRITE setTraditionalMedia NOTIFY changed)
+    // Full material batch supplied by the mixer. The component masses and
+    // residual identities are kept verbatim until a material stroke loads it.
+    Q_PROPERTY(QVariantMap materialMixture READ materialMixture NOTIFY materialMixtureChanged)
     Q_PROPERTY(int minimumSize READ minimumSize CONSTANT)
     Q_PROPERTY(int maximumSize READ maximumSize CONSTANT)
     Q_PROPERTY(int minimumSpacing READ minimumSpacing CONSTANT)
@@ -35,6 +39,7 @@ public:
     int stabilization() const { return m_stabilization; }
     bool erase() const { return m_erase; }
     bool traditionalMedia() const { return m_traditionalMedia; }
+    QVariantMap materialMixture() const { return m_materialMixture; }
     int minimumSize() const { return MinSize; }
     int maximumSize() const { return MaxSize; }
     int minimumSpacing() const { return MinSpacing; }
@@ -48,13 +53,26 @@ public:
     void setStabilization(int v) { v = qBound(0, v, 100); if (m_stabilization != v) { m_stabilization = v; emit changed(); } }
     void setErase(bool v) { if (m_erase != v) { m_erase = v; emit changed(); } }
     void setTraditionalMedia(bool v) { if (m_traditionalMedia != v) { m_traditionalMedia = v; emit changed(); } }
+    Q_INVOKABLE bool loadMaterialMixture(const QVariantMap& mixture) {
+        if (mixture.isEmpty()) return false;
+        m_materialMixture = mixture;
+        emit materialMixtureChanged();
+        return true;
+    }
+    Q_INVOKABLE void clearMaterialMixture() {
+        if (m_materialMixture.isEmpty()) return;
+        m_materialMixture.clear();
+        emit materialMixtureChanged();
+    }
 signals:
     void changed();
+    void materialMixtureChanged();
 private:
     int m_size = 16, m_opacity = 100, m_flow = 100, m_spacing = 15;
     int m_hardness = 100, m_stabilization = 0;
     bool m_textured = false;
     bool m_erase = false;
     bool m_traditionalMedia = false;
+    QVariantMap m_materialMixture;
 };
 }

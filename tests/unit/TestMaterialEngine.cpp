@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <vector>
 
 using namespace komapaint;
 using namespace komapaint::material;
@@ -318,6 +319,175 @@ void authoritativeSparseMaterialTilesSurviveStrokesAndRendering()
     CHECK(material.dirtyRegions().size() == 1);
 }
 
+void wetMaterialDriesSettlesSpreadsAndBecomesInactiveLazily()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    MaterialTileStore store(96, 96, 16);
+    PaintBatch wash;
+    wash.mediumId = "watercolour";
+    wash.addPigment("PBr7", 1.0);
+    wash.addWater(4.0);
+    wash.addBinder(0.1);
+    wash.drying = 0.08;
+    CHECK(store.setBatch({7, 7}, wash) == MaterialTileStore::Result::Changed);
+    PaintBatch dry = makeResidualPaint(0xff3a5268U, 1.0, 0.0, 0.2, "gouache");
+    dry.drying = 1.0;
+    CHECK(store.setBatch({70, 70}, dry) == MaterialTileStore::Result::Changed);
+    CHECK(store.activeTilePoints().size() == 1);
+
+    const auto totalStoredPigment = [&store] {
+        double total = 0.0;
+        for (const TilePoint tile : store.allocatedTilePoints())
+            for (const auto& entry : store.tileEntries(tile)) total += entry.cell.pigmentMass;
+        return total;
+    };
+    const double originalPigment = totalStoredPigment();
+    const auto stats = engine.advanceWetMaterial(store, 30.0, roughPaper());
+    const auto evolved = store.batchAt({7, 7});
+    CHECK(!stats.failed);
+    CHECK(stats.activeTiles == 1);
+    CHECK(stats.cellsVisited > 0);
+    CHECK(stats.cellsChanged > 0);
+    CHECK(evolved && evolved->water < wash.water);
+    CHECK(evolved && evolved->drying > wash.drying);
+    CHECK(evolved && evolved->settling > 0.0);
+    CHECK(std::abs(totalStoredPigment() - originalPigment) < 1e-4);
+    CHECK(stats.transfers > 0);
+    const auto rightSpread = store.batchAt({8, 7});
+    const auto lowerSpread = store.batchAt({7, 8});
+    CHECK((rightSpread && rightSpread->totalMass() > 0.0)
+          || (lowerSpread && lowerSpread->totalMass() > 0.0));
+
+    for (int i = 0; i < 40 && !store.activeTilePoints().empty(); ++i)
+        CHECK(!engine.advanceWetMaterial(store, 60.0, roughPaper()).failed);
+    const auto dried = store.batchAt({7, 7});
+    CHECK(dried && dried->water == 0.0);
+    CHECK(dried && dried->drying == 1.0);
+    CHECK(store.activeTilePoints().empty());
+    CHECK(store.batchAt({70, 70})->drying == 1.0);
+}
+
+void activeTileIndexTracksWetWritesDryingAndHistoryRestore()
+{
+    MaterialTileStore store(64, 64, 16);
+    PaintBatch wet = makeResidualPaint(0xff5381a4U, 1.0, 2.0, 0.1, "watercolour");
+    CHECK(store.setBatch({20, 20}, wet) == MaterialTileStore::Result::Changed);
+    const std::vector<TilePoint> expectedActive{{1, 1}};
+    CHECK(store.activeTilePoints() == expectedActive);
+    const auto snapshot = store.snapshot({1, 1});
+    PaintBatch dry = wet;
+    dry.water = 0.0;
+    dry.wetness = 0.0;
+    dry.drying = 1.0;
+    CHECK(store.setBatch({20, 20}, dry) == MaterialTileStore::Result::Changed);
+    CHECK(store.activeTilePoints().empty());
+    const std::vector<MaterialTileSnapshot> snapshots{snapshot};
+    CHECK(store.restoreTiles(snapshots) == MaterialTileStore::Result::Changed);
+    CHECK(store.activeTilePoints() == expectedActive);
+    CHECK(store.erase({20, 20}) == MaterialTileStore::Result::Changed);
+    CHECK(store.activeTilePoints().empty());
+}
+
+void paperProfilesChangeDepositedMaterialNotOnlyRenderedTexture()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    auto presets = defaultBrushDefinitions();
+    const auto it = std::find_if(presets.begin(), presets.end(), [](const auto& brush) {
+        return brush.id == "watercolour-round";
+    });
+    CHECK(it != presets.end());
+    if (it == presets.end()) return;
+    BrushDefinition brush = *it;
+    brush.size = 12.0;
+    brush.releaseRate = 0.6;
+    brush.depletionRate = 1.0;
+    BrushInput input{1.0, 0.1, 0.0, 0.0};
+    MaterialTileStore hot(64, 64, 64), cold(64, 64, 64), rough(64, 64, 64);
+    BrushReservoir hotReservoir(20.0), coldReservoir(20.0), roughReservoir(20.0);
+    CHECK(hotReservoir.load(brush.initialPaint, brush.initialPaint.totalMass()));
+    CHECK(coldReservoir.load(brush.initialPaint, brush.initialPaint.totalMass()));
+    CHECK(roughReservoir.load(brush.initialPaint, brush.initialPaint.totalMass()));
+    MaterialDab hotDab(engine, watercolourProfile(), hotPressedPaper());
+    MaterialDab coldDab(engine, watercolourProfile(), coldPressedPaper());
+    MaterialDab roughDab(engine, watercolourProfile(), roughPaper());
+    CHECK(hotDab.apply(hot, brush, hotReservoir, 32.0, 32.0, input) == SparseTileStore::WriteResult::Changed);
+    CHECK(coldDab.apply(cold, brush, coldReservoir, 32.0, 32.0, input) == SparseTileStore::WriteResult::Changed);
+    CHECK(roughDab.apply(rough, brush, roughReservoir, 32.0, 32.0, input) == SparseTileStore::WriteResult::Changed);
+    const auto hotBatch = hot.batchAt({32, 32});
+    const auto coldBatch = cold.batchAt({32, 32});
+    const auto roughBatch = rough.batchAt({32, 32});
+    CHECK(hotBatch && coldBatch && roughBatch);
+    CHECK(hotBatch && coldBatch && hotBatch->water != coldBatch->water);
+    CHECK(coldBatch && roughBatch && coldBatch->pigmentMass() != roughBatch->pigmentMass());
+    const auto hotPixel = engine.composite(0U, *hotBatch, watercolourProfile(), hotPressedPaper(), 1.0);
+    const auto roughPixel = engine.composite(0U, *roughBatch, watercolourProfile(), roughPaper(), 1.0);
+    CHECK(hotPixel != roughPixel);
+}
+
+void brushPickupRewettingAndMixerLoadsRetainPigmentProportions()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    PaintBatch surfacePaint;
+    surfacePaint.mediumId = "watercolour";
+    surfacePaint.addPigment("PY3", 2.0);
+    surfacePaint.addPigment("PB15", 1.0);
+    surfacePaint.addWater(2.5);
+    surfacePaint.addBinder(0.1);
+    MaterialTileStore surface(64, 64, 64);
+    CHECK(surface.setBatch({32, 32}, surfacePaint) == MaterialTileStore::Result::Changed);
+
+    auto presets = defaultBrushDefinitions();
+    const auto preset = std::find_if(presets.begin(), presets.end(), [](const auto& brush) {
+        return brush.id == "watercolour-round";
+    });
+    CHECK(preset != presets.end());
+    if (preset == presets.end()) return;
+    BrushDefinition brush = *preset;
+    brush.size = 18.0;
+    brush.reservoirCapacity = 30.0;
+    brush.pickupRate = 1.0;
+    brush.paintLiftability = 1.0;
+    brush.rewetting = 1.0;
+    brush.releaseRate = 0.0;
+    BrushReservoir reservoir(brush.reservoirCapacity);
+    PaintBatch loaded = mix(makeResidualPaint(0xffd9442aU, 1.0, 2.0, 0.2, "watercolour"),
+                            surfacePaint, "watercolour");
+    CHECK(reservoir.load(loaded, loaded.totalMass()));
+    const auto originalComposition = reservoir.batch().pigments;
+    const auto before = surface.batchAt({32, 32});
+    MaterialDab rework(engine, watercolourProfile(), coldPressedPaper());
+    CHECK(rework.apply(surface, brush, reservoir, 32.0, 32.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    const auto after = surface.batchAt({32, 32});
+    CHECK(before && after && after->totalMass() < before->totalMass());
+    CHECK(reservoir.batch().pigments.size() >= originalComposition.size());
+    CHECK(std::any_of(reservoir.batch().pigments.begin(), reservoir.batch().pigments.end(),
+        [](const auto& pigment) { return pigment.pigmentId == "PY3"; }));
+    CHECK(std::any_of(reservoir.batch().pigments.begin(), reservoir.batch().pigments.end(),
+        [](const auto& pigment) { return pigment.pigmentId == "PB15"; }));
+
+    // A dried surface remains stable until water-bearing paint contacts it;
+    // rewetting can mobilize only a liftable fraction and does not relabel the
+    // original pigment composition as the brush's selected RGB.
+    PaintBatch dry = surfacePaint;
+    dry.water = 0.0;
+    dry.drying = 1.0;
+    dry.wetness = 0.0;
+    CHECK(surface.setBatch({40, 40}, dry) == MaterialTileStore::Result::Changed);
+    BrushReservoir liftingReservoir(30.0);
+    PaintBatch wetBrush = makeResidualPaint(0xffe4d8afU, 0.2, 5.0, 0.0, "watercolour");
+    CHECK(liftingReservoir.load(wetBrush, wetBrush.totalMass()));
+    const double beforeLift = surface.batchAt({40, 40})->totalMass();
+    CHECK(rework.apply(surface, brush, liftingReservoir, 40.0, 40.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    CHECK(surface.batchAt({40, 40})->totalMass() < beforeLift);
+    CHECK(std::any_of(liftingReservoir.batch().pigments.begin(), liftingReservoir.batch().pigments.end(),
+        [](const auto& pigment) { return pigment.pigmentId == "PY3"; }));
+}
+
 void namedProfilesAndPhysicalPigmentPropertiesArePresent()
 {
     PigmentLibrary library;
@@ -341,6 +511,10 @@ int main()
     brushPressureSpeedAndSurfaceDabsAffectRealSparsePixels();
     materialStrokeSpacesDabsAndStaysInsideSparseCanvas();
     authoritativeSparseMaterialTilesSurviveStrokesAndRendering();
+    wetMaterialDriesSettlesSpreadsAndBecomesInactiveLazily();
+    activeTileIndexTracksWetWritesDryingAndHistoryRestore();
+    paperProfilesChangeDepositedMaterialNotOnlyRenderedTexture();
+    brushPickupRewettingAndMixerLoadsRetainPigmentProportions();
     namedProfilesAndPhysicalPigmentPropertiesArePresent();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "material engine checks passed\n";

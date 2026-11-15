@@ -257,6 +257,7 @@ private slots:
     void thumbnailWheelResizesWithoutChangingSelection();
     void colorSelectorShapeDefaultsFollowTheme();
     void spectralMixerProducesPaintLikeColours();
+    void mixerMaterialMixtureLoadsIntoBrushWithoutLosingFractions();
     void newProjectDialogShowsTheProjectTypeIcons();
     void iconsFollowTheTheme();
     void preferencesDialogStoresThemeAndIconColours();
@@ -967,6 +968,29 @@ void TestBrushUi::spectralMixerProducesPaintLikeColours()
     QCOMPARE(mix.call({QStringLiteral("#002185"), QStringLiteral("#FCD200"), 0.0}).toString(), QStringLiteral("#002185"));
     QCOMPARE(mix.call({QStringLiteral("#002185"), QStringLiteral("#FCD200"), 0.5}).toString(), QStringLiteral("#3D933E"));
     QCOMPARE(mix.call({QStringLiteral("#002185"), QStringLiteral("#FCD200"), 1.0}).toString(), QStringLiteral("#FCD200"));
+}
+
+void TestBrushUi::mixerMaterialMixtureLoadsIntoBrushWithoutLosingFractions()
+{
+    BrushSettings brush;
+    QSignalSpy changed(&brush, &BrushSettings::materialMixtureChanged);
+    QVariantList pigments;
+    pigments.push_back(QVariantMap{{QStringLiteral("pigmentId"), QStringLiteral("PY3")},
+                                   {QStringLiteral("mass"), 0.125}});
+    pigments.push_back(QVariantMap{{QStringLiteral("pigmentId"), QStringLiteral("PB15")},
+                                   {QStringLiteral("mass"), 0.875}});
+    const QVariantMap mixture{{QStringLiteral("mediumId"), QStringLiteral("watercolour")},
+                              {QStringLiteral("pigments"), pigments},
+                              {QStringLiteral("water"), 2.0}, {QStringLiteral("binder"), 0.12},
+                              {QStringLiteral("filler"), 0.0}};
+    QVERIFY(brush.loadMaterialMixture(mixture));
+    QCOMPARE(brush.materialMixture(), mixture);
+    QCOMPARE(changed.count(), 1);
+    QVERIFY(!brush.loadMaterialMixture(QVariantMap{}));
+    QCOMPARE(brush.materialMixture(), mixture);
+    brush.clearMaterialMixture();
+    QVERIFY(brush.materialMixture().isEmpty());
+    QCOMPARE(changed.count(), 2);
 }
 
 // --------------------------------------------------------------- new project
