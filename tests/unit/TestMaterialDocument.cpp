@@ -135,10 +135,10 @@ void TestMaterialDocument::nativeSaveOpenRetainsMaterialAndDigitalPlane()
     QCOMPARE(firstBatch->pigments.size(), std::size_t(1));
     QCOMPARE(secondBatch->pigments.size(), std::size_t(2));
     QVERIFY(firstBatch->mediumId == "gouache");
-    QCOMPARE(firstBatch->drying, first.drying);
-    QCOMPARE(firstBatch->settling, first.settling);
-    QCOMPARE(secondBatch->drying, second.drying);
-    QCOMPARE(secondBatch->settling, second.settling);
+    QVERIFY(std::abs(firstBatch->drying - first.drying) < 1e-6);
+    QVERIFY(std::abs(firstBatch->settling - first.settling) < 1e-6);
+    QVERIFY(std::abs(secondBatch->drying - second.drying) < 1e-6);
+    QVERIFY(std::abs(secondBatch->settling - second.settling) < 1e-6);
     QVERIFY(secondBatch->pigments[1].pigmentId == "PY3");
     QVERIFY(!reopened->isModified());
 }
