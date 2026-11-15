@@ -255,6 +255,7 @@ private slots:
     void viewToolsZoomPanAndPickColour();
     void layerIconsAct();
     void thumbnailWheelResizesWithoutChangingSelection();
+    void colorSelectorShapeDefaultsFollowTheme();
     void spectralMixerProducesPaintLikeColours();
     void newProjectDialogShowsTheProjectTypeIcons();
     void iconsFollowTheTheme();
@@ -903,6 +904,26 @@ void TestBrushUi::thumbnailWheelResizesWithoutChangingSelection()
     QVERIFY(!item(app, QStringLiteral("commandBarSizeField")));
     QVERIFY(!item(app, QStringLiteral("commandBarOpacityField")));
     QVERIFY(!item(app, QStringLiteral("preferencesToolbarButton")));
+}
+
+// The approved visual defaults are a triangle in dark mode and a square in
+// light mode. The user's explicit session preference is tested by the control
+// itself; this test protects the theme-dependent first-run default.
+void TestBrushUi::colorSelectorShapeDefaultsFollowTheme()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiColorWheelShape")));
+    auto* theme = themeOf(app);
+    auto* wheel = item(app, QStringLiteral("colorWheel"));
+    QVERIFY(theme && wheel);
+
+    theme->setProperty("mode", QStringLiteral("dark"));
+    QTRY_VERIFY(wheel->property("triangle").toBool());
+    theme->setProperty("mode", QStringLiteral("light"));
+    QTRY_VERIFY(!wheel->property("triangle").toBool());
+    theme->setProperty("mode", QStringLiteral("dark"));
+    QTRY_VERIFY(wheel->property("triangle").toBool());
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\\n'))));
 }
 
 // The spectral mixer is deterministic and retains exact endpoints.

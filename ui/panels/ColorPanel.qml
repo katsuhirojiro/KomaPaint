@@ -26,7 +26,9 @@ Rectangle {
     property real saturation: 0
     property real value: 0
     property bool updating: false
-    property bool triangleWheel: String(Workspace.sessionValue("ui.color.triangleWheel", "1")) === "1"
+    // The approved interface uses a triangle in dark mode and a square in
+    // light mode. A saved explicit shape preference still takes precedence.
+    property bool triangleWheel: String(Workspace.sessionValue("ui.color.triangleWheel", KP.isDark ? "1" : "0")) === "1"
     // Colours picked this session, newest first. Nothing is invented here: the
     // list is the foreground colour's own history.
     property var recent: []
