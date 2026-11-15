@@ -88,9 +88,15 @@ public:
     std::optional<PaintBatch> batchAt(TilePoint point) const;
     const MaterialComposition* composition(std::size_t id) const noexcept;
     const std::vector<MaterialComposition>& compositions() const noexcept { return m_compositions; }
+    std::size_t activeCompositionCount() const noexcept;
+    std::size_t reclaimUnreferenced() noexcept;
+    void pinSnapshots(std::span<const MaterialTileSnapshot> snapshots) noexcept;
+    void unpinSnapshots(std::span<const MaterialTileSnapshot> snapshots) noexcept;
 
     Result deposit(TilePoint point, const PaintBatch& paint);
     Result setBatch(TilePoint point, const PaintBatch& paint);
+    Result updateCellState(TilePoint point, double water, double binder, double filler,
+                           double drying, double settling);
     Result scaleCell(TilePoint point, double factor);
     Result erase(TilePoint point);
     // Remove up to amount of the local material while preserving its complete
@@ -137,6 +143,9 @@ private:
     std::size_t m_activeTileBytes = 0;
     std::vector<MaterialComposition> m_compositions; // index zero is the empty sentinel
     std::vector<std::size_t> m_compositionHashes;
+    std::vector<std::size_t> m_compositionLiveRefs;
+    std::vector<std::size_t> m_compositionPinRefs;
+    std::vector<std::size_t> m_freeCompositionIds;
     std::unordered_multimap<std::size_t, std::size_t> m_compositionIndex;
     std::size_t m_allocatedBytes = 0;
     std::size_t m_compositionBytes = 0;

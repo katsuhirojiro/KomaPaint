@@ -421,8 +421,8 @@ void paperProfilesChangeDepositedMaterialNotOnlyRenderedTexture()
     CHECK(hotBatch && coldBatch && roughBatch);
     CHECK(hotBatch && coldBatch && hotBatch->water != coldBatch->water);
     CHECK(coldBatch && roughBatch && coldBatch->pigmentMass() != roughBatch->pigmentMass());
-    const auto hotPixel = engine.composite(0U, *hotBatch, watercolourProfile(), hotPressedPaper(), 1.0);
-    const auto roughPixel = engine.composite(0U, *roughBatch, watercolourProfile(), roughPaper(), 1.0);
+    const auto hotPixel = engine.composite(0U, *hotBatch, watercolourProfile(), hotPressedPaper(), 1.0, 4096.0);
+    const auto roughPixel = engine.composite(0U, *roughBatch, watercolourProfile(), roughPaper(), 1.0, 4096.0);
     CHECK(hotPixel != roughPixel);
 }
 
@@ -500,6 +500,182 @@ void namedProfilesAndPhysicalPigmentPropertiesArePresent()
     CHECK(watercolourProfile().waterSpread > gouacheProfile().waterSpread);
     CHECK(nonAbsorbentPalette().paletteNonAbsorbency > absorbentPaper().paletteNonAbsorbency);
 }
+
+void spectralPigmentsMatchMagentaPurpleAndPreserveTintAlpha()
+{
+    PigmentLibrary library;
+    MaterialEngine engine(library);
+
+    PaintBatch magenta;
+    magenta.mediumId = "gouache";
+    magenta.addPigment("PR122", 1.0);
+    magenta.addBinder(0.2);
+    const auto magentaOpt = engine.opticalResult(magenta, gouacheProfile(), absorbentPaper());
+    const unsigned mr = (magentaOpt.straightArgb >> 16U) & 255U;
+    const unsigned mg = (magentaOpt.straightArgb >> 8U) & 255U;
+    const unsigned mb = magentaOpt.straightArgb & 255U;
+    CHECK(mr > 180U);
+    CHECK(mb > mg + 10U);
+    CHECK(mr > mb);
+
+    PaintBatch blue;
+    blue.mediumId = "gouache";
+    blue.addPigment("PB15", 1.0);
+    blue.addBinder(0.2);
+    const PaintBatch purple = mix(magenta, blue, "gouache");
+    const auto purpleOpt = engine.opticalResult(purple, gouacheProfile(), absorbentPaper());
+    const unsigned pr = (purpleOpt.straightArgb >> 16U) & 255U;
+    const unsigned pg = (purpleOpt.straightArgb >> 8U) & 255U;
+    const unsigned pb = purpleOpt.straightArgb & 255U;
+    CHECK(pr > pg + 15U);
+    CHECK(pb > pg + 25U);
+
+    // A heavily diluted watercolour wash must remain translucent even after its
+    // water evaporates into a dry glaze.
+    PaintBatch wetTint;
+    wetTint.mediumId = "watercolour";
+    wetTint.addPigment("PR122", 0.05);
+    wetTint.addWater(5.0);
+    wetTint.addBinder(0.02);
+    const auto wetOpt = engine.opticalResult(wetTint, watercolourProfile(), absorbentPaper(), 4.0);
+    PaintBatch dryTint = wetTint;
+    dryTint.water = 0.0;
+    dryTint.wetness = 0.0;
+    dryTint.drying = 1.0;
+    const auto dryOpt = engine.opticalResult(dryTint, watercolourProfile(), absorbentPaper(), 4.0);
+    CHECK(wetOpt.alpha < 0.65);
+    CHECK(dryOpt.alpha < 0.65);
+}
+
+void dryingReclaimsCompositionsAndRespectsUndoPins()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    auto presets = defaultBrushDefinitions();
+    const auto it = std::find_if(presets.begin(), presets.end(), [](const auto& b) {
+        return b.id == "watercolour-round";
+    });
+    CHECK(it != presets.end());
+    if (it == presets.end()) return;
+
+    BrushDefinition brush = *it;
+    brush.size = 14.0;
+    MaterialTileStore store(128, 128, 32);
+    BrushReservoir reservoir(brush.reservoirCapacity);
+    MaterialStroke stroke(store, brush, reservoir, engine, watercolourProfile(), coldPressedPaper());
+    CHECK(stroke.begin({20.0, 20.0, {0.8, 0.2, 0.0, 0.0}}));
+    CHECK(stroke.extend({60.0, 20.0, {0.8, 0.2, 0.0, 0.0}}));
+    CHECK(stroke.end({60.0, 20.0, {0.8, 0.2, 0.0, 0.0}}));
+
+    const std::size_t afterStrokeComps = store.activeCompositionCount();
+    CHECK(afterStrokeComps > 0);
+
+    // Pin a snapshot as UndoStack does before drying advances.
+    const auto pinnedSnap = store.snapshot({0, 0});
+    const std::vector<MaterialTileSnapshot> pinned{pinnedSnap};
+    store.pinSnapshots(pinned);
+
+    for (int step = 0; step < 30 && !store.activeTilePoints().empty(); ++step) {
+        const auto stats = engine.advanceWetMaterial(store, 0.2, coldPressedPaper());
+        CHECK(!stats.failed);
+    }
+
+    // Pure evaporation / bounded capillary spread should not explode composition storage.
+    const std::size_t afterDryingComps = store.activeCompositionCount();
+    CHECK(afterDryingComps < afterStrokeComps * 4 + 32);
+
+    // Unpinning and reclaiming drops any unreferenced historical compositions.
+    store.unpinSnapshots(pinned);
+    store.reclaimUnreferenced();
+    CHECK(store.activeCompositionCount() <= afterDryingComps);
+}
+
+void materialStrokeAutoReloadsCleanMixtureAndScalesBySize()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    auto presets = defaultBrushDefinitions();
+    const auto mopIt = std::find_if(presets.begin(), presets.end(), [](const auto& b) {
+        return b.id == "watercolour-mop";
+    });
+    const auto roundIt = std::find_if(presets.begin(), presets.end(), [](const auto& b) {
+        return b.id == "watercolour-round";
+    });
+    CHECK(mopIt != presets.end() && roundIt != presets.end());
+    if (mopIt == presets.end() || roundIt == presets.end()) return;
+
+    // Seed surface with contrasting PY3 paint to verify pickup does not leak
+    // into subsequent auto-reloaded strokes.
+    MaterialTileStore store(256, 256, 64);
+    PaintBatch yellowSurface;
+    yellowSurface.mediumId = "watercolour";
+    yellowSurface.addPigment("PY3", 1.0);
+    yellowSurface.addWater(2.0);
+    yellowSurface.addBinder(0.1);
+    for (int y = 28; y <= 36; ++y)
+        for (int x = 28; x <= 36; ++x)
+            CHECK(store.setBatch({x, y}, yellowSurface) == MaterialTileStore::Result::Changed);
+
+    BrushDefinition brush = *roundIt;
+    brush.size = 12.0;
+    brush.pickupRate = 0.8;
+    brush.rewetting = 0.8;
+    brush.initialPaint = PaintBatch{};
+    brush.initialPaint.mediumId = "watercolour";
+    brush.initialPaint.addPigment("PR122", 1.0);
+    brush.initialPaint.addWater(2.0);
+    brush.initialPaint.addBinder(0.1);
+    brush.autoReloadOnStroke = true;
+
+    BrushReservoir reservoir(brush.reservoirCapacity);
+    MaterialStroke firstStroke(store, brush, reservoir, engine, watercolourProfile(), coldPressedPaper());
+    CHECK(firstStroke.begin({32.0, 32.0, {0.9, 0.1, 0.0, 0.0}}));
+    CHECK(firstStroke.end({34.0, 32.0, {0.9, 0.1, 0.0, 0.0}}));
+    CHECK(std::any_of(reservoir.batch().pigments.begin(), reservoir.batch().pigments.end(),
+        [](const auto& p) { return p.pigmentId == "PY3"; }));
+
+    // A new stroke on a clean area automatically reloads clean PR122 without
+    // carrying PY3 contamination from the previous stroke.
+    MaterialStroke secondStroke(store, brush, reservoir, engine, watercolourProfile(), coldPressedPaper());
+    CHECK(secondStroke.begin({160.0, 160.0, {0.9, 0.1, 0.0, 0.0}}));
+    const auto cleanSpotBeforeEnd = store.batchAt({160, 160});
+    CHECK(cleanSpotBeforeEnd && cleanSpotBeforeEnd->pigments.size() == 1);
+    CHECK(cleanSpotBeforeEnd && cleanSpotBeforeEnd->pigments.front().pigmentId == "PR122");
+    CHECK(secondStroke.end({180.0, 160.0, {0.9, 0.1, 0.0, 0.0}}));
+
+    // A large mop brush must sustain a long stroke without emptying in 4 dabs,
+    // and light pressure must remain visible on the rendered canvas.
+    BrushDefinition mop = *mopIt;
+    mop.autoReloadOnStroke = true;
+    BrushReservoir mopReservoir(mop.reservoirCapacity);
+    MaterialTileStore mopStore(512, 128, 64);
+    MaterialStroke longStroke(mopStore, mop, mopReservoir, engine, watercolourProfile(), coldPressedPaper());
+    CHECK(longStroke.begin({40.0, 64.0, {0.8, 0.2, 0.0, 0.0}}));
+    CHECK(longStroke.extend({240.0, 64.0, {0.8, 0.2, 0.0, 0.0}}));
+    CHECK(longStroke.end({440.0, 64.0, {0.8, 0.2, 0.0, 0.0}}));
+    CHECK(mopReservoir.fillRatio() > 0.05);
+    const auto endCell = mopStore.batchAt({420, 64});
+    CHECK(endCell && endCell->pigmentMass() > 0.0);
+
+    BrushDefinition lightBrush = *roundIt;
+    lightBrush.size = 12.0;
+    lightBrush.initialPaint = PaintBatch{};
+    lightBrush.initialPaint.mediumId = "watercolour";
+    lightBrush.initialPaint.addPigment("PR122", 1.0);
+    lightBrush.initialPaint.addWater(2.0);
+    lightBrush.initialPaint.addBinder(0.1);
+    lightBrush.autoReloadOnStroke = true;
+    MaterialTileStore lightStore(64, 64, 64);
+    BrushReservoir lightReservoir(lightBrush.reservoirCapacity);
+    MaterialStroke lightStroke(lightStore, lightBrush, lightReservoir, engine, watercolourProfile(), coldPressedPaper());
+    CHECK(lightStroke.begin({32.0, 32.0, {0.08, 0.0, 0.0, 0.0}}));
+    CHECK(lightStroke.end({32.0, 32.0, {0.08, 0.0, 0.0, 0.0}}));
+    std::vector<std::uint32_t> rendered;
+    MaterialRenderer renderer(engine);
+    CHECK(renderer.renderTile(lightStore, {0, 0}, {}, watercolourProfile(), coldPressedPaper(), &rendered));
+    const std::uint32_t centerPixel = rendered[32 * 64 + 32];
+    CHECK((centerPixel >> 24U) >= 15U);
+}
 }
 
 int main()
@@ -516,6 +692,9 @@ int main()
     paperProfilesChangeDepositedMaterialNotOnlyRenderedTexture();
     brushPickupRewettingAndMixerLoadsRetainPigmentProportions();
     namedProfilesAndPhysicalPigmentPropertiesArePresent();
+    spectralPigmentsMatchMagentaPurpleAndPreserveTintAlpha();
+    dryingReclaimsCompositionsAndRespectsUndoPins();
+    materialStrokeAutoReloadsCleanMixtureAndScalesBySize();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "material engine checks passed\n";
     return EXIT_SUCCESS;

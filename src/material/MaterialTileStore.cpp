@@ -32,6 +32,12 @@ bool emptyComposition(const MaterialComposition& composition) noexcept
     return composition.mediumId.empty() && composition.pigments.empty();
 }
 
+std::size_t compositionCharge(const MaterialComposition& composition) noexcept
+{
+    return sizeof(MaterialComposition) + composition.mediumId.capacity()
+        + composition.pigments.capacity() * sizeof(PigmentComponent) + 3 * sizeof(std::size_t);
+}
+
 bool validProfile(const MaterialComposition& composition) noexcept
 {
     if (composition.mediumId.empty()) return false;
@@ -66,9 +72,11 @@ MaterialTileStore::MaterialTileStore(std::int64_t width, std::int64_t height, in
     : m_geometry(width, height, tileSize), m_dirty(m_geometry), m_budget(std::move(budget))
 {
     // ID zero is an explicit empty sentinel. Real compositions are immutable
-    // and append-only so tile/history snapshots never acquire dangling IDs.
+    // while referenced; unreferenced and unpinned entries can be reclaimed.
     m_compositions.emplace_back();
     m_compositionHashes.push_back(0);
+    m_compositionLiveRefs.push_back(0);
+    m_compositionPinRefs.push_back(0);
 }
 
 MaterialTileStore::~MaterialTileStore() { releaseAll(); }
@@ -144,7 +152,73 @@ std::optional<MaterialCell> MaterialTileStore::cellAt(TilePoint point) const noe
 
 const MaterialComposition* MaterialTileStore::composition(std::size_t id) const noexcept
 {
-    return id > 0 && id < m_compositions.size() ? &m_compositions[id] : nullptr;
+    return id > 0 && id < m_compositions.size() && !m_compositions[id].mediumId.empty()
+        ? &m_compositions[id] : nullptr;
+}
+
+std::size_t MaterialTileStore::activeCompositionCount() const noexcept
+{
+    std::size_t count = 0;
+    for (std::size_t id = 1; id < m_compositions.size(); ++id)
+        if (!m_compositions[id].mediumId.empty()) ++count;
+    return count;
+}
+
+std::size_t MaterialTileStore::reclaimUnreferenced() noexcept
+{
+    std::size_t reclaimed = 0;
+    for (std::size_t id = 1; id < m_compositions.size(); ++id) {
+        if (m_compositions[id].mediumId.empty()) continue;
+        if (m_compositionLiveRefs[id] != 0 || m_compositionPinRefs[id] != 0) continue;
+        const std::size_t charge = compositionCharge(m_compositions[id]);
+        const auto range = m_compositionIndex.equal_range(m_compositionHashes[id]);
+        for (auto it = range.first; it != range.second; ++it) {
+            if (it->second == id) { m_compositionIndex.erase(it); break; }
+        }
+        m_compositions[id] = MaterialComposition{};
+        m_compositionHashes[id] = 0;
+        m_compositionBytes -= charge;
+        if (m_budget) m_budget->release(DocumentMemoryBudget::Category::Artwork, charge);
+        try {
+            m_freeCompositionIds.push_back(id);
+        } catch (const std::bad_alloc&) {}
+          catch (const std::length_error&) {}
+        ++reclaimed;
+    }
+    while (m_compositions.size() > 1 && m_compositions.back().mediumId.empty()
+           && m_compositionLiveRefs.back() == 0 && m_compositionPinRefs.back() == 0) {
+        const std::size_t tailId = m_compositions.size() - 1;
+        m_compositions.pop_back();
+        m_compositionHashes.pop_back();
+        m_compositionLiveRefs.pop_back();
+        m_compositionPinRefs.pop_back();
+        m_freeCompositionIds.erase(
+            std::remove(m_freeCompositionIds.begin(), m_freeCompositionIds.end(), tailId),
+            m_freeCompositionIds.end());
+    }
+    return reclaimed;
+}
+
+void MaterialTileStore::pinSnapshots(std::span<const MaterialTileSnapshot> snapshots) noexcept
+{
+    for (const auto& snap : snapshots) {
+        for (const auto& entry : snap.entries) {
+            const std::size_t id = entry.cell.compositionId;
+            if (id > 0 && id < m_compositionPinRefs.size())
+                ++m_compositionPinRefs[id];
+        }
+    }
+}
+
+void MaterialTileStore::unpinSnapshots(std::span<const MaterialTileSnapshot> snapshots) noexcept
+{
+    for (const auto& snap : snapshots) {
+        for (const auto& entry : snap.entries) {
+            const std::size_t id = entry.cell.compositionId;
+            if (id > 0 && id < m_compositionPinRefs.size() && m_compositionPinRefs[id] > 0)
+                --m_compositionPinRefs[id];
+        }
+    }
 }
 
 std::optional<PaintBatch> MaterialTileStore::expand(const MaterialCell& cell) const
@@ -226,32 +300,67 @@ std::optional<std::size_t> MaterialTileStore::intern(const PaintBatch& paint, bo
     for (const auto& pigment : merged) pigmentMass += pigment.mass;
     if (!std::isfinite(pigmentMass)) throw std::invalid_argument("pigment mass overflow");
     if (pigmentMass > 0.0) {
-        for (auto& pigment : merged) {
+        std::size_t maxIdx = 0;
+        double maxMass = 0.0;
+        double sum = 0.0;
+        for (std::size_t i = 0; i < merged.size(); ++i) {
+            auto& pigment = merged[i];
             pigment.mass /= pigmentMass;
             if (!std::isfinite(pigment.mass) || pigment.mass <= 0.0)
                 throw std::invalid_argument("pigment proportion is not representable");
+            if (pigment.mass >= 1e-10) {
+                const double quantized = std::round(pigment.mass * 1e12) / 1e12;
+                if (quantized > 0.0) pigment.mass = quantized;
+            }
+            sum += pigment.mass;
+            if (pigment.mass > maxMass) { maxMass = pigment.mass; maxIdx = i; }
         }
+        if (std::abs(sum - 1.0) > 1e-14 && merged[maxIdx].mass + (1.0 - sum) > 0.0)
+            merged[maxIdx].mass += (1.0 - sum);
     }
     canonical.pigments = std::move(merged);
     const std::size_t hash = compositionHash(canonical);
     const auto [first, last] = m_compositionIndex.equal_range(hash);
     for (auto candidate = first; candidate != last; ++candidate)
-        if (sameComposition(m_compositions[candidate->second], canonical)) return candidate->second;
+        if (!m_compositions[candidate->second].mediumId.empty()
+            && sameComposition(m_compositions[candidate->second], canonical)) return candidate->second;
 
-    const std::size_t charge = sizeof(MaterialComposition) + canonical.mediumId.capacity()
-        + canonical.pigments.capacity() * sizeof(PigmentComponent) + 3 * sizeof(std::size_t);
+    const std::size_t charge = compositionCharge(canonical);
     if (m_budget && !m_budget->reserve(DocumentMemoryBudget::Category::Artwork, charge))
         return std::nullopt;
     try {
-        m_compositions.push_back(std::move(canonical));
-        try {
-            m_compositionHashes.push_back(hash);
-            try { m_compositionIndex.emplace(hash, m_compositions.size() - 1); }
-            catch (...) { m_compositionHashes.pop_back(); throw; }
-        } catch (...) { m_compositions.pop_back(); throw; }
+        std::size_t slotId = 0;
+        if (!m_freeCompositionIds.empty()) {
+            slotId = m_freeCompositionIds.back();
+            m_compositionIndex.emplace(hash, slotId);
+            m_freeCompositionIds.pop_back();
+            m_compositions[slotId] = std::move(canonical);
+            m_compositionHashes[slotId] = hash;
+            m_compositionLiveRefs[slotId] = 0;
+            m_compositionPinRefs[slotId] = 0;
+        } else {
+            m_compositions.push_back(std::move(canonical));
+            try {
+                m_compositionHashes.push_back(hash);
+                try {
+                    m_compositionLiveRefs.push_back(0);
+                    m_compositionPinRefs.push_back(0);
+                    slotId = m_compositions.size() - 1;
+                    m_compositionIndex.emplace(hash, slotId);
+                } catch (...) {
+                    if (m_compositionLiveRefs.size() == m_compositions.size()) m_compositionLiveRefs.pop_back();
+                    if (m_compositionPinRefs.size() == m_compositions.size()) m_compositionPinRefs.pop_back();
+                    m_compositionHashes.pop_back();
+                    throw;
+                }
+            } catch (...) {
+                m_compositions.pop_back();
+                throw;
+            }
+        }
         m_compositionBytes += charge;
         if (inserted) *inserted = true;
-        return m_compositions.size() - 1;
+        return slotId;
     } catch (...) {
         if (m_budget) m_budget->release(DocumentMemoryBudget::Category::Artwork, charge);
         throw;
@@ -480,6 +589,11 @@ MaterialTileStore::Result MaterialTileStore::writeCell(TilePoint point, const Ma
         m_activeTiles.insert(activePosition, tilePoint); // capacity reserved before changing the cell
     else if (!activeAfter && activeListed)
         m_activeTiles.erase(activePosition);
+    if (old.compositionId > 0 && old.compositionId < m_compositionLiveRefs.size()
+        && m_compositionLiveRefs[old.compositionId] > 0)
+        --m_compositionLiveRefs[old.compositionId];
+    if (cell.compositionId > 0 && cell.compositionId < m_compositionLiveRefs.size())
+        ++m_compositionLiveRefs[cell.compositionId];
     notify(tilePoint);
     return Result::Changed;
 }
@@ -524,6 +638,31 @@ MaterialTileStore::Result MaterialTileStore::deposit(TilePoint point, const Pain
 MaterialTileStore::Result MaterialTileStore::setBatch(TilePoint point, const PaintBatch& paint)
 {
     return write(point, paint, false);
+}
+
+MaterialTileStore::Result MaterialTileStore::updateCellState(TilePoint point, double water,
+                                                             double binder, double filler,
+                                                             double drying, double settling)
+{
+    if (!finiteFloat(water) || !finiteFloat(binder) || !finiteFloat(filler)
+        || !std::isfinite(drying) || drying < 0.0 || drying > 1.0
+        || !std::isfinite(settling) || settling < 0.0 || settling > 1.0)
+        return Result::InvalidData;
+    if (!isValid() || !m_geometry.address(point)) return Result::OutOfBounds;
+    const auto existing = cellAt(point);
+    if (!existing) return Result::OutOfBounds;
+    if (existing->empty()) return Result::Unchanged;
+    MaterialCell next = *existing;
+    next.water = static_cast<float>(water);
+    next.binder = static_cast<float>(binder);
+    next.filler = static_cast<float>(filler);
+    next.drying = static_cast<float>(drying);
+    next.settling = static_cast<float>(settling);
+    const double total = static_cast<double>(next.pigmentMass) + water + binder + filler;
+    if (total <= 0.0) return erase(point);
+    next.wetness = static_cast<float>(std::clamp(water / total, 0.0, 1.0));
+    next.consistency = static_cast<float>(std::clamp((static_cast<double>(next.pigmentMass) + binder + filler) / total, 0.0, 1.0));
+    return writeCell(point, next);
 }
 
 MaterialTileStore::Result MaterialTileStore::scaleCell(TilePoint point, double factor)
@@ -571,19 +710,26 @@ MaterialTileStore::Result MaterialTileStore::take(TilePoint point, double amount
 
 void MaterialTileStore::eraseUnreferencedComposition(std::size_t id) noexcept
 {
-    // Appended IDs are stable and never reused. Drop an unused tail record only
-    // when the failed write created the final ID; otherwise retain it so that
-    // every historical/reference ID remains unambiguous.
-    if (id + 1 != m_compositions.size()) return;
-    const auto charge = sizeof(MaterialComposition) + m_compositions[id].mediumId.capacity()
-        + m_compositions[id].pigments.capacity() * sizeof(PigmentComponent) + 3 * sizeof(std::size_t);
+    if (id == 0 || id >= m_compositions.size() || m_compositions[id].mediumId.empty()) return;
+    if (m_compositionLiveRefs[id] != 0 || m_compositionPinRefs[id] != 0) return;
+    const auto charge = compositionCharge(m_compositions[id]);
     const auto range = m_compositionIndex.equal_range(m_compositionHashes[id]);
     for (auto it = range.first; it != range.second; ++it)
         if (it->second == id) { m_compositionIndex.erase(it); break; }
-    m_compositions.pop_back();
-    m_compositionHashes.pop_back();
     m_compositionBytes -= charge;
     if (m_budget) m_budget->release(DocumentMemoryBudget::Category::Artwork, charge);
+    if (id + 1 == m_compositions.size()) {
+        m_compositions.pop_back();
+        m_compositionHashes.pop_back();
+        m_compositionLiveRefs.pop_back();
+        m_compositionPinRefs.pop_back();
+    } else {
+        m_compositions[id] = MaterialComposition{};
+        m_compositionHashes[id] = 0;
+        try { m_freeCompositionIds.push_back(id); }
+        catch (const std::bad_alloc&) {}
+        catch (const std::length_error&) {}
+    }
 }
 
 MaterialTileSnapshot MaterialTileStore::snapshot(TilePoint tile) const
@@ -680,14 +826,30 @@ MaterialTileStore::Result MaterialTileStore::restoreTiles(std::span<const Materi
             auto incoming = staged.extract(snapshot.tile);
             auto current = m_tiles.find(snapshot.tile);
             if (current != m_tiles.end()) {
+                for (const auto& oldEntry : current->second.entries) {
+                    const std::size_t oldId = oldEntry.cell.compositionId;
+                    if (oldId > 0 && oldId < m_compositionLiveRefs.size()
+                        && m_compositionLiveRefs[oldId] > 0)
+                        --m_compositionLiveRefs[oldId];
+                }
                 m_allocatedBytes -= current->second.chargedBytes;
                 if (m_budget) m_budget->release(DocumentMemoryBudget::Category::Artwork, current->second.chargedBytes);
                 if (incoming.empty() || incoming.mapped().entries.empty()) m_tiles.erase(current);
                 else {
+                    for (const auto& newEntry : incoming.mapped().entries) {
+                        const std::size_t newId = newEntry.cell.compositionId;
+                        if (newId > 0 && newId < m_compositionLiveRefs.size())
+                            ++m_compositionLiveRefs[newId];
+                    }
                     m_allocatedBytes += incoming.mapped().chargedBytes;
                     current->second = std::move(incoming.mapped());
                 }
             } else if (!incoming.empty() && !incoming.mapped().entries.empty()) {
+                for (const auto& newEntry : incoming.mapped().entries) {
+                    const std::size_t newId = newEntry.cell.compositionId;
+                    if (newId > 0 && newId < m_compositionLiveRefs.size())
+                        ++m_compositionLiveRefs[newId];
+                }
                 m_allocatedBytes += incoming.mapped().chargedBytes;
                 m_tiles.insert(std::move(incoming));
             }
@@ -714,9 +876,9 @@ bool MaterialTileStore::importCompositions(const std::vector<MaterialComposition
         return false;
     std::size_t charge = 0;
     for (std::size_t i = 1; i < imported.size(); ++i) {
+        if (emptyComposition(imported[i])) continue;
         if (!validProfile(imported[i])) return false;
-        const std::size_t item = sizeof(MaterialComposition) + imported[i].mediumId.capacity()
-            + imported[i].pigments.capacity() * sizeof(PigmentComponent) + 3 * sizeof(std::size_t);
+        const std::size_t item = compositionCharge(imported[i]);
         if (item > std::numeric_limits<std::size_t>::max() - charge) return false;
         charge += item;
     }
@@ -726,15 +888,26 @@ bool MaterialTileStore::importCompositions(const std::vector<MaterialComposition
         std::vector<std::size_t> hashes;
         hashes.reserve(staged.size());
         hashes.push_back(0);
+        std::vector<std::size_t> liveRefs(staged.size(), 0);
+        std::vector<std::size_t> pinRefs(staged.size(), 0);
+        std::vector<std::size_t> freeIds;
         std::unordered_multimap<std::size_t, std::size_t> index;
         index.reserve(staged.size() - 1);
         for (std::size_t i = 1; i < staged.size(); ++i) {
-            const auto hash = compositionHash(staged[i]);
-            hashes.push_back(hash);
-            index.emplace(hash, i);
+            if (emptyComposition(staged[i])) {
+                hashes.push_back(0);
+                freeIds.push_back(i);
+            } else {
+                const auto hash = compositionHash(staged[i]);
+                hashes.push_back(hash);
+                index.emplace(hash, i);
+            }
         }
         m_compositions.swap(staged);
         m_compositionHashes.swap(hashes);
+        m_compositionLiveRefs.swap(liveRefs);
+        m_compositionPinRefs.swap(pinRefs);
+        m_freeCompositionIds.swap(freeIds);
         m_compositionIndex.swap(index);
         m_compositionBytes = charge;
         return true;
@@ -784,17 +957,13 @@ bool MaterialRenderer::renderTile(const MaterialTileStore& material, TilePoint t
             else if (batch->mediumId == watercolourProfile().id) profile = &watercolourProfile();
             else if (batch->mediumId == inkProfile().id) profile = &inkProfile();
             else if (batch->mediumId != defaultMedium.id) return false;
-            // MaterialDab distributes its transferred batch across a pixel's
-            // contact weight and derives dry-film depth as 64 batch units per
-            // unit of local mass. Reapply that mapping here. Using local mass
-            // as both alpha coverage and tooth contact would square an already
-            // sparse per-pixel deposit and make real brush strokes nearly
-            // invisible.
-            constexpr double FilmDepthPerBatchUnit = 64.0;
-            const double filmMass = batch->totalMass() * FilmDepthPerBatchUnit;
+            // MaterialDab deposits a local fraction of a batch per pixel; scale
+            // by the 64x64 tile pixel reference unit so optical depth matches
+            // direct batch evaluation without letting water inflate opacity.
+            constexpr double ReferenceBatchPixels = 4096.0;
             const double toothContact = 0.84 + 0.16 * static_cast<double>(cell.consistency);
             (*output)[entry.localIndex] = m_engine.composite((*output)[entry.localIndex], *batch,
-                *profile, surface, 1.0, filmMass, toothContact);
+                *profile, surface, 1.0, ReferenceBatchPixels, toothContact);
         }
         return true;
     } catch (const std::bad_alloc&) { return false; }

@@ -168,6 +168,7 @@ void CanvasViewport::setDocument(QObject* object)
     }
     if (m_materialTimer) m_materialTimer->stop();
     cancelStroke();
+    m_materialReservoir.reset();
     m_document = doc;
     m_invalidation.reset();
     clearCache();
@@ -551,19 +552,22 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             definition.releaseRate *= brush->flow() / 100.0;
             definition.contactTransfer *= brush->opacity() / 100.0
                 * (brush->erase() ? brush->flow() / 100.0 : 1.0);
+            definition.autoReloadOnStroke = !brush->persistentReservoir();
             if (brush->textured()) {
                 definition.tip = material::TipGeometry::Bristle;
                 definition.bristleCount = 13;
                 definition.bristleSpread = 0.55;
             }
-            m_materialReservoir = std::make_unique<material::BrushReservoir>(definition.reservoirCapacity);
-            if (!brush->erase()) {
-                if (!mixerPaintLoaded) {
-                    const double alpha = color.alphaF();
-                    definition.initialPaint = material::makeResidualPaint(
-                        color.rgba(), alpha, 0.3 * alpha, 0.2 * alpha, definition.mediumId);
-                }
-                if (!m_materialReservoir->load(definition.initialPaint, definition.initialPaint.totalMass())) {
+            if (!brush->erase() && !mixerPaintLoaded) {
+                const double alpha = color.alphaF();
+                definition.initialPaint = material::makeResidualPaint(
+                    color.rgba(), alpha, 0.3 * alpha, 0.2 * alpha, definition.mediumId);
+            }
+            if (!m_materialReservoir || !brush->persistentReservoir()
+                || m_materialReservoir->capacity() != definition.reservoirCapacity) {
+                m_materialReservoir = std::make_unique<material::BrushReservoir>(definition.reservoirCapacity);
+                if (!brush->erase()
+                    && !m_materialReservoir->load(definition.initialPaint, definition.initialPaint.totalMass())) {
                     m_materialReservoir.reset();
                     m_history->cancelStroke();
                     emit strokeError(QStringLiteral("The selected colour could not be loaded into the material brush."));
@@ -693,13 +697,16 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
     }
     m_stroke.reset();
     m_materialStroke.reset();
-    m_materialReservoir.reset();
     if (m_history && !m_history->commitStroke()) {
         if (m_history->strokeActive()) m_history->cancelStroke();
         if (m_strokeLayer && m_document) m_document->setModified(m_modifiedBeforeStroke);
         m_strokeLayer = nullptr;
         emit strokeError(QStringLiteral("Could not commit stroke history."));
-    } else m_strokeLayer = nullptr;
+    } else {
+        if (materialStroke && m_strokeLayer)
+            m_strokeLayer->materialTiles().reclaimUnreferenced();
+        m_strokeLayer = nullptr;
+    }
     refreshMaterialSimulation();
     qDebug() << "[CanvasViewport] endStroke: stroke ended, ok=" << ok;
 }
@@ -708,7 +715,6 @@ void CanvasViewport::cancelStroke() {
     if (m_history && m_history->strokeActive()) m_history->cancelStroke();
     m_stroke.reset();
     m_materialStroke.reset();
-    m_materialReservoir.reset();
     m_strokeLayer = nullptr;
 }
 

@@ -14,6 +14,45 @@ constexpr std::array<double, SpectralBands> Wavelengths{
     405, 430, 455, 480, 505, 530, 555, 580, 605, 630, 655, 680
 };
 
+// CIE 1931 2-degree CMF under D65 normalized so flat reflectance 1.0 maps to
+// linear sRGB (1.0, 1.0, 1.0).
+constexpr std::array<std::array<double, SpectralBands>, 3> SpectralToLinearRgb{{
+    { 0.00366,  0.01884, -0.00674, -0.07931, -0.16926, -0.20265,
+      0.01365,  0.35078,  0.54764,  0.37885,  0.12488,  0.01970 },
+    {-0.00346, -0.03989, -0.03106,  0.04790,  0.17985,  0.34724,
+      0.32625,  0.18391,  0.02402, -0.02598, -0.00913,  0.00035 },
+    { 0.02958,  0.37334,  0.46845,  0.21079,  0.03578, -0.02798,
+     -0.03970, -0.03008, -0.01414, -0.00445, -0.00139, -0.00020 }
+}};
+
+// Smooth calibrated primary/secondary reflectance spectra for arbitrary RGB
+// compatibility; every corner lies strictly in [0.015, 0.985] and preserves
+// subtractive mixing behaviour without inventing named pigment identities.
+constexpr Spectrum BasisRed{
+    0.0446, 0.0344, 0.0150, 0.0150, 0.0150, 0.0150,
+    0.0150, 0.1321, 0.8026, 0.9850, 0.9850, 0.9850
+};
+constexpr Spectrum BasisGreen{
+    0.0150, 0.0150, 0.0150, 0.2721, 0.9428, 0.9850,
+    0.9850, 0.7532, 0.1803, 0.0150, 0.0150, 0.0221
+};
+constexpr Spectrum BasisBlue{
+    0.9850, 0.9850, 0.9841, 0.6361, 0.2150, 0.0150,
+    0.0150, 0.0150, 0.0226, 0.0941, 0.1417, 0.1659
+};
+constexpr Spectrum BasisCyan{
+    0.9554, 0.9656, 0.9850, 0.9850, 0.9850, 0.9850,
+    0.9850, 0.8679, 0.1974, 0.0150, 0.0150, 0.0150
+};
+constexpr Spectrum BasisMagenta{
+    0.9850, 0.9850, 0.9850, 0.7279, 0.0572, 0.0150,
+    0.0150, 0.2468, 0.8197, 0.9850, 0.9850, 0.9779
+};
+constexpr Spectrum BasisYellow{
+    0.0150, 0.0150, 0.0159, 0.3639, 0.7850, 0.9850,
+    0.9850, 0.9850, 0.9774, 0.9059, 0.8583, 0.8341
+};
+
 double clamp01(double value) noexcept
 {
     return std::clamp(value, 0.0, 1.0);
@@ -58,19 +97,51 @@ std::array<double, 3> unpackLinear(std::uint32_t argb) noexcept
             srgbToLinear(double(argb & 0xffU) / 255.0)};
 }
 
+std::array<double, 3> spectrumToLinearRgb(const Spectrum& spectrum) noexcept
+{
+    std::array<double, 3> rgb{0.0, 0.0, 0.0};
+    for (int c = 0; c < 3; ++c) {
+        double sum = 0.0;
+        for (std::size_t i = 0; i < SpectralBands; ++i)
+            sum += SpectralToLinearRgb[static_cast<std::size_t>(c)][i] * spectrum[i];
+        rgb[static_cast<std::size_t>(c)] = clamp01(sum);
+    }
+    return rgb;
+}
+
 Spectrum rgbToReflectance(std::uint32_t argb) noexcept
 {
     const auto rgb = unpackLinear(argb);
+    const double r = rgb[0], g = rgb[1], b = rgb[2];
+    const double w = std::min({r, g, b});
+    const double maxC = std::max({r, g, b});
+    const double k = clamp01(1.0 - maxC);
+
+    // Express the residual chromaticity as a convex combination of one
+    // secondary and one primary basis curve, plus neutral white and black.
+    const Spectrum* secondary = &BasisYellow;
+    const Spectrum* primary = &BasisRed;
+    double secWeight = 0.0;
+    double priWeight = 0.0;
+    if (r >= g && g >= b) {
+        secWeight = g - b; priWeight = r - g; secondary = &BasisYellow; primary = &BasisRed;
+    } else if (g >= r && r >= b) {
+        secWeight = r - b; priWeight = g - r; secondary = &BasisYellow; primary = &BasisGreen;
+    } else if (g >= b && b >= r) {
+        secWeight = b - r; priWeight = g - b; secondary = &BasisCyan; primary = &BasisGreen;
+    } else if (b >= g && g >= r) {
+        secWeight = g - r; priWeight = b - g; secondary = &BasisCyan; primary = &BasisBlue;
+    } else if (b >= r && r >= g) {
+        secWeight = r - g; priWeight = b - r; secondary = &BasisMagenta; primary = &BasisBlue;
+    } else {
+        secWeight = b - g; priWeight = r - b; secondary = &BasisMagenta; primary = &BasisRed;
+    }
+
     Spectrum result{};
-    // Smooth basis functions provide a continuous spectral approximation for
-    // arbitrary RGB input. The component remains explicitly unidentified.
     for (std::size_t i = 0; i < SpectralBands; ++i) {
-        const double w = Wavelengths[i];
-        const double r = gaussian(w, 610.0, 57.0);
-        const double g = gaussian(w, 535.0, 43.0);
-        const double b = gaussian(w, 450.0, 38.0);
-        const double norm = r + g + b;
-        result[i] = norm > 0 ? clamp01((r * rgb[0] + g * rgb[1] + b * rgb[2]) / norm) : 0.0;
+        const double value = w * 0.985 + k * 0.015
+            + secWeight * (*secondary)[i] + priWeight * (*primary)[i];
+        result[i] = std::clamp(value, 0.015, 0.985);
     }
     return result;
 }
@@ -103,7 +174,7 @@ PigmentDefinition pigmentFromReflectance(std::string id, std::string name,
         // artist's pigment-concentration control.
         const double scatter = std::clamp(0.6 + size * 0.035 + density * 0.08, 0.5, 2.0);
         p.scattering[i] = scatter;
-        p.absorption[i] = ratio * scatter / std::max(0.1, tint);
+        p.absorption[i] = ratio * scatter * std::max(0.1, tint);
     }
     return p;
 }
@@ -113,7 +184,7 @@ Spectrum yellowSpectrum() noexcept
     Spectrum s{};
     for (std::size_t i = 0; i < s.size(); ++i) {
         const double w = Wavelengths[i];
-        s[i] = clamp01(0.035 + 0.90 / (1.0 + std::exp(-(w - 493.0) / 12.0)));
+        s[i] = clamp01(0.018 + 0.91 / (1.0 + std::exp(-(w - 486.0) / 8.0)));
     }
     return s;
 }
@@ -123,17 +194,21 @@ Spectrum blueSpectrum() noexcept
     Spectrum s{};
     for (std::size_t i = 0; i < s.size(); ++i) {
         const double w = Wavelengths[i];
-        s[i] = clamp01(0.025 + 0.83 / (1.0 + std::exp((w - 490.0) / 15.0)));
+        s[i] = clamp01(0.055 + 0.78 / (1.0 + std::exp((w - 492.0) / 14.0))
+                       + 0.055 / (1.0 + std::exp(-(w - 635.0) / 14.0)));
     }
     return s;
 }
 
 Spectrum redSpectrum() noexcept
 {
+    // Quinacridone Magenta (PR122): strong red reflection, secondary violet-blue
+    // reflection, and strong green absorption trough.
     Spectrum s{};
     for (std::size_t i = 0; i < s.size(); ++i) {
         const double w = Wavelengths[i];
-        s[i] = clamp01(0.035 + 0.84 / (1.0 + std::exp(-(w - 585.0) / 18.0)));
+        s[i] = clamp01(0.018 + 0.86 / (1.0 + std::exp(-(w - 578.0) / 14.0))
+                       + 0.48 / (1.0 + std::exp((w - 446.0) / 14.0)));
     }
     return s;
 }
@@ -141,14 +216,14 @@ Spectrum redSpectrum() noexcept
 Spectrum whiteSpectrum() noexcept
 {
     Spectrum s{};
-    s.fill(0.90);
+    s.fill(0.94);
     return s;
 }
 
 Spectrum blackSpectrum() noexcept
 {
     Spectrum s{};
-    s.fill(0.025);
+    s.fill(0.022);
     return s;
 }
 
@@ -157,8 +232,8 @@ Spectrum earthSpectrum() noexcept
     Spectrum s{};
     for (std::size_t i = 0; i < s.size(); ++i) {
         const double w = Wavelengths[i];
-        const double red = 0.42 / (1.0 + std::exp(-(w - 565.0) / 22.0));
-        s[i] = clamp01(0.035 + red + 0.06 * gaussian(w, 525.0, 45.0));
+        const double red = 0.28 / (1.0 + std::exp(-(w - 565.0) / 22.0));
+        s[i] = clamp01(0.025 + red + 0.04 * gaussian(w, 525.0, 45.0));
     }
     return s;
 }
@@ -464,6 +539,21 @@ bool BrushReservoir::load(const PaintBatch& paint, double amount)
     return true;
 }
 
+bool BrushReservoir::reload(const BrushDefinition& brush)
+{
+    if (!brush.valid() || m_capacity <= 0.0 || brush.initialLoad <= 0.0)
+        return false;
+    const double sourceMass = brush.initialPaint.totalMass();
+    if (!finiteNonnegative(sourceMass) || sourceMass <= 0.0)
+        return false;
+    const double targetMass = std::min(m_capacity, m_capacity * brush.initialLoad);
+    if (targetMass <= 0.0) return false;
+    m_batch = brush.initialPaint;
+    m_batch.scale(targetMass / sourceMass);
+    m_loaded = true;
+    return true;
+}
+
 bool BrushReservoir::reloadIfNeeded(const BrushDefinition& brush)
 {
     if (!brush.valid() || brush.reloadThreshold <= 0 || brush.initialLoad <= brush.reloadThreshold
@@ -549,12 +639,12 @@ double BrushReservoir::transferredAmount(const BrushDefinition& brush,
     return std::min(quantity(), amount);
 }
 
-Spectrum MaterialEngine::reflectance(const PaintBatch& paint, double filmMass) const noexcept
+Spectrum MaterialEngine::reflectance(const PaintBatch& paint, double depositShare) const noexcept
 {
     Spectrum k{}, s{};
-    if (!std::isfinite(filmMass) || filmMass <= 0) filmMass = 0;
+    if (!std::isfinite(depositShare) || depositShare <= 0.0) depositShare = 0.0;
     for (const auto& component : paint.pigments) {
-        if (!finiteNonnegative(component.mass) || component.mass <= 0) continue;
+        if (!finiteNonnegative(component.mass) || component.mass <= 0.0) continue;
         const PigmentDefinition* pigment = component.pigmentId.empty() ? nullptr : m_pigments.find(component.pigmentId);
         Spectrum residual{};
         if (!pigment) residual = rgbToReflectance(component.residualArgb | 0xff000000U);
@@ -571,14 +661,24 @@ Spectrum MaterialEngine::reflectance(const PaintBatch& paint, double filmMass) c
             s[i] += scattering * component.mass;
         }
     }
+    if (finiteNonnegative(paint.filler) && paint.filler > 0.0) {
+        // Inert white filler / chalk adds diffuse scattering and minimal
+        // absorption, increasing gouache opacity and slightly lifting value.
+        for (std::size_t i = 0; i < SpectralBands; ++i) {
+            s[i] += 1.8 * paint.filler;
+            k[i] += 0.01 * paint.filler;
+        }
+    }
     Spectrum result{};
-    const double amount = paint.pigmentMass() * filmMass;
-    if (amount <= 1e-12) { result.fill(1.0); return result; }
+    const double localPigment = paint.pigmentMass() * depositShare;
+    if (localPigment <= 1e-12) { result.fill(1.0); return result; }
+    // Keep intrinsic pigment chroma even for thin glazes/tints; thin-film
+    // transparency is carried by OpticalResult::alpha rather than washing out
+    // straight RGB toward white.
+    const double depthScale = 0.35 + 0.65 * clamp01(localPigment);
     for (std::size_t i = 0; i < SpectralBands; ++i) {
         const double ratio = k[i] / std::max(1e-12, s[i]);
-        // Kubelka-Munk infinite-layer reflectance. Film mass modulates optical
-        // depth without converting the pigment composition to RGB.
-        const double opticalDepth = std::max(0.0, ratio * std::min(1.0, amount));
+        const double opticalDepth = std::max(0.0, ratio * depthScale);
         result[i] = clamp01(1.0 + opticalDepth - std::sqrt(opticalDepth * opticalDepth + 2.0 * opticalDepth));
     }
     return result;
@@ -587,34 +687,40 @@ Spectrum MaterialEngine::reflectance(const PaintBatch& paint, double filmMass) c
 OpticalResult MaterialEngine::opticalResult(const PaintBatch& paint,
                                             const MediumProfile& medium,
                                             const SurfaceProfile& surface,
-                                            double filmMass) const noexcept
+                                            double depositShare) const noexcept
 {
     OpticalResult out;
     const double pigmentMass = paint.pigmentMass();
     const double totalMass = paint.totalMass();
-    if (pigmentMass <= 1e-12 || totalMass <= 1e-12) return out;
-    const Spectrum spectrum = reflectance(paint, std::max(0.01, filmMass));
-    double rgb[3] = {0, 0, 0}, norms[3] = {0, 0, 0};
-    for (std::size_t i = 0; i < SpectralBands; ++i) {
-        const double w = Wavelengths[i];
-        const double weights[3] = {gaussian(w, 610.0, 57.0), gaussian(w, 535.0, 43.0), gaussian(w, 450.0, 38.0)};
-        for (int c = 0; c < 3; ++c) { rgb[c] += spectrum[i] * weights[c]; norms[c] += weights[c]; }
+    if (pigmentMass <= 1e-12 || totalMass <= 1e-12
+        || !std::isfinite(depositShare) || depositShare <= 0.0) return out;
+    const Spectrum spectrum = reflectance(paint, depositShare);
+    const auto rgb = spectrumToLinearRgb(spectrum);
+
+    double weightedOpacity = 0.0;
+    for (const auto& component : paint.pigments) {
+        if (!finiteNonnegative(component.mass) || component.mass <= 0.0) continue;
+        const auto* p = component.pigmentId.empty() ? nullptr : m_pigments.find(component.pigmentId);
+        const double transparency = p ? clamp01(p->transparency) : 0.25;
+        const double tint = p ? std::clamp(p->tintStrength, 0.25, 2.0) : 1.0;
+        weightedOpacity += component.mass * (0.65 + 0.35 * (1.0 - transparency)) * (0.7 + 0.3 * tint);
     }
-    for (int c = 0; c < 3; ++c) rgb[c] = norms[c] > 0 ? rgb[c] / norms[c] : 1.0;
-    const double concentration = clamp01(pigmentMass / totalMass);
+    const double pigmentOpacityFactor = clamp01(weightedOpacity / pigmentMass);
+    const double localPigment = pigmentMass * depositShare;
+    const double localFiller = std::max(0.0, finiteOrZero(paint.filler)) * depositShare;
+    const double effectiveSolids = localPigment * pigmentOpacityFactor + localFiller * 0.45;
     const double binderRatio = clamp01(paint.binder / totalMass);
     const double waterFraction = clamp01(paint.water / totalMass);
-    const double wetTransparency = 1.0 - waterFraction * clamp01(medium.waterSpread) * 0.34;
-    const double dryFilmDensity = 0.82 + clamp01(paint.drying) * 0.18;
-    const double thickness = std::max(0.0, filmMass) * (0.25 + concentration * 2.2)
-        * (0.65 + clamp01(medium.viscosity) * 0.55)
-        * (0.7 + clamp01(paint.consistency) * 0.45) * wetTransparency * dryFilmDensity;
-    const double mediumFactor = (0.18 + clamp01(medium.hidingPower) * 1.8)
-        * (0.72 + binderRatio * clamp01(medium.binderResponse));
+    const double wetTransparency = 1.0 - waterFraction * clamp01(medium.waterSpread) * 0.42;
+    const double dryFilmDensity = 0.90 + clamp01(paint.drying) * 0.10;
+    const double mediumFactor = (0.22 + clamp01(medium.hidingPower) * 1.45)
+        * (0.78 + binderRatio * clamp01(medium.binderResponse) * 0.35);
     const double substrateRetention = (0.55 + clamp01(surface.absorbency) * 0.8)
         * (0.72 + clamp01(surface.pigmentRetention) * 0.28)
         * (0.96 - clamp01(surface.porosity) * 0.08);
-    const double alpha = 1.0 - std::exp(-thickness * mediumFactor * substrateRetention);
+    const double opticalDepth = std::max(0.0, effectiveSolids * mediumFactor
+        * wetTransparency * dryFilmDensity * substrateRetention);
+    const double alpha = 1.0 - std::exp(-opticalDepth);
     out.straightArgb = packStraight(rgb[0], rgb[1], rgb[2], 1.0);
     out.alpha = clamp01(alpha);
     double weightedGranulation = 0;
@@ -633,10 +739,10 @@ std::uint32_t MaterialEngine::composite(std::uint32_t destinationPremultiplied,
                                         const PaintBatch& paint,
                                         const MediumProfile& medium,
                                         const SurfaceProfile& surface,
-                                        double coverage, double filmMass,
+                                        double coverage, double depositShare,
                                         double toothContact) const noexcept
 {
-    const auto optical = opticalResult(paint, medium, surface, filmMass);
+    const auto optical = opticalResult(paint, medium, surface, depositShare);
     const double surfaceRetention = (1.0 - surface.paletteNonAbsorbency)
         * (0.55 + surface.absorbency * 0.45);
     const double contact = clamp01(finiteOrZero(toothContact));
@@ -673,13 +779,16 @@ MaterialSimulationStats MaterialEngine::advanceWetMaterial(MaterialTileStore& st
                 const TilePoint point{
                     tile.x * tileSize + static_cast<std::int64_t>(entry.localIndex % static_cast<std::size_t>(geometry.tileSize())),
                     tile.y * tileSize + static_cast<std::int64_t>(entry.localIndex / static_cast<std::size_t>(geometry.tileSize()))};
-                auto maybeBatch = store.batchAt(point);
-                if (!maybeBatch || !maybeBatch->valid()) { stats.failed = true; return stats; }
-                PaintBatch batch = std::move(*maybeBatch);
-                const double originalWater = batch.water;
-                if (originalWater <= 1.0e-7 || batch.totalMass() <= 1.0e-12) continue;
+                const auto* composition = store.composition(entry.cell.compositionId);
+                if (!composition || composition->mediumId.empty()) { stats.failed = true; return stats; }
+                const double originalWater = entry.cell.water;
+                const double pigmentMass = entry.cell.pigmentMass;
+                const double binder = entry.cell.binder;
+                const double filler = entry.cell.filler;
+                const double totalMass = pigmentMass + originalWater + binder + filler;
+                if (originalWater <= 1.0e-7 || totalMass <= 1.0e-12) continue;
                 ++stats.cellsVisited;
-                const MediumProfile* medium = findMediumProfile(batch.mediumId);
+                const MediumProfile* medium = findMediumProfile(composition->mediumId);
                 if (!medium) medium = &gouacheProfile();
                 const double porousAbsorption = clamp01(surface.absorbency) * clamp01(surface.porosity);
                 // Two distinct sinks act on water: absorption into porous stock
@@ -691,34 +800,33 @@ MaterialSimulationStats MaterialEngine::advanceWetMaterial(MaterialTileStore& st
                 const double absorptionRate = porousAbsorption
                     * (0.012 + clamp01(medium->absorption) * 0.015);
                 const double waterSurvival = std::exp(-(evaporationRate + absorptionRate) * dt);
-                batch.water = originalWater * waterSurvival;
+                double nextWater = originalWater * waterSurvival;
                 stats.waterEvaporated += originalWater * (1.0 - std::exp(-evaporationRate * dt));
                 const double cureRate = evaporationRate * (0.35 + clamp01(surface.dryingAcceleration) * 0.4)
                     + absorptionRate * 0.22;
-                batch.drying = clamp01(1.0 - (1.0 - batch.drying) * std::exp(-cureRate * dt));
+                double nextDrying = clamp01(1.0 - (1.0 - double(entry.cell.drying)) * std::exp(-cureRate * dt));
 
                 double settlingTendency = 0.0;
-                const double pigmentMass = batch.pigmentMass();
-                if (pigmentMass > 1.0e-12) {
-                    for (const auto& component : batch.pigments) {
+                if (pigmentMass > 1.0e-12 && !composition->pigments.empty()) {
+                    for (const auto& component : composition->pigments) {
                         const auto* pigment = component.pigmentId.empty()
                             ? nullptr : m_pigments.find(component.pigmentId);
                         settlingTendency += component.mass * (pigment ? pigment->settling : 0.25);
                     }
-                    settlingTendency = clamp01(settlingTendency / pigmentMass);
+                    settlingTendency = clamp01(settlingTendency);
                 }
-                const double liquidFraction = clamp01(originalWater / std::max(1.0e-12, batch.totalMass()));
+                const double liquidFraction = clamp01(originalWater / std::max(1.0e-12, totalMass));
                 const double settleRate = settlingTendency * (1.0 - clamp01(medium->pigmentSuspension))
                     * liquidFraction * (0.008 + clamp01(surface.tooth) * 0.016);
-                batch.settling = clamp01(1.0 - (1.0 - batch.settling) * std::exp(-settleRate * dt));
-                if (batch.water <= std::max(1.0e-6, (pigmentMass + batch.binder + batch.filler) * 1.0e-5)) {
-                    batch.water = 0.0;
-                    batch.drying = 1.0;
+                const double nextSettling = clamp01(1.0 - (1.0 - double(entry.cell.settling)) * std::exp(-settleRate * dt));
+                if (nextWater <= std::max(1.0e-6, (pigmentMass + binder + filler) * 1.0e-5)) {
+                    nextWater = 0.0;
+                    nextDrying = 1.0;
                 }
-                refreshBatchState(batch);
-                if (batch.water != originalWater || batch.drying != entry.cell.drying
-                    || batch.settling != entry.cell.settling) {
-                    const auto result = store.setBatch(point, batch);
+                if (nextWater != originalWater || nextDrying != double(entry.cell.drying)
+                    || nextSettling != double(entry.cell.settling)) {
+                    const auto result = store.updateCellState(point, nextWater, binder, filler,
+                                                              nextDrying, nextSettling);
                     if (result != MaterialTileStore::Result::Changed
                         && result != MaterialTileStore::Result::Unchanged) {
                         stats.failed = true;
@@ -798,6 +906,7 @@ MaterialSimulationStats MaterialEngine::advanceWetMaterial(MaterialTileStore& st
                 }
             }
         }
+        store.reclaimUnreferenced();
     } catch (const std::bad_alloc&) {
         stats.failed = true;
     } catch (const std::length_error&) {
@@ -857,7 +966,10 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
         }
     }
     if (contactWeight <= 0) return Result::Unchanged;
-    const double normalizedArea = contactWeight / 64.0;
+    constexpr double kPi = 3.14159265358979323846;
+    const double ellipseArea = std::max(1.0, kPi * rx * ry);
+    const double normalizedArea = (contactWeight / ellipseArea)
+        * 1.8 * std::sqrt(std::max(1.0, brush.size) / 18.0);
     const double requested = reservoir.transferredAmount(brush, input, normalizedArea);
     if (requested <= 0) return Result::Unchanged;
     PaintBatch transferred = reservoir.withdraw(requested);
@@ -896,16 +1008,14 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
                 * (1.0 - grain * (1.0 - grainStructure) * 0.35);
             const double edge = 1.0 + brush.edgeAccumulation * std::exp(-std::pow((1.0 - radial) * brush.size, 2.0) / 3.0);
             const double diffusion = 1.0 + brush.pigmentDiffusion * m_medium.waterSpread * waterFraction;
-            // Brush material units are normalized batch quantities. Convert
-            // the local amount into a sub-pixel dry-film optical depth; this
-            // keeps sparse high-resolution pixels responsive without filling
-            // the whole canvas with a simulated fluid grid.
-            constexpr double FilmDepthPerBatchUnit = 64.0;
-            const double filmMass = FilmDepthPerBatchUnit * transferred.totalMass()
-                * contact * edge * diffusion / contactWeight;
+            // Local deposited share of the transferred batch at this pixel,
+            // scaled to the 64x64 tile pixel reference unit so optical depth
+            // matches MaterialTileStore + MaterialRenderer.
+            constexpr double ReferenceBatchPixels = 4096.0;
+            const double depositShare = ReferenceBatchPixels * contact * edge * diffusion / contactWeight;
             const auto old = store.pixel({x, y}).value_or(0U);
             const auto next = m_engine.composite(old, transferred, m_medium, m_surface,
-                                                 contact * edge, filmMass * (1.0 + particleGranulation * 0.08), tooth);
+                                                 contact * edge, depositShare * (1.0 + particleGranulation * 0.08), tooth);
             const auto result = store.setPixel({x, y}, next);
             if (result == Result::Changed) changed = true;
             else if (result != Result::Unchanged) { store.endBatch(); return result; }
@@ -1044,7 +1154,11 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
         (void)distributed;
     }
 
-    const double requested = reservoir.transferredAmount(brush, input, contactWeight / 64.0);
+    constexpr double kPi = 3.14159265358979323846;
+    const double ellipseArea = std::max(1.0, kPi * rx * ry);
+    const double normalizedArea = (contactWeight / ellipseArea)
+        * 1.8 * std::sqrt(std::max(1.0, brush.size) / 18.0);
+    const double requested = reservoir.transferredAmount(brush, input, normalizedArea);
     if (requested <= 0.0) return pickedUp ? Result::Changed : Result::Unchanged;
     PaintBatch transferred = reservoir.withdraw(requested);
     const double transferredMass = transferred.totalMass();
@@ -1096,18 +1210,22 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
             part.filler *= clamp01(m_surface.pigmentRetention);
             refreshBatchState(part);
             const TilePoint point{static_cast<std::int64_t>(x), static_cast<std::int64_t>(y)};
-            const auto prior = store.batchAt(point);
-            if (prior && prior->totalMass() > 0.0 && part.water > 0.0) {
-                PaintBatch reworked = *prior;
-                const double wetting = clamp01((part.water / std::max(1.0e-12, part.totalMass()))
-                    * m_medium.rewetting * brush.rewetting * m_surface.rewetting);
-                reworked.drying *= 1.0 - wetting;
-                reworked.settling *= 1.0 - wetting * 0.35;
-                const auto stateResult = store.setBatch(point, reworked);
-                if (stateResult != MaterialTileStore::Result::Changed
-                    && stateResult != MaterialTileStore::Result::Unchanged) {
-                    failure = Result::AllocationFailed;
-                    break;
+            const auto prior = store.cellAt(point);
+            if (prior && !prior->empty() && part.water > 0.0) {
+                const double priorMass = double(prior->pigmentMass) + double(prior->water)
+                    + double(prior->binder) + double(prior->filler);
+                if (priorMass > 0.0) {
+                    const double wetting = clamp01((part.water / std::max(1.0e-12, part.totalMass()))
+                        * m_medium.rewetting * brush.rewetting * m_surface.rewetting);
+                    const double nextDrying = double(prior->drying) * (1.0 - wetting);
+                    const double nextSettling = double(prior->settling) * (1.0 - wetting * 0.35);
+                    const auto stateResult = store.updateCellState(point, prior->water, prior->binder,
+                                                                   prior->filler, nextDrying, nextSettling);
+                    if (stateResult != MaterialTileStore::Result::Changed
+                        && stateResult != MaterialTileStore::Result::Unchanged) {
+                        failure = Result::AllocationFailed;
+                        break;
+                    }
                 }
             }
             const auto result = store.deposit(point, part);
@@ -1257,7 +1375,15 @@ bool MaterialStroke::stamp(MaterialSample sample)
 
 bool MaterialStroke::begin(MaterialSample sample)
 {
-    if (m_started || m_failed || !stamp(sample)) return false;
+    if (m_started || m_failed) return false;
+    if (!m_eraseMaterial && m_brush.autoReloadOnStroke && m_brush.valid()) {
+        if (!m_reservoir.reload(m_brush)) {
+            m_failed = true;
+            m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
+            return false;
+        }
+    }
+    if (!stamp(sample)) return false;
     m_previous = sample;
     m_started = true;
     m_remaining = m_spacing;

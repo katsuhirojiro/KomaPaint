@@ -22,6 +22,7 @@ class TestMaterialDocument : public QObject
 private slots:
     void materialUndoRedoRetainsComposition();
     void nativeSaveOpenRetainsMaterialAndDigitalPlane();
+    void reclamationRespectsUndoPinsAndDenseSaveAfterHoles();
 };
 
 void TestMaterialDocument::materialUndoRedoRetainsComposition()
@@ -141,6 +142,72 @@ void TestMaterialDocument::nativeSaveOpenRetainsMaterialAndDigitalPlane()
     QVERIFY(std::abs(secondBatch->settling - second.settling) < 1e-6);
     QVERIFY(secondBatch->pigments[1].pigmentId == "PY3");
     QVERIFY(!reopened->isModified());
+}
+
+void TestMaterialDocument::reclamationRespectsUndoPinsAndDenseSaveAfterHoles()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("reclaimed.koma"));
+
+    CanvasDocument document;
+    document.setSize(QSize(128, 128));
+    Layer* layer = document.layers()->layerAt(0);
+    QVERIFY(layer);
+
+    PaintBatch a;
+    a.mediumId = "watercolour";
+    QVERIFY(a.addPigment("PY3", 1.0));
+    QVERIFY(a.addWater(2.0));
+    PaintBatch b;
+    b.mediumId = "watercolour";
+    QVERIFY(b.addPigment("PR122", 1.0));
+    QVERIFY(b.addWater(2.0));
+    PaintBatch c;
+    c.mediumId = "watercolour";
+    QVERIFY(c.addPigment("PB15", 1.0));
+    QVERIFY(c.addWater(2.0));
+
+    UndoStack history;
+    QVERIFY(history.beginMaterialStroke(layer));
+    QCOMPARE(layer->materialTiles().setBatch({10, 10}, a), MaterialTileStore::Result::Changed);
+    QVERIFY(history.commitStroke());
+
+    QVERIFY(history.beginMaterialStroke(layer));
+    QCOMPARE(layer->materialTiles().setBatch({10, 10}, b), MaterialTileStore::Result::Changed);
+    QVERIFY(history.commitStroke());
+
+    QVERIFY(history.beginMaterialStroke(layer));
+    QCOMPARE(layer->materialTiles().setBatch({10, 10}, c), MaterialTileStore::Result::Changed);
+    QVERIFY(history.commitStroke());
+
+    // Only composition c is live on canvas, while a and b are pinned in history.
+    layer->materialTiles().reclaimUnreferenced();
+    QVERIFY(layer->materialTiles().activeCompositionCount() >= 3);
+
+    // Dense save skips dead/pinned-only compositions and writes only c cleanly.
+    QString error;
+    QVERIFY2(DocumentFile::save(document, path, &error), qPrintable(error));
+    std::unique_ptr<CanvasDocument> reopened(DocumentFile::open(path, &error));
+    QVERIFY2(reopened != nullptr, qPrintable(error));
+    const auto reopenedBatch = reopened->layers()->layerAt(0)->materialTiles().batchAt({10, 10});
+    QVERIFY(reopenedBatch && reopenedBatch->pigments.size() == 1);
+    QCOMPARE(reopenedBatch->pigments.front().pigmentId, std::string("PB15"));
+
+    // Undoing still restores pinned historical compositions b then a.
+    history.undo();
+    const auto restoredB = layer->materialTiles().batchAt({10, 10});
+    QVERIFY(restoredB && restoredB->pigments.size() == 1);
+    QCOMPARE(restoredB->pigments.front().pigmentId, std::string("PR122"));
+    history.undo();
+    const auto restoredA = layer->materialTiles().batchAt({10, 10});
+    QVERIFY(restoredA && restoredA->pigments.size() == 1);
+    QCOMPARE(restoredA->pigments.front().pigmentId, std::string("PY3"));
+
+    // Clearing history unpins b and c and reclaims them.
+    history.clear();
+    layer->materialTiles().reclaimUnreferenced();
+    QCOMPARE(layer->materialTiles().activeCompositionCount(), std::size_t(1));
 }
 
 QTEST_GUILESS_MAIN(TestMaterialDocument)

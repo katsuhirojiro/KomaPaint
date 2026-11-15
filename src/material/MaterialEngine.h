@@ -146,6 +146,7 @@ struct BrushDefinition {
     SensorCurve tiltCurve{};
     PaintBatch initialPaint;
     std::string mediumId = "gouache";
+    bool autoReloadOnStroke = true;
 
     bool valid() const noexcept;
 };
@@ -169,6 +170,7 @@ public:
     double availablePigment() const noexcept { return m_batch.pigmentMass(); }
     const PaintBatch& batch() const noexcept { return m_batch; }
     bool load(const PaintBatch& paint, double amount = -1.0);
+    bool reload(const BrushDefinition& brush);
     bool reloadIfNeeded(const BrushDefinition& brush);
     PaintBatch withdraw(double amount);
     bool pickup(const PaintBatch& paint, double amount);
@@ -226,14 +228,14 @@ class MaterialEngine {
 public:
     explicit MaterialEngine(const PigmentLibrary& pigments) : m_pigments(pigments) {}
     const PigmentLibrary& pigments() const noexcept { return m_pigments; }
-    Spectrum reflectance(const PaintBatch& paint, double filmMass = 1.0) const noexcept;
+    Spectrum reflectance(const PaintBatch& paint, double depositShare = 1.0) const noexcept;
     OpticalResult opticalResult(const PaintBatch& paint, const MediumProfile& medium,
                                 const SurfaceProfile& surface,
-                                double filmMass = 1.0) const noexcept;
+                                double depositShare = 1.0) const noexcept;
     std::uint32_t composite(std::uint32_t destinationPremultiplied,
                             const PaintBatch& paint, const MediumProfile& medium,
                             const SurfaceProfile& surface, double coverage,
-                            double filmMass = 1.0,
+                            double depositShare = 1.0,
                             double toothContact = 1.0) const noexcept;
     // Advance only tiles containing mobile material. Dry cells remain sparse
     // and unchanged; elapsed time is integrated analytically for stable lazy

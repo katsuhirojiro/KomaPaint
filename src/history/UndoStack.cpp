@@ -6,6 +6,17 @@
 #include <stdexcept>
 
 namespace komapaint {
+UndoStack::StrokeCommand::~StrokeCommand()
+{
+    if (layer && materialStroke && (!materialBefore.empty() || !materialAfter.empty())) {
+        auto& store = layer->materialTiles();
+        store.unpinSnapshots(materialBefore);
+        store.unpinSnapshots(materialAfter);
+        store.reclaimUnreferenced();
+    }
+    if (budget) budget->release(DocumentMemoryBudget::Category::History, historyBytes);
+}
+
 UndoStack::UndoStack(QObject* parent) : QObject(parent)
 {
     // Qt allocates a QObject's weak-reference block the first time a QPointer
@@ -186,6 +197,8 @@ bool UndoStack::captureMaterialTile(TilePoint tile, std::span<const material::Ma
     m_current->materialBefore.push_back(std::move(before));
     m_current->materialAfter.push_back(std::move(after));
     m_current->materialBeforeCharges.push_back(dataBytes);
+    m_current->layer->materialTiles().pinSnapshots(
+        std::span<const material::MaterialTileSnapshot>(&m_current->materialBefore.back(), 1));
     m_current->historyBytes += dataBytes;
     m_currentBytes += charge;
     reservation.retained = true;
@@ -240,6 +253,8 @@ void UndoStack::finishMaterialCapture()
         m_currentBytes += bytes;
         reservation.retained = true;
         if (m_current->materialBefore[i].entries == after) {
+            store.unpinSnapshots(
+                std::span<const material::MaterialTileSnapshot>(&m_current->materialBefore[i], 1));
             const auto beforeBytes = m_current->materialBeforeCharges[i];
             if (budget && beforeBytes) budget->release(DocumentMemoryBudget::Category::History, beforeBytes);
             if (budget && bytes) budget->release(DocumentMemoryBudget::Category::History, bytes);
@@ -248,7 +263,11 @@ void UndoStack::finishMaterialCapture()
             m_current->materialBefore.erase(m_current->materialBefore.begin() + static_cast<std::ptrdiff_t>(i));
             m_current->materialAfter.erase(m_current->materialAfter.begin() + static_cast<std::ptrdiff_t>(i));
             m_current->materialBeforeCharges.erase(m_current->materialBeforeCharges.begin() + static_cast<std::ptrdiff_t>(i));
-        } else ++i;
+        } else {
+            store.pinSnapshots(
+                std::span<const material::MaterialTileSnapshot>(&m_current->materialAfter[i], 1));
+            ++i;
+        }
     }
 }
 

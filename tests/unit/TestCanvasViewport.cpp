@@ -272,6 +272,28 @@ void TestCanvasViewport::traditionalMediaStrokeRendersAndUsesMaterialHistory()
     QVERIFY(namedA != loadedPaint->pigments.end() && namedB != loadedPaint->pigments.end());
     if (namedA != loadedPaint->pigments.end() && namedB != loadedPaint->pigments.end())
         QVERIFY(std::abs(namedA->mass / namedB->mass - 1.0 / 3.0) < 1e-5);
+
+    // By default, persistentReservoir is false so each new stroke starts with
+    // a clean, freshly reloaded mixture rather than carrying picked-up paint.
+    QVERIFY(!mixerBrush.persistentReservoir());
+    QVariantList prComponents;
+    prComponents.push_back(QVariantMap{{QStringLiteral("pigmentId"), QStringLiteral("PR122")},
+                                       {QStringLiteral("mass"), 1.0}});
+    const QVariantMap prMixture{{QStringLiteral("mediumId"), QStringLiteral("watercolour")},
+                                {QStringLiteral("pigments"), prComponents},
+                                {QStringLiteral("water"), 2.0},
+                                {QStringLiteral("binder"), 0.12},
+                                {QStringLiteral("filler"), 0.0}};
+    QVERIFY(mixerBrush.loadMaterialMixture(prMixture));
+    const QPointF p1 = view.documentToViewport(160, 160);
+    QVERIFY(view.beginStroke(p1.x(), p1.y(), 1.0, &mixerBrush, QColor(Qt::magenta)));
+    view.endStroke(p1.x(), p1.y(), 1.0);
+    const QPointF p2 = view.documentToViewport(240, 240);
+    QVERIFY(view.beginStroke(p2.x(), p2.y(), 1.0, &mixerBrush, QColor(Qt::magenta)));
+    view.endStroke(p2.x(), p2.y(), 1.0);
+    const auto cleanSecondStroke = layer->materialTiles().batchAt({240, 240});
+    QVERIFY(cleanSecondStroke && cleanSecondStroke->pigments.size() == 1);
+    QCOMPARE(cleanSecondStroke->pigments.front().pigmentId, std::string("PR122"));
 }
 
 void TestCanvasViewport::strokeFailureDiagnostics()

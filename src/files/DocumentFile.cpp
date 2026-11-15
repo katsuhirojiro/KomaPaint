@@ -557,11 +557,35 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
         if (version >= DocumentFile::FormatVersion) {
             const auto& materialStore = layer->materialTiles();
             const auto& compositions = materialStore.compositions();
-            putU64(buffer, static_cast<quint64>(compositions.size()));
-            for (std::size_t id = 0; id < compositions.size(); ++id) {
-                const auto& composition = compositions[id];
-                if ((id == 0 && (!composition.mediumId.empty() || !composition.pigments.empty()))
-                    || (id != 0 && composition.mediumId.empty()))
+            std::vector<TilePoint> materialPoints = materialStore.allocatedTilePoints();
+            std::sort(materialPoints.begin(), materialPoints.end(), [](TilePoint a, TilePoint b) {
+                return a.y < b.y || (a.y == b.y && a.x < b.x);
+            });
+            quint64 materialPixelCount = 0;
+            std::vector<std::size_t> denseIds(compositions.size(), 0);
+            std::vector<std::size_t> exportIds;
+            exportIds.push_back(0);
+            for (TilePoint tile : materialPoints) {
+                const auto entries = materialStore.tileEntries(tile);
+                if (entries.size() > std::numeric_limits<quint64>::max() - materialPixelCount)
+                    return fail(QStringLiteral("The material content is too large to save."));
+                materialPixelCount += static_cast<quint64>(entries.size());
+                for (const auto& entry : entries) {
+                    const std::size_t cid = entry.cell.compositionId;
+                    if (cid == 0 || cid >= compositions.size() || compositions[cid].mediumId.empty())
+                        return fail(QStringLiteral("A layer references an invalid material composition. The file was not changed."));
+                    if (denseIds[cid] == 0) {
+                        denseIds[cid] = exportIds.size();
+                        exportIds.push_back(cid);
+                    }
+                }
+            }
+            putU64(buffer, static_cast<quint64>(exportIds.size()));
+            for (std::size_t outId = 0; outId < exportIds.size(); ++outId) {
+                const std::size_t srcId = exportIds[outId];
+                const auto& composition = compositions[srcId];
+                if ((outId == 0 && (!composition.mediumId.empty() || !composition.pigments.empty()))
+                    || (outId != 0 && composition.mediumId.empty()))
                     return fail(QStringLiteral("A layer has an invalid material composition table. The file was not changed."));
                 if (!putUtf8String(buffer, composition.mediumId))
                     return fail(QStringLiteral("A material medium identifier is not valid UTF-8. The file was not changed."));
@@ -583,17 +607,6 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
                     return fail(QStringLiteral("A layer contains a non-normalized pigment composition. The file was not changed."));
             }
 
-            std::vector<TilePoint> materialPoints = materialStore.allocatedTilePoints();
-            std::sort(materialPoints.begin(), materialPoints.end(), [](TilePoint a, TilePoint b) {
-                return a.y < b.y || (a.y == b.y && a.x < b.x);
-            });
-            quint64 materialPixelCount = 0;
-            for (TilePoint tile : materialPoints) {
-                const auto entries = materialStore.tileEntries(tile);
-                if (entries.size() > std::numeric_limits<quint64>::max() - materialPixelCount)
-                    return fail(QStringLiteral("The material content is too large to save."));
-                materialPixelCount += static_cast<quint64>(entries.size());
-            }
             const auto& materialGeometry = materialStore.geometry();
             if (materialGeometry.width() != geometry.width() || materialGeometry.height() != geometry.height())
                 return fail(QStringLiteral("A material layer has invalid geometry. The file was not changed."));
@@ -637,6 +650,7 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
                 if (item.x >= static_cast<quint64>(materialGeometry.width())
                     || item.y >= static_cast<quint64>(materialGeometry.height())
                     || cell.compositionId == 0 || cell.compositionId >= compositions.size()
+                    || denseIds[cell.compositionId] == 0
                     || !std::isfinite(cell.pigmentMass) || cell.pigmentMass < 0.0F
                     || !std::isfinite(cell.water) || cell.water < 0.0F
                     || !std::isfinite(cell.binder) || cell.binder < 0.0F
@@ -652,7 +666,7 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
                     return fail(QStringLiteral("The material content is too large for the native file format. The file was not changed."));
                 putU64(buffer, item.x);
                 putU64(buffer, item.y);
-                putU64(buffer, static_cast<quint64>(cell.compositionId));
+                putU64(buffer, static_cast<quint64>(denseIds[cell.compositionId]));
                 putFloat(buffer, cell.pigmentMass);
                 putFloat(buffer, cell.water);
                 putFloat(buffer, cell.binder);

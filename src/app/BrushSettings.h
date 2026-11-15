@@ -19,6 +19,10 @@ class BrushSettings : public QObject {
     // True while an eraser is selected: strokes remove paint from the layer.
     Q_PROPERTY(bool erase READ erase WRITE setErase NOTIFY changed)
     Q_PROPERTY(bool traditionalMedia READ traditionalMedia WRITE setTraditionalMedia NOTIFY changed)
+    // False by default: every new stroke starts with a clean, full reservoir
+    // of the configured colour/mixture. True keeps remaining paint across
+    // strokes as an optional advanced workflow.
+    Q_PROPERTY(bool persistentReservoir READ persistentReservoir WRITE setPersistentReservoir NOTIFY changed)
     // Full material batch supplied by the mixer. The component masses and
     // residual identities are kept verbatim until a material stroke loads it.
     Q_PROPERTY(QVariantMap materialMixture READ materialMixture NOTIFY materialMixtureChanged)
@@ -39,6 +43,7 @@ public:
     int stabilization() const { return m_stabilization; }
     bool erase() const { return m_erase; }
     bool traditionalMedia() const { return m_traditionalMedia; }
+    bool persistentReservoir() const { return m_persistentReservoir; }
     QVariantMap materialMixture() const { return m_materialMixture; }
     int minimumSize() const { return MinSize; }
     int maximumSize() const { return MaxSize; }
@@ -53,6 +58,7 @@ public:
     void setStabilization(int v) { v = qBound(0, v, 100); if (m_stabilization != v) { m_stabilization = v; emit changed(); } }
     void setErase(bool v) { if (m_erase != v) { m_erase = v; emit changed(); } }
     void setTraditionalMedia(bool v) { if (m_traditionalMedia != v) { m_traditionalMedia = v; emit changed(); } }
+    void setPersistentReservoir(bool v) { if (m_persistentReservoir != v) { m_persistentReservoir = v; emit changed(); } }
     Q_INVOKABLE bool loadMaterialMixture(const QVariantMap& mixture) {
         if (mixture.isEmpty()) return false;
         m_materialMixture = mixture;
@@ -73,6 +79,7 @@ private:
     bool m_textured = false;
     bool m_erase = false;
     bool m_traditionalMedia = false;
+    bool m_persistentReservoir = false;
     QVariantMap m_materialMixture;
 };
 }
