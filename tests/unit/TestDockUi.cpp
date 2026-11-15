@@ -93,7 +93,18 @@ bool start(Running& app, bool keepStoredLayout = false)
     app.window->show();
     if (!QTest::qWaitForWindowExposed(app.window)) return false;
     QTest::qWait(60);
-    return app.workspace.newProject(QStringLiteral("Dock"), 320, 240, true, QStringLiteral("white"), 72);
+    if (!app.workspace.newProject(QStringLiteral("Dock"), 320, 240, true, QStringLiteral("white"), 72))
+        return false;
+    // The docking workspace is only shown for an open project, so its items get
+    // their geometry on the first frame after the project appears. A drag that
+    // starts before that lands on a zero-size tab and reaches nothing.
+    for (int attempt = 0; attempt < 40; ++attempt) {
+        auto* tab = item(app, QStringLiteral("dockTab_layers"));
+        if (tab && tab->isVisible() && tab->width() > 0 && tab->height() > 0) return true;
+        QTest::qWait(25);
+    }
+    qWarning() << "dock tabs never received geometry after the project opened";
+    return false;
 }
 
 QStringList floatingWindowNames()

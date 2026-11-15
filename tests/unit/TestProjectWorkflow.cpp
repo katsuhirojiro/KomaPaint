@@ -159,13 +159,18 @@ void TestProjectWorkflow::replaceOpenedArtwork()
     // painting or saving it.
     QVERIFY(workspace.newProject(QStringLiteral("Existing"), 640, 480, true,
                                  QStringLiteral("white"), 72));
+    // The canvas is only shown for an open project, so it takes its size on the
+    // frame after the project appears. A stroke on a viewport that is still
+    // zero-sized (or still shows the previous document) records nothing.
+    QTRY_VERIFY(canvas->document() == static_cast<QObject*>(workspace.document())
+                && canvas->width() > 100 && canvas->height() > 100);
     draw();
     QTRY_VERIFY(workspace.document()->isModified());
     const auto file = dir.filePath(QStringLiteral("existing.koma"));
     QVERIFY(workspace.saveToPath(file));
     QVERIFY(workspace.openFromPath(file));
     QCOMPARE(workspace.currentFile(), file);
-    QCOMPARE(canvas->document(), static_cast<QObject*>(workspace.document()));
+    QTRY_COMPARE(canvas->document(), static_cast<QObject*>(workspace.document()));
     draw();
     QTRY_VERIFY(workspace.document()->isModified());
     auto* previous = workspace.document();

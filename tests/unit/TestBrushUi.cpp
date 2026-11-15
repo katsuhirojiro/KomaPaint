@@ -95,20 +95,35 @@ void click(Running& app, QQuickItem* target, Qt::MouseButton button = Qt::LeftBu
     QCoreApplication::processEvents();
 }
 
+// Rows live inside clipped flickables: the tool palette, the sub tool list and
+// the scroll view of the Tool Property panel. A click on a row that is scrolled
+// out of view lands on whatever is behind the viewport, so bring the row into
+// view first — the same thing a person does with the wheel. The nearest
+// scrollable ancestor is found by duck typing, because a ListView, a Flickable
+// and a ScrollView's content item all expose contentY/contentHeight while the
+// plain contentItem node does not.
+bool scrollIntoView(QQuickItem* target)
+{
+    for (auto* view = target->parentItem(); view; view = view->parentItem()) {
+        const QVariant contentY = view->property("contentY");
+        const QVariant contentHeight = view->property("contentHeight");
+        if (!contentY.isValid() || !contentHeight.isValid()) continue;
+        const qreal centre = view->mapFromItem(target, QPointF(0, target->height() / 2)).y();
+        const qreal maximum = std::max(0.0, contentHeight.toReal() - view->height());
+        const qreal next = std::clamp(contentY.toReal() + centre - view->height() / 2, 0.0, maximum);
+        if (qAbs(next - contentY.toReal()) < 0.5) return true;
+        view->setProperty("contentY", next);
+        QCoreApplication::processEvents();
+        return true;
+    }
+    return false;
+}
+
 bool clickNamed(Running& app, const QString& name)
 {
     auto* target = item(app, name);
     if (!target || target->width() <= 0 || !target->isVisible()) return false;
-    if (name.startsWith(QStringLiteral("tool_"))) {
-        auto* scroll = item(app, QStringLiteral("toolPaletteScroll"));
-        if (scroll) {
-            const qreal y = target->mapToItem(scroll, QPointF(0, target->height() / 2)).y();
-            const qreal maximum = std::max(0.0, scroll->property("contentHeight").toReal() - scroll->height());
-            const qreal next = std::clamp(scroll->property("contentY").toReal() + y - scroll->height() / 2, 0.0, maximum);
-            scroll->setProperty("contentY", next);
-            QCoreApplication::processEvents();
-        }
-    }
+    scrollIntoView(target);
     click(app, target);
     return true;
 }
@@ -746,12 +761,18 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QVERIFY(start(app, QStringLiteral("BrushUiSubTools")));
     auto& ws = app.workspace;
     auto* brush = ws.brush();
+    QVERIFY(clickNamed(app, QStringLiteral("tool_brush")));  // the list is the brush's
     auto* list = item(app, QStringLiteral("subToolList"));
     QVERIFY(list && list->isVisible());
-    QCOMPARE(list->property("count").toInt(), 3);          // Round, Soft, Dry
+    QTRY_COMPARE(list->property("count").toInt(), 3);       // Round, Soft, Dry
+    // Preset rows are list delegates: they take their geometry together with the
+    // model, so wait for the row itself rather than assuming a settled layout.
+    auto* softRow = item(app, QStringLiteral("subTool1"));
+    QVERIFY(softRow);
+    QTRY_VERIFY(softRow->isVisible() && softRow->width() > 0 && softRow->height() > 0);
 
     QVERIFY(clickNamed(app, QStringLiteral("subTool1")));  // Soft brush
-    QCOMPARE(ws.subTools()->currentName(), QStringLiteral("Soft brush"));
+    QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Soft brush"));
     QCOMPARE(brush->size(), 40); QCOMPARE(brush->hardness(), 30); QCOMPARE(brush->flow(), 35);
     QVERIFY(item(app, QStringLiteral("brushSize40"))->property("current").toBool());
 

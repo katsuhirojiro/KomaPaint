@@ -15,7 +15,12 @@ private slots:
 void TestDocumentCreation::createsIndependentDocument()
 {
     WorkspaceState workspace;
+    // The workspace starts with nothing open by design, so the first project
+    // has to be created the way the New Project dialog creates it. Everything
+    // below then compares two real tabs instead of a phantom startup one.
+    QVERIFY(workspace.newDocument(64, 48, true, Qt::white));
     auto* old = workspace.document();
+    QVERIFY(old);
     auto oldBudget = old->layers()->documentBudget();
     workspace.layers()->addLayer();
     QVERIFY(workspace.history()->beginStroke(workspace.layers()->layerAt(0)));

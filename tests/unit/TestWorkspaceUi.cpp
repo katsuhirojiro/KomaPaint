@@ -655,6 +655,13 @@ void TestWorkspaceUi::toolbarOpenAndSaveAreConnected()
                   dir.filePath(QStringLiteral("session.json"))));
     auto& ws = app.parts.workspace;
     QVERIFY(ws.newProject(QStringLiteral("toolbar"), 64, 64, true, QStringLiteral("white"), 72));
+    // The command bar and the docks are only shown for an open project, and Qt
+    // Quick re-lays the window out on the frame after that. A click based on the
+    // pre-project geometry lands on nothing, so wait for the layout to settle.
+    auto* canvas = qobject_cast<CanvasViewport*>(findInWindow(app.window, QStringLiteral("canvasViewport")));
+    QVERIFY(canvas);
+    QTRY_VERIFY(canvas->document() == static_cast<QObject*>(ws.document())
+                && canvas->width() > 0 && canvas->height() > 0);
     QVERIFY(paint(ws, {1, 1}, 0xffff0000U));
     QVERIFY(ws.saveToPath(path));
     QVERIFY(paint(ws, {2, 2}, 0xff00ff00U));
@@ -662,6 +669,11 @@ void TestWorkspaceUi::toolbarOpenAndSaveAreConnected()
     auto* save = findInWindow(app.window, QStringLiteral("saveToolbarButton"));
     auto* open = findInWindow(app.window, QStringLiteral("openToolbarButton"));
     QVERIFY(save && open);
+    QVERIFY2(save->isEnabled() && save->width() > 0 && save->height() > 0,
+             qPrintable(QStringLiteral("save button enabled=%1 size=%2x%3 scene=%4,%5 window=%6x%7")
+                        .arg(save->isEnabled()).arg(save->width()).arg(save->height())
+                        .arg(save->mapToScene(QPointF(0, 0)).x()).arg(save->mapToScene(QPointF(0, 0)).y())
+                        .arg(app.window->width()).arg(app.window->height())));
     click(app.window, save);
     QTRY_VERIFY(!ws.document()->isModified());
     QVERIFY(app.messages.isEmpty());
