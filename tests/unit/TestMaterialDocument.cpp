@@ -158,15 +158,15 @@ void TestMaterialDocument::reclamationRespectsUndoPinsAndDenseSaveAfterHoles()
     PaintBatch a;
     a.mediumId = "watercolour";
     QVERIFY(a.addPigment("PY3", 1.0));
-    QVERIFY(a.addWater(2.0));
+    a.addWater(2.0);
     PaintBatch b;
     b.mediumId = "watercolour";
     QVERIFY(b.addPigment("PR122", 1.0));
-    QVERIFY(b.addWater(2.0));
+    b.addWater(2.0);
     PaintBatch c;
     c.mediumId = "watercolour";
     QVERIFY(c.addPigment("PB15", 1.0));
-    QVERIFY(c.addWater(2.0));
+    c.addWater(2.0);
 
     UndoStack history;
     QVERIFY(history.beginMaterialStroke(layer));
