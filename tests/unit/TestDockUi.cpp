@@ -77,6 +77,13 @@ bool start(Running& app, bool keepStoredLayout = false)
     app.panels.dockModel()->setSettings(app.settings.get());
     QObject::connect(&app.workspace, &WorkspaceState::fileErrorOccurred, &app.workspace,
                      [&app](const QString& message) { app.messages << message; });
+    // Every test here drives the docking workspace with the mouse, and that
+    // workspace is only part of the window while a project is open. The project
+    // is therefore opened before the window is built — what a restored session
+    // does — instead of half-way through a drag. The empty start-up itself is
+    // covered by TestWorkspaceUi.
+    if (!app.workspace.newProject(QStringLiteral("Dock"), 320, 240, true, QStringLiteral("white"), 72))
+        return false;
     app.engine.addImportPath(QStringLiteral("qrc:/"));
     auto* context = app.engine.rootContext();
     context->setContextProperty(QStringLiteral("Settings"), app.settings.get());
@@ -93,17 +100,20 @@ bool start(Running& app, bool keepStoredLayout = false)
     app.window->show();
     if (!QTest::qWaitForWindowExposed(app.window)) return false;
     QTest::qWait(60);
-    if (!app.workspace.newProject(QStringLiteral("Dock"), 320, 240, true, QStringLiteral("white"), 72))
-        return false;
-    // The docking workspace is only shown for an open project, so its items get
-    // their geometry on the first frame after the project appears. A drag that
-    // starts before that lands on a zero-size tab and reaches nothing.
-    for (int attempt = 0; attempt < 40; ++attempt) {
+    // A drag or a click before the docking workspace has real geometry would
+    // land on an unsized item, so wait for the workspace and its header to be
+    // laid out inside the window.
+    for (int attempt = 0; attempt < 80; ++attempt) {
         auto* tab = item(app, QStringLiteral("dockTab_layers"));
-        if (tab && tab->isVisible() && tab->width() > 0 && tab->height() > 0) return true;
+        auto* canvas = item(app, QStringLiteral("canvasViewport"));
+        if (tab && canvas && canvas->width() > 100 && canvas->height() > 100
+            && tab->width() > 0 && tab->height() > 0
+            && QRectF(0, 0, app.window->width(), app.window->height())
+                   .contains(tab->mapToScene(QPointF(tab->width() / 2, tab->height() / 2))))
+            return true;
         QTest::qWait(25);
     }
-    qWarning() << "dock tabs never received geometry after the project opened";
+    qWarning() << "the docking workspace never received usable geometry";
     return false;
 }
 
