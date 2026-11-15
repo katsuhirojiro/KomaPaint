@@ -40,9 +40,11 @@ g++ -std=c++20 -Wall -Wextra -Wpedantic -fsanitize=address,undefined \
 
 Result: `material engine checks passed`. This covers only the standalone material tests; it does not build/test QML, viewport integration, native file I/O, history, or recovery. `git diff --check` passed before the latest active-list edits and must be rerun.
 
-### Windows CI baseline
+### Windows CI
 
-Run `43716877704` corresponds to the last pushed commit `dfe7fc4`: **full Windows build succeeded; unit tests failed; packaging/smoke tests were skipped**. Its summary reports six failing test executables, including `test_dock_ui.exe` (5 passed, 9 failed) and a crash in `test_document_creation.exe` during `createsIndependentDocument`. Complete logs were unavailable in that run; material-specific outcomes were not individually confirmed. Earlier compile errors at `8f1fe6d` and `fb99220` were fixed in `fb99220` and `dfe7fc4` respectively. This old CI result does not verify any of the current working-tree changes.
+Run `43716877704` was for `dfe7fc4`: full Windows build succeeded, unit tests failed, and packaging/smoke tests were skipped. Its summary reported six failing test executables, including `test_dock_ui.exe` (5 passed, 9 failed) and a crash in `test_document_creation.exe` during `createsIndependentDocument`; material-specific results were not individually confirmed. Earlier compile errors at `8f1fe6d` and `fb99220` were fixed in `fb99220` and `dfe7fc4` respectively.
+
+Run `43719613913` was for `53d7f311bf19dcec1f87bd3ba9e3b1299655f799`: full Windows build succeeded, but the unit-test step failed with seven failing executables and packaging/smoke tests were skipped. The available truncated annotation still shows the nine `test_dock_ui.exe` assertion failures and `test_document_creation.exe` crashing in `createsIndependentDocument`; it does not expose the complete list, so do not infer whether the new material/UI tests passed. `gh run view --log-failed` again failed with EOF from Actions log storage. A small workflow change is now made to report each failed test executable as a separate check annotation so a future run's full diagnostics do not disappear in a single truncated 4 KiB annotation. This run does not establish that the integration suite passes.
 
 ## Immediate next steps
 

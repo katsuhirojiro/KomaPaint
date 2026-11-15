@@ -143,7 +143,6 @@ jobs:
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
           $failed = 0
-          $failingSummary = @()
           $totals = @()
           $exes = Get-ChildItem "${{ env.TEST_DIR }}" -Filter "test_*.exe" | Sort-Object Name
           if ($exes.Count -eq 0) {
@@ -175,7 +174,11 @@ jobs:
               else { $annotation = $output }
               $annotation = $annotation.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' || ')
               if ($annotation.Length -gt 1800) { $annotation = "...(truncated) " + $annotation.Substring($annotation.Length - 1800) }
-              $failingSummary += "$($exe.Name) (exit $code): $annotation"
+              # Emit one compact check annotation per failing executable. A
+              # single aggregate annotation is truncated by GitHub at 4 KiB,
+              # which can hide the first failures and make CI impossible to
+              # diagnose when the raw Actions log archive is unavailable.
+              Write-Host "::error title=$($exe.Name) failed (exit $code)::$annotation"
             } else {
               Write-Host ">>> $($exe.Name) PASSED (exit $code) <<<"
             }
@@ -183,11 +186,7 @@ jobs:
           }
           if ($failed -gt 0) {
             Write-Host "=== $failed test(s) FAILED ==="
-            # Compact summary annotation carrying the failing output tails:
-            # small enough to survive, so failures are diagnosable without logs.
-            $summary = $failingSummary -join ' ~~ '
-            if ($summary.Length -gt 5500) { $summary = "...(truncated) " + $summary.Substring($summary.Length - 5500) }
-            Write-Host "::error title=Unit tests failed ($failed)::$summary"
+            Write-Host "::error title=Unit tests failed ($failed)::See the per-executable failure annotations above."
             exit 1
           }
           Write-Host "=== All tests passed ==="
