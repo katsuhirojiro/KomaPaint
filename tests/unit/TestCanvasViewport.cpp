@@ -374,6 +374,10 @@ void TestCanvasViewport::qmlMouseStroke()
 void TestCanvasViewport::actualWindowShortcuts()
 {
     WorkspaceState workspace;
+    // Nothing is open at start-up now, and the docks (including the canvas)
+    // only become visible for an open project. Create the document the way the
+    // New Project dialog does, before the window is built.
+    QVERIFY(workspace.newDocument(1200, 900, false, QColor(Qt::white)));
     ApplicationConfig config;
     Settings settings(QStringLiteral("KomaPaintTests"), QStringLiteral("UndoWindow"));
     PanelManager panels;
@@ -394,6 +398,7 @@ void TestCanvasViewport::actualWindowShortcuts()
     auto* window = qobject_cast<QQuickWindow*>(object); QVERIFY(window);
     window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
     auto* canvas = object->findChild<CanvasViewport*>(QStringLiteral("canvasViewport")); QVERIFY(canvas);
+    QTRY_VERIFY(canvas->document() == static_cast<QObject*>(workspace.document()));
     QTest::qWait(30); canvas->refreshNow();
     const auto location = canvas->mapToScene(QPointF(100, 100)).toPoint();
     const auto docPoint = canvas->viewportToDocument(100, 100);
