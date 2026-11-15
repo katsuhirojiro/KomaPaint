@@ -889,7 +889,9 @@ void TestBrushUi::thumbnailWheelResizesWithoutChangingSelection()
     QCOMPARE(panel->property("thumbnailSize").toInt(), 32);
     sendWheel(60);
     QTRY_COMPARE(panel->property("thumbnailSize").toInt(), 48);
-    QCOMPARE(qRound(thumbnail->width()), 48);
+    // Let Qt Quick polish the RowLayout after the modeless wheel event before
+    // asserting the delegate's actual thumbnail geometry.
+    QTRY_COMPARE(qRound(thumbnail->width()), 48);
     QCOMPARE(app.workspace.layers()->activeLayerIndex(), 0);
     sendWheel(-120);
     QTRY_COMPARE(panel->property("thumbnailSize").toInt(), 32);

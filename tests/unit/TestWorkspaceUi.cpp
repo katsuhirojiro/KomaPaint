@@ -554,7 +554,11 @@ void TestWorkspaceUi::sessionRestoresProjectsAndLayoutAtStartup()
         QTest::mouseMove(app.window, grab - QPoint(80, 0));
         QTest::mouseRelease(app.window, Qt::LeftButton, Qt::NoModifier, grab - QPoint(80, 0));
         QTRY_VERIFY(dock->fractionsOf(10) != startFractions);
-        QTRY_VERIFY(layersGroup->width() >= rightColumnWidth + 20);
+        // A layoutChanged notification rebuilds dock delegates; re-find the
+        // group each time rather than measuring a detached pre-drag item.
+        QTRY_VERIFY((layersGroup = findInWindow(app.window,
+            QStringLiteral("dockGroup%1").arg(dock->groupOf(QStringLiteral("layers")))))
+            && layersGroup->width() >= rightColumnWidth + 20);
         rightColumnWidth = layersGroup->width();
         // The layout is written back on a short debounce.
         QTRY_VERIFY_WITH_TIMEOUT(!m_settings->value(QStringLiteral("workspace/layout")).toString().isEmpty(), 3000);
