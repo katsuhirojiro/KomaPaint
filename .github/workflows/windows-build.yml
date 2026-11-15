@@ -137,6 +137,9 @@ jobs:
         run: |
           $env:PATH = "${{ steps.qt.outputs.qtBin }};${{ env.TEST_DIR }};" + $env:PATH
           $env:QT_QPA_PLATFORM = "offscreen"
+          # These interfaces deliberately customize Controls 2 primitives;
+          # the Basic style supports that consistently on the Windows runner.
+          $env:QT_QUICK_CONTROLS_STYLE = "Basic"
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
           $failed = 0
@@ -162,9 +165,16 @@ jobs:
             if ($code -ne 0) {
               Write-Host ">>> $($exe.Name) FAILED with exit code $code <<<"
               $failed++
-              # Build a compact single-line diagnostic for the annotation.
-              $annotation = $output.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' || ')
-              if ($annotation.Length -gt 1000) { $annotation = "...(truncated) " + $annotation.Substring($annotation.Length - 1000) }
+              # Preserve actual assertion failures in the annotation rather than
+              # the last QML warnings, so CI failures remain diagnosable when raw
+              # Actions logs cannot be downloaded from this environment.
+              $diagnostics = @($output -split "`n" | Where-Object {
+                $_ -match '^(FAIL!|QFATAL|   Actual|   Expected|   Loc:|.*failure location|Totals:)'
+              })
+              if ($diagnostics.Count -gt 0) { $annotation = $diagnostics -join ' || ' }
+              else { $annotation = $output }
+              $annotation = $annotation.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' || ')
+              if ($annotation.Length -gt 1800) { $annotation = "...(truncated) " + $annotation.Substring($annotation.Length - 1800) }
               $failingSummary += "$($exe.Name) (exit $code): $annotation"
             } else {
               Write-Host ">>> $($exe.Name) PASSED (exit $code) <<<"

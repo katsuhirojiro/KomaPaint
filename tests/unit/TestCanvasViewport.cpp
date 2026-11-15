@@ -287,6 +287,9 @@ void TestCanvasViewport::actualWindowShortcuts()
     ApplicationConfig config;
     Settings settings(QStringLiteral("KomaPaintTests"), QStringLiteral("UndoWindow"));
     PanelManager panels;
+    // The title field belongs to the Properties tab, which shares a dock group
+    // with Color and is not the active tab in the default layout.
+    panels.dockModel()->setActive(QStringLiteral("properties"));
     NewProjectSettings newProject;
     QQmlEngine engine; engine.addImportPath(QStringLiteral("qrc:/"));
     engine.rootContext()->setContextProperty(QStringLiteral("Workspace"), &workspace);

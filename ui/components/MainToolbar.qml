@@ -55,6 +55,29 @@ Rectangle {
         anchors.rightMargin: KP.gapM
         spacing: KP.gapS
 
+        // File actions remain small icon commands; brush-specific controls do
+        // not belong in this shared command bar.
+        Row {
+            Layout.alignment: Qt.AlignVCenter
+            spacing: KP.gapXS
+
+            KpButton {
+                objectName: "openToolbarButton"
+                glyph: "open"
+                tip: qsTr("Open project (Ctrl+O)")
+                onClicked: bar.openRequested()
+            }
+            KpButton {
+                objectName: "saveToolbarButton"
+                glyph: "save"
+                tip: qsTr("Save project (Ctrl+S)")
+                enabled: Workspace.document !== null
+                onClicked: bar.saveRequested()
+            }
+        }
+
+        BarRule { Layout.alignment: Qt.AlignVCenter }
+
         // ---- Edit
         Row {
             visible: bar.showEditGroup

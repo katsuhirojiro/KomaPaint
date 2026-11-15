@@ -749,9 +749,13 @@ void TestDocking::aHiddenStandalonePanelReturnsToItsSlot()
 {
     DockModel dock;
     const QString panel = QStringLiteral("properties");
+    // Properties shares the default Color tab group. Split it first so this
+    // test really covers a standalone panel remembering its dock slot.
+    QVERIFY(dock.dockToSide(panel, QStringLiteral("color"), QStringLiteral("bottom")));
     const int group = dock.groupOf(panel);
+    QCOMPARE(dock.nodeById(group).value(QStringLiteral("panels")).toStringList(), QStringList{panel});
     const QVariantMap parentBefore = parentOf(dock.tree(), group);
-    QCOMPARE(parentBefore.value(QStringLiteral("children")).toList().size(), 3);
+    QCOMPARE(parentBefore.value(QStringLiteral("children")).toList().size(), 2);
     const qreal fraction = fractionOf(dock.tree(), group);
     QVERIFY(fraction > 0.05);
 
@@ -848,6 +852,8 @@ void TestDocking::aStoredLayoutKeepsAreaStateAndPlacements()
     DockModel dock;
     QVERIFY(dock.dockToWorkspace(QStringLiteral("timeline"), QStringLiteral("bottom")));
     QVERIFY(dock.setAreaCollapsed(QStringLiteral("bottom"), true));
+    // Store a standalone Properties slot, not the shared Color tab position.
+    QVERIFY(dock.dockToSide(QStringLiteral("properties"), QStringLiteral("color"), QStringLiteral("bottom")));
     dock.hidePanel(QStringLiteral("properties"));
     const QVariantMap stored = dock.serialise();
     QCOMPARE(stored.value(QStringLiteral("collapsedAreas")).toStringList(),
