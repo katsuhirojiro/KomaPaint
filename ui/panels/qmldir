@@ -6,3 +6,7 @@ TimelinePanel 1.0 TimelinePanel.qml
 SubToolPanel 1.0 SubToolPanel.qml
 ToolPropertyPanel 1.0 ToolPropertyPanel.qml
 BrushSizePanel 1.0 BrushSizePanel.qml
+
+PalettePanel 1.0 PalettePanel.qml
+ColorMixerPanel 1.0 ColorMixerPanel.qml
+AssetsPanel 1.0 AssetsPanel.qml

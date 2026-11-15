@@ -19,6 +19,41 @@ std::uint32_t over(std::uint32_t src, std::uint32_t dst, unsigned opacity) {
     };
     return (channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0);
 }
+// W3C source-over blend compositing, in premultiplied form:
+// co = Cs*as*(1-ab) + Cb*ab*(1-as) + B(Cb,Cs)*as*ab.
+// The existing integer Normal path is retained to avoid altering old projects.
+std::uint32_t blendOver(std::uint32_t src, std::uint32_t dst, unsigned opacity, BlendMode mode) {
+    if (mode == BlendMode::Normal) return over(src, dst, opacity);
+    const double sourceAlpha = double((src >> 24) & 255U) / 255.0;
+    const double backdropAlpha = double((dst >> 24) & 255U) / 255.0;
+    const double effectiveAlpha = sourceAlpha * double(opacity) / 255.0;
+    const double outAlpha = effectiveAlpha + backdropAlpha * (1.0 - effectiveAlpha);
+    const unsigned a = static_cast<unsigned>(std::lround(outAlpha * 255.0));
+    auto channel = [&](unsigned shift) {
+        const double sourcePremul = double((src >> shift) & 255U) / 255.0;
+        const double backdropPremul = double((dst >> shift) & 255U) / 255.0;
+        const double cs = sourceAlpha > 0 ? sourcePremul / sourceAlpha : 0;
+        const double cb = backdropAlpha > 0 ? backdropPremul / backdropAlpha : 0;
+        double blended = 0;
+        switch (mode) {
+        case BlendMode::Multiply: blended = cb * cs; break;
+        case BlendMode::Screen: blended = cb + cs - cb * cs; break;
+        case BlendMode::Overlay: blended = cb <= 0.5 ? 2 * cb * cs : 1 - 2 * (1 - cb) * (1 - cs); break;
+        case BlendMode::Normal: break; // handled above
+        }
+        const double result = cs * effectiveAlpha * (1 - backdropAlpha)
+                            + backdropPremul * (1 - effectiveAlpha)
+                            + blended * effectiveAlpha * backdropAlpha;
+        return std::min(a, static_cast<unsigned>(std::lround(std::clamp(result, 0.0, 1.0) * 255.0)));
+    };
+    return (a << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0);
+}
+bool validBlendMode(BlendMode mode) {
+    switch (mode) {
+    case BlendMode::Normal: case BlendMode::Multiply: case BlendMode::Screen: case BlendMode::Overlay: return true;
+    }
+    return false;
+}
 bool same(const std::vector<CompositeLayer>& a, std::uint32_t ab,
           const std::vector<CompositeLayer>& b, std::uint32_t bb) { return ab == bb && a == b; }
 }
@@ -28,7 +63,7 @@ std::optional<CompositeTile> CpuTileCompositor::compose(const TileGeometry& geom
     auto bounds = geometry.tileBounds(tile);
     if (!bounds || !validPixel(background) || geometry.tileSize() > 4096) return std::nullopt;
     for (const auto& layer : layers) {
-        if (!layer.store || !layer.store->isValid() || !std::isfinite(layer.opacity) || layer.opacity < 0 || layer.opacity > 1)
+        if (!layer.store || !layer.store->isValid() || !std::isfinite(layer.opacity) || layer.opacity < 0 || layer.opacity > 1 || !validBlendMode(layer.blendMode))
             return std::nullopt;
         const auto& other = layer.store->geometry();
         if (other.width() != geometry.width() || other.height() != geometry.height() || other.tileSize() != geometry.tileSize())
@@ -49,7 +84,7 @@ std::optional<CompositeTile> CpuTileCompositor::compose(const TileGeometry& geom
             const auto stride = static_cast<std::size_t>(geometry.tileSize());
             for (std::size_t y = 0; y < height; ++y)
                 for (std::size_t x = 0; x < width; ++x)
-                    result.pixels[y * width + x] = over(pixels[y * stride + x], result.pixels[y * width + x], opacity);
+                    result.pixels[y * width + x] = blendOver(pixels[y * stride + x], result.pixels[y * width + x], opacity, it->blendMode);
         }
         return result;
     } catch (const std::bad_alloc&) { return std::nullopt; }

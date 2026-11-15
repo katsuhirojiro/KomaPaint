@@ -6,12 +6,17 @@
 #include <vector>
 
 namespace komapaint {
+// Compositing modes operate on straight RGB colours but store premultiplied
+// ARGB. Normal is the existing source-over behavior and remains the default.
+enum class BlendMode { Normal, Multiply, Screen, Overlay };
+
 // UI-independent view, ordered TOP-FIRST (same as the layer panel).
 // Stores must remain alive and unmodified during a synchronous compose call.
 struct CompositeLayer {
     SparseTileStore* store = nullptr;
     bool visible = true;
     double opacity = 1.0;
+    BlendMode blendMode = BlendMode::Normal;
     bool operator==(const CompositeLayer&) const = default;
 };
 struct CompositeTile {

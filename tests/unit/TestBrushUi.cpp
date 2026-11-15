@@ -16,8 +16,10 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QJSEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QWheelEvent>
 #include <QSGRendererInterface>
 #include <QTemporaryDir>
 
@@ -97,7 +99,32 @@ bool clickNamed(Running& app, const QString& name)
 {
     auto* target = item(app, name);
     if (!target || target->width() <= 0 || !target->isVisible()) return false;
+    if (name.startsWith(QStringLiteral("tool_"))) {
+        auto* scroll = item(app, QStringLiteral("toolPaletteScroll"));
+        if (scroll) {
+            const qreal y = target->mapToItem(scroll, QPointF(0, target->height() / 2)).y();
+            const qreal maximum = std::max(0.0, scroll->property("contentHeight").toReal() - scroll->height());
+            const qreal next = std::clamp(scroll->property("contentY").toReal() + y - scroll->height() / 2, 0.0, maximum);
+            scroll->setProperty("contentY", next);
+            QCoreApplication::processEvents();
+        }
+    }
     click(app, target);
+    return true;
+}
+
+bool chooseHardness(Running& app, int choice)
+{
+    auto* target = item(app, QStringLiteral("brushHardnessChoice"));
+    auto* scroll = item(app, QStringLiteral("toolPropertyScroll"));
+    if (!target || !scroll || choice < 0 || choice > 4) return false;
+    const qreal y = target->mapToItem(scroll, QPointF(0, target->height() / 2)).y();
+    const qreal maximum = std::max(0.0, scroll->property("contentHeight").toReal() - scroll->height());
+    scroll->setProperty("contentY", std::clamp(scroll->property("contentY").toReal() + y - scroll->height() / 2, 0.0, maximum));
+    QCoreApplication::processEvents();
+    const QPoint at = target->mapToScene(QPointF(target->width() * (choice + 0.5) / 5.0, target->height() / 2)).toPoint();
+    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, at);
+    QCoreApplication::processEvents();
     return true;
 }
 
@@ -106,6 +133,13 @@ bool setSlider(Running& app, const QString& name, double position)
 {
     auto* slider = item(app, name);
     if (!slider || !slider->isVisible() || slider->width() <= 0) return false;
+    auto* scroll = item(app, QStringLiteral("toolPropertyScroll"));
+    if (scroll) {
+        const qreal y = slider->mapToItem(scroll, QPointF(0, slider->height() / 2)).y();
+        const qreal maximum = std::max(0.0, scroll->property("contentHeight").toReal() - scroll->height());
+        scroll->setProperty("contentY", std::clamp(scroll->property("contentY").toReal() + y - scroll->height() / 2, 0.0, maximum));
+        QCoreApplication::processEvents();
+    }
     const QPointF local(1 + position * (slider->width() - 2), slider->height() - 7);
     const QPoint at = slider->mapToScene(local).toPoint();
     QTest::mouseMove(app.window, at);
@@ -220,6 +254,8 @@ private slots:
     void subToolsLoadAndKeepTheirSettings();
     void viewToolsZoomPanAndPickColour();
     void layerIconsAct();
+    void thumbnailWheelResizesWithoutChangingSelection();
+    void spectralMixerProducesPaintLikeColours();
     void newProjectDialogShowsTheProjectTypeIcons();
     void iconsFollowTheTheme();
     void preferencesDialogStoresThemeAndIconColours();
@@ -425,10 +461,10 @@ void TestBrushUi::paletteShowsEveryToolAndSelectsOnlyWorkingOnes()
         for (const QRectF& other : cells) QVERIFY2(!cell.intersects(other), qPrintable(tool));
         cells << cell;
     }
-    // Two columns.
+    // One column, with groups scrolling inside the rail.
     QSet<int> columns;
     for (const QRectF& cell : cells) columns << qRound(cell.x());
-    QCOMPARE(columns.size(), 2);
+    QCOMPARE(columns.size(), 1);
 
     QVERIFY(clickNamed(app, QStringLiteral("tool_eraser")));
     QCOMPARE(ws.activeTool(), QStringLiteral("eraser"));
@@ -460,14 +496,8 @@ void TestBrushUi::paletteShowsEveryToolAndSelectsOnlyWorkingOnes()
     QTest::keyClick(app.window, Qt::Key_BracketLeft);
     QTRY_COMPARE(ws.brush()->size(), 12);
 
-    // The brush is no longer set up in the top toolbar.
-    auto* toolbarButton = item(app, QStringLiteral("newProjectToolbarButton"));
-    QVERIFY(toolbarButton);
-    QQuickItem* toolbar = toolbarButton->parentItem();
-    while (toolbar && toolbar->height() > 60) toolbar = toolbar->parentItem();
-    QVERIFY(toolbar);
-    QVERIFY(!hasClass(toolbar->parentItem(), "SpinBox"));
-    QVERIFY(!hasClass(toolbar->parentItem(), "ComboBox"));
+    // Document commands live in File rather than occupying the command bar.
+    QVERIFY(!item(app, QStringLiteral("newProjectToolbarButton")));
 
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
@@ -532,16 +562,16 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
     QVERIFY(qAbs(brush->opacity() - 50) <= 2);
     QVERIFY(setSlider(app, QStringLiteral("brushDensitySlider"), 0.25));
     QVERIFY(qAbs(brush->flow() - 25) <= 2);
-    QVERIFY(setSlider(app, QStringLiteral("brushHardnessSlider"), 0.0));
+    QVERIFY(chooseHardness(app, 0));
     QCOMPARE(brush->hardness(), 0);
-    QVERIFY(setSlider(app, QStringLiteral("brushHardnessSlider"), 0.6));
-    QVERIFY(qAbs(brush->hardness() - 60) <= 2);
+    QVERIFY(chooseHardness(app, 3));
+    QCOMPARE(brush->hardness(), 75);
     QVERIFY(setSlider(app, QStringLiteral("brushStabilizationSlider"), 1.0));
     QCOMPARE(brush->stabilization(), 100);
-    QVERIFY(setSlider(app, QStringLiteral("brushSpacingSlider"), 1.0));
-    QCOMPARE(brush->spacing(), int(BrushSettings::MaxSpacing));
-    QVERIFY(setSlider(app, QStringLiteral("brushSpacingSlider"), 0.0));
-    QCOMPARE(brush->spacing(), int(BrushSettings::MinSpacing));
+    QVERIFY(!item(app, QStringLiteral("brushSpacingSlider")));
+    // Return to the top of the property panel for the precision controls.
+    item(app, QStringLiteral("toolPropertyScroll"))->setProperty("contentY", 0);
+    QCoreApplication::processEvents();
     // Brush size: both ends of the bar are the engine's limits.
     QVERIFY(setSlider(app, QStringLiteral("brushSizeSlider"), 1.0));
     QCOMPARE(brush->size(), int(BrushSettings::MaxSize));
@@ -594,7 +624,7 @@ void TestBrushUi::strokesFollowHardnessAndTheEraserErases()
     QCOMPARE(alpha(app, 226, 300), 0);
 
     // Same size, hardness 0: solid in the middle, fading towards the rim.
-    QVERIFY(setSlider(app, QStringLiteral("brushHardnessSlider"), 0.0));
+    QVERIFY(chooseHardness(app, 0));
     QCOMPARE(ws.brush()->hardness(), 0);
     QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, onCanvas(app, 400, 300));
     QTest::qWait(20);
@@ -604,7 +634,9 @@ void TestBrushUi::strokesFollowHardnessAndTheEraserErases()
     QVERIFY2(softOuter > 0 && softOuter < softMiddle, qPrintable(QString::number(softOuter)));
 
     // Density 25 %: one dab deposits a quarter.
-    QVERIFY(setSlider(app, QStringLiteral("brushHardnessSlider"), 1.0));
+    QVERIFY(chooseHardness(app, 4));
+    item(app, QStringLiteral("toolPropertyScroll"))->setProperty("contentY", 0);
+    QCoreApplication::processEvents();
     QVERIFY(setSlider(app, QStringLiteral("brushDensitySlider"), 0.25));
     const int density = ws.brush()->flow();
     QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, onCanvas(app, 600, 300));
@@ -785,6 +817,20 @@ void TestBrushUi::layerIconsAct()
     QTRY_COMPARE(layers->rowCount(), 2);
     QTRY_VERIFY(remove->isEnabled());
 
+    // The always-visible layer opacity control edits the actual selected layer.
+    auto* opacitySlider = item(app, QStringLiteral("layerOpacitySlider"));
+    auto* opacityField = item(app, QStringLiteral("layerOpacityField"));
+    QVERIFY(opacitySlider && opacityField && opacitySlider->isVisible());
+    layers->setActiveLayerIndex(0);
+    layers->layerAt(0)->setOpacity(0.37);
+    QTRY_COMPARE(opacityField->property("value").toInt(), 37);
+    layers->setActiveLayerIndex(1);
+    QTRY_COMPARE(opacityField->property("value").toInt(), 100);
+    const QPoint opacityAt = opacitySlider->mapToScene(QPointF(opacitySlider->width() / 2, opacitySlider->height() / 2)).toPoint();
+    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, opacityAt);
+    QTRY_VERIFY(qAbs(layers->layerAt(1)->opacity() - 0.5) < 0.05);
+    QCOMPARE(layers->layerAt(0)->opacity(), 0.37);
+
     // Eye and lock in the row.
     const int active = layers->activeLayerIndex();
     auto* layer = layers->layerAt(active);
@@ -821,12 +867,67 @@ void TestBrushUi::layerIconsAct()
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 
+void TestBrushUi::thumbnailWheelResizesWithoutChangingSelection()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiThumbnailWheel")));
+    auto* panel = item(app, QStringLiteral("layersPanel"));
+    auto* thumbnail = item(app, QStringLiteral("layerThumbnail0"));
+    QVERIFY(panel && thumbnail);
+    QCOMPARE(panel->property("thumbnailSize").toInt(), 32);
+    QCOMPARE(qRound(thumbnail->width()), 32);
+    const auto sendWheel = [&](int delta) {
+        const QPoint at = centre(thumbnail);
+        QTest::mouseMove(app.window, at);
+        QWheelEvent event(QPointF(at), QPointF(app.window->mapToGlobal(at)), QPoint(),
+                          QPoint(0, delta), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(app.window, &event);
+        QCoreApplication::processEvents();
+    };
+    sendWheel(60);
+    QCOMPARE(panel->property("thumbnailSize").toInt(), 32);
+    sendWheel(60);
+    QTRY_COMPARE(panel->property("thumbnailSize").toInt(), 48);
+    QCOMPARE(qRound(thumbnail->width()), 48);
+    QCOMPARE(app.workspace.layers()->activeLayerIndex(), 0);
+    sendWheel(-120);
+    QTRY_COMPARE(panel->property("thumbnailSize").toInt(), 32);
+    sendWheel(-120);
+    QTRY_COMPARE(panel->property("thumbnailSize").toInt(), 24);
+    sendWheel(-120); // endpoint remains compact
+    QCOMPARE(panel->property("thumbnailSize").toInt(), 24);
+    QVERIFY(QMetaObject::invokeMethod(panel, "setThumbnailWheelEnabled", Q_ARG(QVariant, QVariant(false))));
+    sendWheel(120);
+    QCOMPARE(panel->property("thumbnailSize").toInt(), 24);
+    QVERIFY(item(app, QStringLiteral("dockOptions_layers")));
+    QVERIFY(!item(app, QStringLiteral("commandBarSizeField")));
+    QVERIFY(!item(app, QStringLiteral("commandBarOpacityField")));
+    QVERIFY(!item(app, QStringLiteral("preferencesToolbarButton")));
+}
+
+// The spectral mixer is deterministic and retains exact endpoints.
+void TestBrushUi::spectralMixerProducesPaintLikeColours()
+{
+    QFile script(QStringLiteral(":/components/SpectralMix.js"));
+    QVERIFY(script.open(QIODevice::ReadOnly));
+    QString source = QString::fromUtf8(script.readAll());
+    source.remove(QStringLiteral(".pragma library"));
+    QJSEngine js;
+    const QJSValue loaded = js.evaluate(source, QStringLiteral("SpectralMix.js"));
+    QVERIFY2(!loaded.isError(), qPrintable(loaded.toString()));
+    auto mix = js.globalObject().property(QStringLiteral("mixHex"));
+    QVERIFY(mix.isCallable());
+    QCOMPARE(mix.call({QStringLiteral("#002185"), QStringLiteral("#FCD200"), 0.0}).toString(), QStringLiteral("#002185"));
+    QCOMPARE(mix.call({QStringLiteral("#002185"), QStringLiteral("#FCD200"), 0.5}).toString(), QStringLiteral("#3D933E"));
+    QCOMPARE(mix.call({QStringLiteral("#002185"), QStringLiteral("#FCD200"), 1.0}).toString(), QStringLiteral("#FCD200"));
+}
+
 // --------------------------------------------------------------- new project
 void TestBrushUi::newProjectDialogShowsTheProjectTypeIcons()
 {
     Running app;
     QVERIFY(start(app, QStringLiteral("BrushUiNewProject")));
-    QVERIFY(clickNamed(app, QStringLiteral("newProjectToolbarButton")));
+    QVERIFY(QMetaObject::invokeMethod(app.root.get(), "requestNewDocument"));
     auto* dialog = app.root->findChild<QObject*>(QStringLiteral("newProjectDialog"));
     QVERIFY(dialog);
     QTRY_VERIFY(dialog->property("opened").toBool());

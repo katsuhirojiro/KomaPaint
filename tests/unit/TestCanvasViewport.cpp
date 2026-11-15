@@ -36,6 +36,7 @@ class TestCanvasViewport : public QObject {
 private slots:
     void navigationAndVisibleTiles();
     void dirtyAndLayers();
+    void blendModeChangesInvalidateComposite();
     void brushInputAndLayerRules();
     void strokeFailureDiagnostics();
     void compositeCacheAccounting();
@@ -125,6 +126,32 @@ void TestCanvasViewport::dirtyAndLayers()
     view.panBy(10 - origin.x(), 10 - origin.y()); view.refreshNow();
     QVERIFY(bottom->tiles().dirtyRegions().empty());
     QCOMPARE(view.frameSnapshot().pixelColor(10, 10), QColor(Qt::green));
+}
+void TestCanvasViewport::blendModeChangesInvalidateComposite()
+{
+    CanvasDocument doc;
+    doc.setSize(QSize(64, 64));
+    doc.setTransparentBackground(true);
+    doc.layers()->addLayer();
+    Layer* top = doc.layers()->layerAt(0);
+    Layer* bottom = doc.layers()->layerAt(1);
+    QCOMPARE(top->tiles().setPixel({32, 32}, 0xffff0000U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(bottom->tiles().setPixel({32, 32}, 0xff0000ffU), SparseTileStore::WriteResult::Changed);
+    CanvasViewport view;
+    view.setWidth(128); view.setHeight(128); view.setDocument(&doc);
+    view.refreshNow();
+    const QPointF point = view.documentToViewport(32, 32);
+    const int x = qRound(point.x()), y = qRound(point.y());
+    QCOMPARE(view.frameSnapshot().pixelColor(x, y), QColor(Qt::red));
+    const auto count = view.compositeCount();
+    top->setBlendMode(1); // Multiply red and blue: black.
+    QVERIFY(doc.isModified());
+    view.refreshNow();
+    QVERIFY(view.compositeCount() > count);
+    QCOMPARE(view.frameSnapshot().pixelColor(x, y), QColor(Qt::black));
+    top->setBlendMode(2); // Screen red and blue: magenta.
+    view.refreshNow();
+    QCOMPARE(view.frameSnapshot().pixelColor(x, y), QColor(Qt::magenta));
 }
 void TestCanvasViewport::brushInputAndLayerRules()
 {

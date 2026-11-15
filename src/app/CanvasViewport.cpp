@@ -260,7 +260,7 @@ std::vector<CompositeLayer> CanvasViewport::layers() const
     result.reserve(static_cast<std::size_t>(model->rowCount()));
     for (int i = 0; i < model->rowCount(); ++i) {
         auto* l = model->layerAt(i);
-        result.push_back({&l->tiles(), l->isVisible(), l->opacity()});
+        result.push_back({&l->tiles(), l->isVisible(), l->opacity(), static_cast<BlendMode>(l->blendMode())});
     }
     return result;
 }

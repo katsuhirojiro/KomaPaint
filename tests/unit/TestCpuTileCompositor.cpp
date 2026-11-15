@@ -43,6 +43,32 @@ int main() {
     SparseTileStore different(6, 5, 4);
     CHECK(!CpuTileCompositor::compose(geometry, {0, 0}, {{&different, true, 1}}, 0));
 
+    // New modes must composite premultiplied pixels correctly, including
+    // transparent backdrops, partial alpha and non-opaque layer opacity.
+    SparseTileStore blendSource(4, 4, 4), blendBase(4, 4, 4);
+    CHECK(blendSource.setPixel({0, 0}, 0xffff8000U) == W::Changed);
+    CHECK(blendBase.setPixel({0, 0}, 0xff80c0ffU) == W::Changed);
+    CHECK(blendSource.setPixel({1, 0}, 0x80800000U) == W::Changed);
+    CHECK(blendBase.setPixel({1, 0}, 0x80000080U) == W::Changed);
+    std::vector<CompositeLayer> blendLayers{{&blendSource, true, 1, BlendMode::Multiply}, {&blendBase, true, 1}};
+    auto blended = CpuTileCompositor::compose(TileGeometry(4, 4, 4), {0, 0}, blendLayers, 0);
+    CHECK(blended && blended->pixels[0] == 0xff806000U);
+    CHECK(blended->pixels[1] == 0xc0400040U);
+    blendLayers[0].blendMode = BlendMode::Screen;
+    blended = CpuTileCompositor::compose(TileGeometry(4, 4, 4), {0, 0}, blendLayers, 0);
+    CHECK(blended && blended->pixels[0] == 0xffffe0ffU);
+    blendLayers[0].blendMode = BlendMode::Overlay;
+    blended = CpuTileCompositor::compose(TileGeometry(4, 4, 4), {0, 0}, blendLayers, 0);
+    CHECK(blended && blended->pixels[0] == 0xffffc0ffU);
+    blendLayers[0].opacity = 0.5;
+    blended = CpuTileCompositor::compose(TileGeometry(4, 4, 4), {0, 0}, blendLayers, 0);
+    CHECK(blended && blended->pixels[0] == 0xffc0c0ffU);
+    blendLayers.pop_back(); // transparent backdrop must not black out source
+    blended = CpuTileCompositor::compose(TileGeometry(4, 4, 4), {0, 0}, blendLayers, 0);
+    CHECK(blended && blended->pixels[0] == 0x80804000U);
+    blendLayers[0].blendMode = static_cast<BlendMode>(-1);
+    CHECK(!CpuTileCompositor::compose(TileGeometry(4, 4, 4), {0, 0}, blendLayers, 0));
+
     layers = {{&top, true, 1}, {&bottom, true, 1}};
     CompositeInvalidation queue;
     auto plan = queue.prepare(layers, 0);
@@ -69,6 +95,8 @@ int main() {
     auto changed = queue.prepare(layers, 0);
     CHECK(queue.accept(changed, layers, 0));
     CHECK(!queue.prepare(layers, 0).invalidateAll);
+    layers[0].blendMode = BlendMode::Multiply; CHECK(queue.prepare(layers, 0).invalidateAll);
+    layers[0].blendMode = BlendMode::Normal;
     layers[0].opacity = 0.25; CHECK(queue.prepare(layers, 0).invalidateAll);
     layers[0].opacity = 1; std::swap(layers[0], layers[1]); CHECK(queue.prepare(layers, 0).invalidateAll);
     CHECK(queue.prepare(layers, 0xff000000U).invalidateAll);

@@ -19,7 +19,7 @@ class LayerModel : public QAbstractListModel
     Q_PROPERTY(int activeLayerIndex READ activeLayerIndex WRITE setActiveLayerIndex NOTIFY activeLayerIndexChanged)
 
 public:
-    enum Roles { NameRole = Qt::UserRole + 1, VisibleRole, LockedRole, OpacityRole, IndexRole };
+    enum Roles { NameRole = Qt::UserRole + 1, VisibleRole, LockedRole, OpacityRole, IndexRole, BlendModeRole, ColorLabelRole };
 
     explicit LayerModel(QObject* parent = nullptr);
 

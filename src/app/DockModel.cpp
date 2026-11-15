@@ -60,9 +60,11 @@ const QList<DockModel::PanelInfo>& DockModel::panelTable()
         { QStringLiteral("layers"),       QStringLiteral("Layers"),        QStringLiteral("right"),  true  },
         { QStringLiteral("properties"),   QStringLiteral("Properties"),    QStringLiteral("right"),  true  },
         { QStringLiteral("color"),        QStringLiteral("Color"),         QStringLiteral("right"),  true  },
+        { QStringLiteral("palette"),      QStringLiteral("Palette"),       QStringLiteral("right"),  true  },
+        { QStringLiteral("colormixer"),   QStringLiteral("Color Mixer"),   QStringLiteral("right"),  true  },
         { QStringLiteral("timeline"),     QStringLiteral("Timeline"),      QStringLiteral("bottom"), false },
         { QStringLiteral("history"),      QStringLiteral("History"),       QStringLiteral("right"),  false },
-        { QStringLiteral("assets"),       QStringLiteral("Assets"),        QStringLiteral("left"),   false },
+        { QStringLiteral("assets"),       QStringLiteral("Assets"),        QStringLiteral("right"),  true  },
         { QStringLiteral("xsheet"),       QStringLiteral("Exposure Sheet"), QStringLiteral("bottom"), false },
     };
     return table;
@@ -153,9 +155,13 @@ void DockModel::buildDefault()
                          tabs(QStringLiteral("brushsize")) },
                        { 0.18, 0.57, 0.25 });
     Node centre = makeCanvas();
-    Node right = column({ tabs(QStringLiteral("layers")), tabs(QStringLiteral("properties")),
-                          tabs(QStringLiteral("color")) },
-                        { 0.45, 0.27, 0.28 });
+    Node colorTabs = tabs(QStringLiteral("color"));
+    colorTabs.panels.append(QStringLiteral("properties"));
+    Node colorTools = tabs(QStringLiteral("palette"));
+    colorTools.panels.append(QStringLiteral("colormixer"));
+    Node right = column({ tabs(QStringLiteral("layers")), std::move(colorTabs),
+                          std::move(colorTools), tabs(QStringLiteral("assets")) },
+                        { 0.40, 0.34, 0.16, 0.10 });
 
     m_root = Node();
     m_root.id = nextId();
@@ -394,6 +400,10 @@ bool DockModel::applyLayout(const QVariantMap& map)
     for (const auto& entry : panelTable()) {
         if (seen.contains(entry.id)) continue;
         if (m_hidden.contains(entry.id)) continue;   // deliberately hidden by the user
+        if (entry.id == QStringLiteral("palette") || entry.id == QStringLiteral("colormixer") || entry.id == QStringLiteral("assets")) {
+            m_hidden.append(entry.id);
+            continue; // Existing layouts remain untouched; View can open these.
+        }
         if (entry.visibleByDefault) restoreVisible.append(entry.id);
         else m_hidden.append(entry.id);
     }
@@ -1347,12 +1357,36 @@ void DockModel::showPanel(const QString& panelId)
         }
     }
 
+    // If both colour-tool tabs were closed, their old group may have dissolved.
+    // Rejoin the remaining colour tool rather than creating a second group.
+    if (panelId == QStringLiteral("palette") || panelId == QStringLiteral("colormixer")) {
+        const QString other = panelId == QStringLiteral("palette") ? QStringLiteral("colormixer") : QStringLiteral("palette");
+        const int otherGroup = groupOf(other);
+        if (otherGroup > 0 && moveToGroup(panelId, otherGroup)) return;
+    }
+
     // Its tab group dissolved while it was hidden: rebuild the slot next to the
     // neighbour it used to sit beside.
     if (restoreBesideAnchor(panelId, placement)) {
         emit activeTabChanged(m_active);
         scheduleSave();
         return;
+    }
+
+    // Newly introduced colour tools belong together below the colour wheel,
+    // without moving an existing saved layout until the user opens them.
+    if (panelId == QStringLiteral("palette") || panelId == QStringLiteral("colormixer")) {
+        const QString other = panelId == QStringLiteral("palette") ? QStringLiteral("colormixer") : QStringLiteral("palette");
+        const int otherGroup = groupOf(other);
+        if (otherGroup > 0 && moveToGroup(panelId, otherGroup)) return;
+        const int colorGroup = groupOf(QStringLiteral("color"));
+        if (colorGroup > 0 && dockToNodeSide(panelId, colorGroup, QStringLiteral("bottom"))) return;
+    }
+    if (panelId == QStringLiteral("assets")) {
+        int anchor = groupOf(QStringLiteral("palette"));
+        if (anchor <= 0) anchor = groupOf(QStringLiteral("colormixer"));
+        if (anchor <= 0) anchor = groupOf(QStringLiteral("color"));
+        if (anchor > 0 && dockToNodeSide(panelId, anchor, QStringLiteral("bottom"))) return;
     }
 
     // Prefer the last tab group of the panel's home side so a reopened panel

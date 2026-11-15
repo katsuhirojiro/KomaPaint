@@ -88,6 +88,7 @@ Rectangle {
 
         Flickable {
             id: scroll
+            objectName: "toolPropertyScroll"
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: panel.painting
@@ -193,26 +194,15 @@ Rectangle {
                                     onChosen: function(index) { panel.brush.textured = index === 1 }
                                 }
                             }
-                            PropertySlider {
-                                objectName: "brushHardnessSlider"
+                            Text { text: qsTr("Hardness"); color: KP.text; font.pixelSize: KP.fontM }
+                            SegmentedChoice {
+                                objectName: "brushHardnessChoice"
                                 width: parent.width
-                                label: qsTr("Hardness")
-                                unit: "%"
-                                from: 0
-                                to: 100
-                                value: panel.brush.hardness
-                                onEdited: function(v) { panel.brush.hardness = v }
+                                options: ["0", "25", "50", "75", "100"]
+                                currentIndex: [0, 25, 50, 75, 100].indexOf(panel.brush.hardness)
+                                onChosen: function(index) { panel.brush.hardness = [0, 25, 50, 75, 100][index] }
                             }
-                            PropertySlider {
-                                objectName: "brushSpacingSlider"
-                                width: parent.width
-                                label: qsTr("Dab spacing")
-                                unit: "%"
-                                from: panel.brush.minimumSpacing
-                                to: panel.brush.maximumSpacing
-                                value: panel.brush.spacing
-                                onEdited: function(v) { panel.brush.spacing = v }
-                            }
+
                         }
                     }
                 }

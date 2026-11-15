@@ -9,9 +9,14 @@
         <file alias="panels/LayersPanel.qml">../ui/panels/LayersPanel.qml</file>
         <file alias="panels/PropertiesPanel.qml">../ui/panels/PropertiesPanel.qml</file>
         <file alias="panels/ColorPanel.qml">../ui/panels/ColorPanel.qml</file>
+        <file alias="panels/PalettePanel.qml">../ui/panels/PalettePanel.qml</file>
+        <file alias="panels/ColorMixerPanel.qml">../ui/panels/ColorMixerPanel.qml</file>
+        <file alias="panels/AssetsPanel.qml">../ui/panels/AssetsPanel.qml</file>
         <file alias="panels/TimelinePanel.qml">../ui/panels/TimelinePanel.qml</file>
         <file alias="components/KpIcon.qml">../ui/components/KpIcon.qml</file>
         <file alias="components/IconButton.qml">../ui/components/IconButton.qml</file>
+        <file alias="components/SpectralMix.js">../ui/components/SpectralMix.js</file>
+        <file alias="components/ColorWheel.qml">../ui/components/ColorWheel.qml</file>
         <file alias="components/PropertySlider.qml">../ui/components/PropertySlider.qml</file>
         <file alias="components/SegmentedChoice.qml">../ui/components/SegmentedChoice.qml</file>
         <file alias="components/PreferencesDialog.qml">../ui/components/PreferencesDialog.qml</file>

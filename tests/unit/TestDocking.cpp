@@ -116,6 +116,7 @@ class TestDocking : public QObject
     Q_OBJECT
 private slots:
     void defaultLayoutPlacesEveryPanelOnce();
+    void colorTabsCanCloseAndReopen();
     void tabIntoExistingGroup();
     void droppingOnAnEdgeSplitsTheGroup();
     void mergingAllPanelsBackLeavesNoEmptyGroups();
@@ -158,11 +159,31 @@ void TestDocking::defaultLayoutPlacesEveryPanelOnce()
     QCOMPARE(actual, expected);
     QVERIFY(!dock.isVisible(QStringLiteral("timeline")));   // optional panels start hidden
     QCOMPARE(dock.hiddenPanels(), QStringList({ QStringLiteral("timeline"), QStringLiteral("history"),
-                                                QStringLiteral("assets"), QStringLiteral("xsheet") }));
+                                                QStringLiteral("xsheet") }));
+    QVERIFY(dock.isVisible(QStringLiteral("palette")));
+    QCOMPARE(dock.groupOf(QStringLiteral("palette")), dock.groupOf(QStringLiteral("colormixer")));
+    QVERIFY(dock.groupOf(QStringLiteral("assets")) != dock.groupOf(QStringLiteral("palette")));
     QVERIFY(dock.isVisible(QStringLiteral("layers")));
     QCOMPARE(dock.title(QStringLiteral("layers")), QStringLiteral("Layers"));
     QCOMPARE(dock.title(QStringLiteral("nope")), QString());
     QVERIFY(!dock.isKnown(QStringLiteral("nope")));
+}
+
+void TestDocking::colorTabsCanCloseAndReopen()
+{
+    DockModel dock;
+    dock.hidePanel(QStringLiteral("palette"));
+    dock.hidePanel(QStringLiteral("colormixer"));
+    QVERIFY(!dock.isVisible(QStringLiteral("palette")));
+    QVERIFY(!dock.isVisible(QStringLiteral("colormixer")));
+    dock.showPanel(QStringLiteral("palette"));
+    dock.showPanel(QStringLiteral("colormixer"));
+    QVERIFY(dock.isVisible(QStringLiteral("palette")));
+    QVERIFY(dock.isVisible(QStringLiteral("colormixer")));
+    QCOMPARE(dock.groupOf(QStringLiteral("palette")), dock.groupOf(QStringLiteral("colormixer")));
+    QVERIFY(dock.groupOf(QStringLiteral("assets")) != dock.groupOf(QStringLiteral("palette")));
+    QVERIFY(layoutProblem(dock.tree()).isEmpty());
+    QVERIFY(uniqueProblem(dock.tree()).isEmpty());
 }
 
 void TestDocking::tabIntoExistingGroup()
@@ -246,13 +267,14 @@ void TestDocking::mergingAllPanelsBackLeavesNoEmptyGroups()
     const int target = dock.groupOf(QStringLiteral("layers"));
     for (const QString& id : { QStringLiteral("color"), QStringLiteral("properties"),
                                QStringLiteral("subtool"), QStringLiteral("toolproperty"),
-                               QStringLiteral("brushsize"), QStringLiteral("timeline") }) {
+                               QStringLiteral("brushsize"), QStringLiteral("timeline"),
+                               QStringLiteral("palette"), QStringLiteral("colormixer"), QStringLiteral("assets") }) {
         QVERIFY2(dock.moveToGroup(id, target), qPrintable(id));
     }
     const QVariantMap tree = dock.tree();
     QVERIFY2(layoutProblem(tree).isEmpty(), qPrintable(layoutProblem(tree)));
     QVERIFY(uniqueProblem(tree).isEmpty());
-    QCOMPARE(dock.nodeById(target).value(QStringLiteral("panels")).toStringList().size(), 7);
+    QCOMPARE(dock.nodeById(target).value(QStringLiteral("panels")).toStringList().size(), 10);
     // Everything else is the canvas: a single row of canvas + one tab group.
     QCOMPARE(countKind(tree, QStringLiteral("tabs")), 1);
     QCOMPARE(countKind(tree, QStringLiteral("canvas")), 1);

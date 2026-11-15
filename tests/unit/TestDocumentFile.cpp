@@ -10,6 +10,7 @@
 #include <QUrl>
 #include <cstring>
 #include <memory>
+#include <limits>
 
 using namespace komapaint;
 
@@ -103,6 +104,10 @@ private slots:
     void legacyVersion1FilesOpen();
     void legacyVersion1ResaveWritesVersion2();
     void legacyVersion1CorruptionRejected();
+    void extendedLayerMetadataRoundTripAndValidation();
+    void saveRejectsUnrepresentableDocumentsWithoutChangingFile();
+    void transparentBackgroundPreservesHiddenColor();
+    void openRejectsSparseTileAmplification();
 };
 
 void TestDocumentFile::roundTripsPixelsAndMetadata()
@@ -263,7 +268,7 @@ void TestDocumentFile::structurallyInvalidFilesAreRejected()
     expectRejected(QStringLiteral("unknown-version.koma"), [] {
         FileBuilder b;
         b.raw("KOMAPAINT", 9);
-        b.u16(3); // version this build does not know
+        b.u16(4); // version this build does not know
         b.u32(4); b.u32(4); b.dbl(300.0); b.u8(1); b.u32(0xffffffffU);
         b.utf8(QStringLiteral("")); b.u32(0); b.u32(1);
         b.utf8(QStringLiteral("Layer 1")); b.u8(1); b.u8(0); b.dbl(1.0); b.u32(0);
@@ -650,6 +655,123 @@ void TestDocumentFile::legacyVersion1ResaveWritesVersion2()
     QCOMPARE(layer->opacity(), 0.75);
     QCOMPARE(layer->tiles().pixel({2, 3}).value(), 0x80112233U);
     QCOMPARE(layer->tiles().pixel({3, 3}).value(), 0x80445566U);
+}
+
+void TestDocumentFile::extendedLayerMetadataRoundTripAndValidation()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("extended.koma"));
+    CanvasDocument doc;
+    doc.setSize(QSize(4, 4));
+    Layer* layer = doc.layers()->layerAt(0);
+    layer->setBlendMode(2);
+    layer->setColorLabel(5);
+    QString error;
+    QVERIFY2(DocumentFile::save(doc, path, &error), qPrintable(error));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QByteArray saved = file.readAll();
+    file.close();
+    QCOMPARE(static_cast<quint8>(saved[9]), quint8(3));
+    std::unique_ptr<CanvasDocument> loaded(DocumentFile::open(path, &error));
+    QVERIFY2(loaded != nullptr, qPrintable(error));
+    QCOMPARE(loaded->layers()->layerAt(0)->blendMode(), 2);
+    QCOMPARE(loaded->layers()->layerAt(0)->colorLabel(), 5);
+    // A CRC-correct v3 file with unknown metadata must fail, not silently
+    // flatten or replace the layer appearance. Locate the fixed empty-layer
+    // tail: blend, label, rect count, asset count, checksum.
+    for (int offset : {14, 13}) {
+        QByteArray bad = saved;
+        const qsizetype pos = bad.size() - offset;
+        bad[pos] = static_cast<char>(99);
+        const quint32 crc = DocumentFile::crc32(bad.left(bad.size() - 4));
+        for (int i = 0; i < 4; ++i)
+            bad[bad.size() - 4 + i] = static_cast<char>((crc >> (8 * i)) & 0xff);
+        QVERIFY(writeFile(path, bad));
+        error.clear();
+        std::unique_ptr<CanvasDocument> rejected(DocumentFile::open(path, &error));
+        QVERIFY(!rejected);
+        QVERIFY(!error.isEmpty());
+    }
+}
+
+void TestDocumentFile::transparentBackgroundPreservesHiddenColor()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("transparent.koma"));
+    CanvasDocument doc;
+    doc.setSize(QSize(4, 4));
+    doc.setBackgroundColor(QColor(17, 34, 51));
+    doc.setTransparentBackground(true);
+    QString error;
+    QVERIFY2(DocumentFile::save(doc, path, &error), qPrintable(error));
+    std::unique_ptr<CanvasDocument> loaded(DocumentFile::open(path, &error));
+    QVERIFY2(loaded != nullptr, qPrintable(error));
+    QVERIFY(loaded->hasTransparentBackground());
+    QCOMPARE(loaded->backgroundColor(), QColor(17, 34, 51));
+    loaded->setTransparentBackground(false);
+    QCOMPARE(loaded->backgroundColor(), QColor(17, 34, 51));
+}
+
+void TestDocumentFile::saveRejectsUnrepresentableDocumentsWithoutChangingFile()
+{
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("keep.koma"));
+    CanvasDocument doc;
+    doc.setSize(QSize(32, 32));
+    auto* layer = doc.layers()->layerAt(0);
+    QCOMPARE(layer->tiles().setPixel({1, 1}, 0xff112233U), SparseTileStore::WriteResult::Changed);
+    QString error;
+    QVERIFY2(DocumentFile::save(doc, path, &error), qPrintable(error));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const QByteArray original = file.readAll();
+    file.close();
+    const auto checkFailure = [&] {
+        error.clear();
+        QVERIFY(!DocumentFile::save(doc, path, &error));
+        QVERIFY(!error.isEmpty());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), original);
+        file.close();
+    };
+    layer->setName(QString(DocumentFile::MaxNameBytes + 1, QLatin1Char('x')));
+    checkFailure();
+    layer->setName(QStringLiteral("Layer"));
+    doc.setTitle(QString(DocumentFile::MaxTitleBytes + 1, QLatin1Char('x')));
+    checkFailure();
+    doc.setTitle(QString(QChar(0xd800))); // lone surrogate cannot be round-tripped as UTF-8
+    checkFailure();
+    doc.setTitle(QStringLiteral("Good"));
+    doc.setDpi(std::numeric_limits<qreal>::quiet_NaN());
+    checkFailure();
+    doc.setDpi(300);
+    for (quint32 i = 1; i <= DocumentFile::MaxLayers; ++i) doc.layers()->addLayer();
+    checkFailure(); // writer must not emit a file its own reader rejects
+}
+
+void TestDocumentFile::openRejectsSparseTileAmplification()
+{
+    // 1025 one-pixel rectangles in different 256x256 tiles are only about
+    // 29 KiB on disk, but require more than the existing 256 MiB layer budget.
+    FileBuilder payload;
+    payload.u32(32768); payload.u32(32768); payload.dbl(300);
+    payload.u8(1); payload.u32(0xffffffffU); payload.utf8(QStringLiteral(""));
+    payload.u32(0); payload.u32(1);
+    payload.utf8(QStringLiteral("Sparse")); payload.u8(1); payload.u8(0); payload.dbl(1);
+    payload.u32(1025);
+    for (int i = 0; i < 1025; ++i) {
+        payload.u64(static_cast<quint64>((i % 128) * 256));
+        payload.u64(static_cast<quint64>((i / 128) * 256));
+        payload.u32(1); payload.u32(1); payload.u32(0xff000000U);
+    }
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("sparse.koma"));
+    QVERIFY(writeFile(path, toVersion2Envelope(payload.bytes)));
+    QString error;
+    std::unique_ptr<CanvasDocument> loaded(DocumentFile::open(path, &error));
+    QVERIFY(!loaded);
+    QVERIFY(!error.isEmpty());
 }
 
 void TestDocumentFile::legacyVersion1CorruptionRejected()

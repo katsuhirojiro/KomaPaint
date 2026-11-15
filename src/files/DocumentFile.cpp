@@ -18,6 +18,9 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <new>
+#include <set>
+#include <stdexcept>
 #include <vector>
 
 namespace komapaint {
@@ -27,9 +30,8 @@ constexpr char Magic[] = "KOMAPAINT";
 constexpr qsizetype MagicSize = 9;
 constexpr qsizetype MinFileBytes = 48;
 
-// Format version 1 was the flat illustration layout; version 2 is the
-// unified project envelope. Both are read here (they share the exact same
-// illustration document payload); only version 2 is ever written.
+// Versions 1 and 2 share a flat illustration payload. Version 3 extends
+// the v2 envelope with layer metadata; unknown versions are rejected.
 
 // ---- little-endian writers ---------------------------------------------------
 
@@ -54,18 +56,15 @@ void putDouble(QByteArray& out, double v)
     std::memcpy(&bits, &v, sizeof(bits));
     putU64(out, bits);
 }
-void putUtf8(QByteArray& out, const QString& text, qsizetype maxBytes)
+bool putUtf8(QByteArray& out, const QString& text, qsizetype maxBytes)
 {
-    QByteArray bytes = text.toUtf8();
-    if (bytes.size() > maxBytes) {
-        QString clamped = text;
-        // Chop whole code units so we never split a multi-byte sequence.
-        // Titles/names are tiny, so the repeated re-encode is fine.
-        while (!clamped.isEmpty() && clamped.toUtf8().size() > maxBytes) clamped.chop(1);
-        bytes = clamped.toUtf8();
-    }
+    const QByteArray bytes = text.toUtf8();
+    // QString can contain unpaired UTF-16 surrogates, which toUtf8 replaces.
+    // Never silently save a changed name or title.
+    if (bytes.size() > maxBytes || QString::fromUtf8(bytes) != text) return false;
     putU32(out, static_cast<quint32>(bytes.size()));
     out.append(bytes);
+    return true;
 }
 
 // ---- CRC-32 (IEEE, zlib polynomial) -----------------------------------------
@@ -211,6 +210,7 @@ struct LayerRecord {
     QString name;
     bool visible = true, locked = false;
     double opacity = 1.0;
+    quint8 blendMode = 0, colorLabel = 0;
     std::vector<RectRecord> rects;
 };
 // The illustration document payload: the exact byte body that existed as
@@ -233,7 +233,7 @@ struct IllustrationPayload {
 // must outlive the result). On any failure, *error carries a readable message
 // and false is returned. Nothing is constructed until every check passes.
 bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype end,
-                              const QString& path, IllustrationPayload* payload, QString* error)
+                              quint16 version, const QString& path, IllustrationPayload* payload, QString* error)
 {
     const auto fail = [&](const QString& message) {
         if (error) *error = message;
@@ -281,6 +281,10 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
         record.locked = locked != 0;
         if (!reader.readDouble(record.opacity) || !std::isfinite(record.opacity) || record.opacity < 0.0 || record.opacity > 1.0)
             return fail(QStringLiteral("\"%1\" has an invalid layer opacity.").arg(path));
+        if (version >= DocumentFile::FormatVersion &&
+            (!reader.readU8(record.blendMode) || record.blendMode > 3 ||
+             !reader.readU8(record.colorLabel) || record.colorLabel > 7))
+            return fail(QStringLiteral("\"%1\" has invalid layer metadata.").arg(path));
         if (!reader.readU32(rectCount) || rectCount > DocumentFile::MaxTileRectsPerLayer)
             return fail(QStringLiteral("\"%1\" has an invalid tile count.").arg(path));
         record.rects.reserve(rectCount);
@@ -337,7 +341,7 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
 // Serializes the illustration document body exactly as a v1 file stores it
 // (and as a v2 illustration payload stores it). Returns false only on
 // internal inconsistency (which the caller must treat as a save failure).
-bool buildIllustrationPayload(const CanvasDocument& document, QByteArray* out, QString* error)
+bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, QByteArray* out, QString* error)
 {
     const auto fail = [&](const QString& message) {
         if (error) *error = message;
@@ -346,6 +350,12 @@ bool buildIllustrationPayload(const CanvasDocument& document, QByteArray* out, Q
     QByteArray& buffer = *out;
     buffer.clear();
     const QSize size = document.size();
+    if (!std::isfinite(document.dpi()) || document.dpi() <= 0.0 || document.dpi() > 1000000.0)
+        return fail(QStringLiteral("The document DPI cannot be stored in a KomaPaint file."));
+    const auto* layers = document.layers();
+    if (layers->rowCount() < 1 || static_cast<quint64>(layers->rowCount()) > DocumentFile::MaxLayers ||
+        layers->activeLayerIndex() < 0 || layers->activeLayerIndex() >= layers->rowCount())
+        return fail(QStringLiteral("The document has an unsupported layer count or active layer. The file was not changed."));
     putU32(buffer, static_cast<quint32>(size.width()));
     putU32(buffer, static_cast<quint32>(size.height()));
     putDouble(buffer, document.dpi());
@@ -353,8 +363,8 @@ bool buildIllustrationPayload(const CanvasDocument& document, QByteArray* out, Q
     const QColor background = document.backgroundColor();
     putU32(buffer, (0xFF000000U | (static_cast<quint32>(background.red()) << 16)
                     | (static_cast<quint32>(background.green()) << 8) | static_cast<quint32>(background.blue())));
-    putUtf8(buffer, document.title(), DocumentFile::MaxTitleBytes);
-    const auto* layers = document.layers();
+    if (!putUtf8(buffer, document.title(), DocumentFile::MaxTitleBytes))
+        return fail(QStringLiteral("The document title is too long or contains invalid Unicode. The file was not changed."));
     putU32(buffer, static_cast<quint32>(layers->activeLayerIndex() < 0 ? 0 : layers->activeLayerIndex()));
     putU32(buffer, static_cast<quint32>(layers->rowCount()));
 
@@ -362,14 +372,25 @@ bool buildIllustrationPayload(const CanvasDocument& document, QByteArray* out, Q
         const Layer* layer = layers->layerAt(row);
         const SparseTileStore& store = layer->tiles();
         const TileGeometry geometry = store.geometry();
+        if (!store.isValid() || geometry.width() != size.width() || geometry.height() != size.height() ||
+            geometry.tileSize() > 4096 || !std::isfinite(layer->opacity()) ||
+            layer->opacity() < 0.0 || layer->opacity() > 1.0)
+            return fail(QStringLiteral("A layer has invalid geometry or opacity. The file was not changed."));
         auto points = store.allocatedTilePoints();
+        if (points.size() > DocumentFile::MaxTileRectsPerLayer)
+            return fail(QStringLiteral("A layer has too many tile rectangles for the file format. The file was not changed."));
         std::sort(points.begin(), points.end(), [](const TilePoint& a, const TilePoint& b) {
             return a.y < b.y || (a.y == b.y && a.x < b.x);
         });
-        putUtf8(buffer, layer->name(), DocumentFile::MaxNameBytes);
+        if (!putUtf8(buffer, layer->name(), DocumentFile::MaxNameBytes))
+            return fail(QStringLiteral("A layer name is too long or contains invalid Unicode. The file was not changed."));
         putU8(buffer, layer->isVisible() ? 1 : 0);
         putU8(buffer, layer->isLocked() ? 1 : 0);
         putDouble(buffer, layer->opacity());
+        if (version >= DocumentFile::FormatVersion) {
+            putU8(buffer, static_cast<quint8>(layer->blendMode()));
+            putU8(buffer, static_cast<quint8>(layer->colorLabel()));
+        }
         putU32(buffer, static_cast<quint32>(points.size()));
         const std::size_t tilePixels = static_cast<std::size_t>(geometry.tileSize()) * static_cast<std::size_t>(geometry.tileSize());
         for (const TilePoint point : points) {
@@ -379,6 +400,13 @@ bool buildIllustrationPayload(const CanvasDocument& document, QByteArray* out, Q
                 return fail(QStringLiteral("Internal error: inconsistent tile storage."));
             const std::uint64_t width = static_cast<std::uint64_t>(bounds->right - bounds->left);
             const std::uint64_t height = static_cast<std::uint64_t>(bounds->bottom - bounds->top);
+            // Account for the envelope, asset count and CRC before allocating
+            // rectangle pixels. A successful save must be readable by open().
+            const quint64 rectangleBytes = 24 + width * height * 4;
+            constexpr quint64 envelopeBytes = 32;
+            if (static_cast<quint64>(buffer.size()) > DocumentFile::MaxFileBytes - envelopeBytes ||
+                rectangleBytes > DocumentFile::MaxFileBytes - envelopeBytes - static_cast<quint64>(buffer.size()))
+                return fail(QStringLiteral("The document is too large for the native file format. The file was not changed."));
             putU64(buffer, static_cast<quint64>(bounds->left));
             putU64(buffer, static_cast<quint64>(bounds->top));
             putU32(buffer, static_cast<quint32>(width));
@@ -388,6 +416,8 @@ bool buildIllustrationPayload(const CanvasDocument& document, QByteArray* out, Q
             for (std::uint64_t y = 0; y < height; ++y) {
                 for (std::uint64_t x = 0; x < width; ++x) {
                     const std::uint32_t p = pixels[static_cast<std::size_t>(y) * stride + static_cast<std::size_t>(x)];
+                    if (!premultiplied(p))
+                        return fail(QStringLiteral("A layer contains invalid pixels. The file was not changed."));
                     if (p != 0) anyNonZero = true;
                     putU32(buffer, p);
                 }
@@ -400,6 +430,8 @@ bool buildIllustrationPayload(const CanvasDocument& document, QByteArray* out, Q
                 return fail(QStringLiteral("Internal error: an empty tile was reported as present."));
         }
     }
+    if (static_cast<quint64>(buffer.size()) > DocumentFile::MaxFileBytes - 32)
+        return fail(QStringLiteral("The document is too large for the native file format. The file was not changed."));
     return true;
 }
 
@@ -416,11 +448,11 @@ CanvasDocument* buildDocument(const IllustrationPayload& payload, const QString&
     document->setSize(QSize(static_cast<int>(payload.width), static_cast<int>(payload.height)));
     document->setDpi(payload.dpi);
     document->setTransparentBackground(payload.transparent != 0);
-    if (!payload.transparent) {
-        document->setBackgroundColor(QColor(static_cast<int>((payload.backgroundRgba >> 16) & 0xff),
-                                            static_cast<int>((payload.backgroundRgba >> 8) & 0xff),
-                                            static_cast<int>(payload.backgroundRgba & 0xff)));
-    }
+    // The opaque background colour remains editable while transparency is
+    // enabled; restore it even when it is not currently shown on the canvas.
+    document->setBackgroundColor(QColor(static_cast<int>((payload.backgroundRgba >> 16) & 0xff),
+                                        static_cast<int>((payload.backgroundRgba >> 8) & 0xff),
+                                        static_cast<int>(payload.backgroundRgba & 0xff)));
     const auto layerCount = static_cast<quint32>(payload.records.size());
     for (quint32 li = 0; li < layerCount; ++li) {
         if (li > 0) document->layers()->addLayer();
@@ -430,6 +462,8 @@ CanvasDocument* buildDocument(const IllustrationPayload& payload, const QString&
         layer->setVisible(record.visible);
         layer->setLocked(record.locked);
         layer->setOpacity(record.opacity);
+        layer->setBlendMode(record.blendMode);
+        layer->setColorLabel(record.colorLabel);
         if (record.rects.empty()) continue;
 
         // Re-tile the stored document-space rectangles onto this build's tile
@@ -439,7 +473,33 @@ CanvasDocument* buildDocument(const IllustrationPayload& payload, const QString&
         const TileGeometry geometry = store.geometry();
         const int tileSize = geometry.tileSize();
         const std::size_t tilePixelCount = static_cast<std::size_t>(tileSize) * static_cast<std::size_t>(tileSize);
+        // Count distinct target tiles first: a small file with many isolated
+        // pixels may require far more memory after re-tiling. Reject it before
+        // allocating the full buffers when it cannot fit the existing store.
+        std::set<TilePoint, TilePointLess> neededTiles;
+        const std::size_t maxTiles = store.pixelBudget() / store.tileBytes();
+        for (const RectRecord& rect : record.rects) {
+            const TileRect documentRect{static_cast<std::int64_t>(rect.left), static_cast<std::int64_t>(rect.top),
+                                        static_cast<std::int64_t>(rect.left + rect.width),
+                                        static_cast<std::int64_t>(rect.top + rect.height)};
+            const auto range = geometry.tilesForRect(documentRect);
+            if (!range) return fail(QStringLiteral("\"%1\" has an out-of-bounds tile rectangle.").arg(path));
+            for (std::int64_t ty = range->first.y; ty <= range->last.y; ++ty)
+                for (std::int64_t tx = range->first.x; tx <= range->last.x; ++tx) {
+                    neededTiles.insert(TilePoint{tx, ty});
+                    if (neededTiles.size() > maxTiles)
+                        return fail(QStringLiteral("The artwork in \"%1\" exceeds the layer memory limit.").arg(path));
+                }
+        }
         std::map<TilePoint, std::vector<std::uint32_t>, TilePointLess> staged;
+        // Re-tiling can amplify a tiny hostile file into many full tiles.
+        // Charge staged buffers to the document budget as they are allocated;
+        // keep the charge until restoreTiles finishes its own atomic staging.
+        struct StagingReservation {
+            std::shared_ptr<DocumentMemoryBudget> budget;
+            std::size_t bytes = 0;
+            ~StagingReservation() { if (budget) budget->release(DocumentMemoryBudget::Category::RestoreStaging, bytes); }
+        } reservation{store.documentBudget()};
         for (const RectRecord& rect : record.rects) {
             const TileRect documentRect{static_cast<std::int64_t>(rect.left), static_cast<std::int64_t>(rect.top),
                                         static_cast<std::int64_t>(rect.left + rect.width),
@@ -453,7 +513,15 @@ CanvasDocument* buildDocument(const IllustrationPayload& payload, const QString&
                     auto bounds = geometry.tileBounds(tile);
                     if (!bounds) return fail(QStringLiteral("\"%1\" has an out-of-bounds tile rectangle.").arg(path));
                     auto& buffer = staged[tile];
-                    if (buffer.empty()) buffer.assign(tilePixelCount, 0);
+                    if (buffer.empty()) {
+                        const auto tileBytes = store.tileBytes();
+                        if (tileBytes > store.pixelBudget() ||
+                            reservation.bytes > store.pixelBudget() - tileBytes ||
+                            (reservation.budget && !reservation.budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, tileBytes)))
+                            return fail(QStringLiteral("The artwork in \"%1\" exceeds available memory or the layer memory limit.").arg(path));
+                        reservation.bytes += tileBytes;
+                        buffer.assign(tilePixelCount, 0);
+                    }
                     const std::int64_t ix0 = std::max<std::int64_t>(bounds->left, documentRect.left);
                     const std::int64_t iy0 = std::max<std::int64_t>(bounds->top, documentRect.top);
                     const std::int64_t ix1 = std::min<std::int64_t>(bounds->right, documentRect.right);
@@ -496,7 +564,7 @@ quint32 DocumentFile::crc32(const QByteArray& bytes)
     return crc.value();
 }
 
-bool DocumentFile::save(const CanvasDocument& document, const QString& path, QString* error)
+bool DocumentFile::save(const CanvasDocument& document, const QString& path, QString* error) try
 {
     const auto fail = [error](const QString& message) {
         if (error) *error = message;
@@ -508,9 +576,17 @@ bool DocumentFile::save(const CanvasDocument& document, const QString& path, QSt
 
     // Serialize the illustration document first. If that fails (e.g. an
     // internal inconsistency), the destination file is never touched.
+    quint16 writeVersion = FlatEnvelopeVersion;
+    for (int row = 0; row < document.layers()->rowCount(); ++row) {
+        const auto* layer = document.layers()->layerAt(row);
+        if (layer->blendMode() != 0 || layer->colorLabel() != 0) {
+            writeVersion = FormatVersion;
+            break;
+        }
+    }
     QByteArray payload;
     payload.reserve(1024 * 1024);
-    if (!buildIllustrationPayload(document, &payload, error)) return false;
+    if (!buildIllustrationPayload(document, writeVersion, &payload, error)) return false;
 
     QSaveFile file(path);
     file.setDirectWriteFallback(false); // Never overwrite the original unless the temp file is complete.
@@ -528,14 +604,12 @@ bool DocumentFile::save(const CanvasDocument& document, const QString& path, QSt
         return false;
     };
 
-    // Version 2 envelope: magic + version + one document record + empty asset
-    // section + CRC trailer. The illustration payload is the exact byte body
-    // a version 1 file stores, so v1 and v2 illustration content match byte
-    // for byte.
+    // Version 2/3 envelope: one document, empty asset section and CRC.
+    // Version 3 is selected only when extended metadata is needed.
     QByteArray header;
     header.reserve(64);
     header.append(Magic, MagicSize);
-    putU16(header, FormatVersion);
+    putU16(header, writeVersion);
     putU32(header, 1);                 // documentCount
     putU8(header, DocumentKindIllustration);
     putU64(header, static_cast<quint64>(payload.size()));
@@ -551,9 +625,15 @@ bool DocumentFile::save(const CanvasDocument& document, const QString& path, QSt
     if (file.write(trailer) != trailer.size()) return failAndCancel(QStringLiteral("Could not write \"%1\" (disk full?).").arg(path));
     if (!file.commit()) return failAndCancel(QStringLiteral("Could not replace \"%1\". The previous file was left unchanged.").arg(path));
     return true;
+} catch (const std::bad_alloc&) {
+    if (error) *error = QStringLiteral("Not enough memory to save the document. The file was not changed.");
+    return false;
+} catch (const std::length_error&) {
+    if (error) *error = QStringLiteral("The document is too large to save. The file was not changed.");
+    return false;
 }
 
-CanvasDocument* DocumentFile::open(const QString& path, QString* error)
+CanvasDocument* DocumentFile::open(const QString& path, QString* error) try
 {
     const auto fail = [error](const QString& message) -> CanvasDocument* {
         if (error) *error = message;
@@ -596,10 +676,10 @@ CanvasDocument* DocumentFile::open(const QString& path, QString* error)
     if (version == LegacyFormatVersion) {
         // Version 1: flat illustration layout (magic + version + payload).
         const qsizetype payloadBegin = MagicSize + 2;
-        if (!parseIllustrationPayload(data, payloadBegin, contentEnd, path, &payload, error))
+        if (!parseIllustrationPayload(data, payloadBegin, contentEnd, version, path, &payload, error))
             return nullptr;
-    } else if (version == FormatVersion) {
-        // Version 2: unified project envelope.
+    } else if (version == FlatEnvelopeVersion || version == FormatVersion) {
+        // Version 2/3: unified project envelope.
         quint32 documentCount = 0;
         if (!head.readU32(documentCount)) return fail(QStringLiteral("\"%1\" is truncated.").arg(path));
         if (documentCount == 0 || documentCount > MaxDocuments)
@@ -618,7 +698,7 @@ CanvasDocument* DocumentFile::open(const QString& path, QString* error)
             return fail(QStringLiteral("\"%1\" is truncated.").arg(path));
         const qsizetype payloadBegin = head.position();
         const qsizetype payloadEnd = payloadBegin + static_cast<qsizetype>(payloadLength);
-        if (!parseIllustrationPayload(data, payloadBegin, payloadEnd, path, &payload, error))
+        if (!parseIllustrationPayload(data, payloadBegin, payloadEnd, version, path, &payload, error))
             return nullptr;
         Reader tail(data, payloadEnd, contentEnd);
         quint32 assetCount = 0;
@@ -632,6 +712,12 @@ CanvasDocument* DocumentFile::open(const QString& path, QString* error)
     }
 
     return buildDocument(payload, path, error);
+} catch (const std::bad_alloc&) {
+    if (error) *error = QStringLiteral("Not enough memory to open the document. No artwork was changed.");
+    return nullptr;
+} catch (const std::length_error&) {
+    if (error) *error = QStringLiteral("The document is too large to open. No artwork was changed.");
+    return nullptr;
 }
 
 } // namespace komapaint

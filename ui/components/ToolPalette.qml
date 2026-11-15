@@ -67,11 +67,12 @@ Item {
     // no tool becomes unreachable on a small screen.
     Flickable {
         id: toolFlick
+        objectName: "toolPaletteScroll"
         anchors.top: parent.top
         anchors.bottom: colourPair.top
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.topMargin: KP.gapS
+        anchors.topMargin: 10
         anchors.bottomMargin: KP.gapM
         contentHeight: toolColumn.height
         contentWidth: width
@@ -83,7 +84,7 @@ Item {
         Column {
             id: toolColumn
             anchors.horizontalCenter: parent.horizontalCenter
-            width: 2 * KP.toolButtonSize + KP.paletteGap
+            width: KP.toolButtonSize
             spacing: 0
 
             Repeater {
@@ -105,11 +106,11 @@ Item {
                             anchors.centerIn: parent
                             width: parent.width - 10
                             height: 1
-                            color: KP.hairline
+                            color: KP.borderLight
                         }
                     }
                     Grid {
-                        columns: 2
+                        columns: 1
                         spacing: KP.paletteGap
                         Repeater {
                             model: group.modelData
@@ -141,15 +142,15 @@ Item {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: KP.gapM
         anchors.horizontalCenter: parent.horizontalCenter
-        width: 56
-        height: 58
+        width: 40
+        height: 54
 
         Rectangle {
             id: backgroundSwatch
-            x: 22
-            y: 24
-            width: 30
-            height: 30
+            x: 19
+            y: 25
+            width: 19
+            height: 19
             radius: KP.radiusXS
             color: Workspace.colors.background
             border.width: 1
@@ -168,9 +169,9 @@ Item {
         Rectangle {
             id: foregroundSwatch
             x: 2
-            y: 2
-            width: 32
-            height: 32
+            y: 3
+            width: 20
+            height: 20
             radius: KP.radiusXS
             color: Workspace.colors.foreground
             border.width: 2

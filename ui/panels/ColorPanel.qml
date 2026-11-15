@@ -26,6 +26,7 @@ Rectangle {
     property real saturation: 0
     property real value: 0
     property bool updating: false
+    property bool triangleWheel: String(Workspace.sessionValue("ui.color.triangleWheel", "1")) === "1"
     // Colours picked this session, newest first. Nothing is invented here: the
     // list is the foreground colour's own history.
     property var recent: []
@@ -187,141 +188,28 @@ Rectangle {
             }
         }
 
-        // ---- Saturation / value plane
-        Item {
-            id: plane
+        SegmentedChoice {
+            objectName: "colorWheelShape"
             Layout.fillWidth: true
-            Layout.preferredHeight: 84
-
-            Canvas {
-                id: planeCanvas
-                anchors.fill: parent
-                antialiasing: false
-                onPaint: {
-                    const ctx = getContext("2d")
-                    ctx.clearRect(0, 0, width, height)
-                    if (width <= 2 || height <= 2) return
-                    // Pure hue, then white to the right, then black downwards:
-                    // the standard saturation/value square.
-                    ctx.fillStyle = "hsl(" + panel.hue + ", 100%, 50%)"
-                    ctx.fillRect(0, 0, width, height)
-                    const white = ctx.createLinearGradient(0, 0, width, 0)
-                    white.addColorStop(0, "rgba(255,255,255,1)")
-                    white.addColorStop(1, "rgba(255,255,255,0)")
-                    ctx.fillStyle = white
-                    ctx.fillRect(0, 0, width, height)
-                    const black = ctx.createLinearGradient(0, 0, 0, height)
-                    black.addColorStop(0, "rgba(0,0,0,0)")
-                    black.addColorStop(1, "rgba(0,0,0,1)")
-                    ctx.fillStyle = black
-                    ctx.fillRect(0, 0, width, height)
-                }
-            }
-            Connections {
-                target: panel
-                function onHueChanged() { planeCanvas.requestPaint() }
-            }
-
-            Rectangle {
-                anchors.fill: parent
-                color: "transparent"
-                border.width: 1
-                border.color: KP.outline
-                radius: KP.radiusXS
-            }
-
-            // Cursor: a white ring with a dark inner ring, readable on any colour.
-            Item {
-                x: Math.round(panel.saturation * (plane.width - 1)) - 6
-                y: Math.round((1 - panel.value) * (plane.height - 1)) - 6
-                width: 12
-                height: 12
-                Rectangle {
-                    anchors.fill: parent
-                    radius: 6
-                    color: "transparent"
-                    border.width: 2
-                    border.color: "#ffffff"
-                }
-                Rectangle {
-                    anchors.fill: parent
-                    anchors.margins: 2
-                    radius: 4
-                    color: "transparent"
-                    border.width: 1
-                    border.color: "#00000088"
-                }
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                preventStealing: true
-                cursorShape: Qt.CrossCursor
-                function pick(x, y) {
-                    panel.saturation = Math.max(0, Math.min(1, x / Math.max(1, plane.width - 1)))
-                    panel.value = 1 - Math.max(0, Math.min(1, y / Math.max(1, plane.height - 1)))
-                    panel.applyHsv()
-                }
-                onPressed: function(mouse) { pick(mouse.x, mouse.y) }
-                onPositionChanged: function(mouse) { if (pressed) pick(mouse.x, mouse.y) }
+            options: [qsTr("Square"), qsTr("Triangle")]
+            currentIndex: panel.triangleWheel ? 1 : 0
+            onChosen: function(index) {
+                panel.triangleWheel = index === 1
+                Workspace.setSessionValue("ui.color.triangleWheel", panel.triangleWheel ? "1" : "0")
             }
         }
-
-        // ---- Hue rail
-        Item {
-            id: rails
-            Layout.fillWidth: true
-            implicitHeight: 16
-
-            Canvas {
-                id: hueCanvas
-                anchors.fill: parent
-                onPaint: {
-                    const ctx = getContext("2d")
-                    ctx.clearRect(0, 0, width, height)
-                    const gradient = ctx.createLinearGradient(0, 0, width, 0)
-                    for (let i = 0; i <= 6; ++i)
-                        gradient.addColorStop(i / 6, "hsl(" + (i * 60) + ", 90%, 52%)")
-                    ctx.fillStyle = gradient
-                    ctx.fillRect(0, 0, width, height)
-                }
-            }
-            Rectangle {
-                anchors.fill: parent
-                radius: height / 2
-                color: "transparent"
-                border.width: 1
-                border.color: KP.outline
-            }
-            Rectangle {
-                // Hue handle
-                x: Math.round((panel.hue / 360) * (parent.width - 10))
-                width: 10
-                height: 16
-                radius: 3
-                color: "transparent"
-                border.width: 2
-                border.color: "#ffffff"
-                Rectangle {
-                    anchors.fill: parent
-                    anchors.margins: -1
-                    radius: 4
-                    color: "transparent"
-                    border.width: 1
-                    border.color: "#00000066"
-                }
-            }
-            MouseArea {
-                anchors.fill: parent
-                preventStealing: true
-                cursorShape: Qt.SizeHorCursor
-                function pick(x) {
-                    panel.hue = Math.max(0, Math.min(359, Math.round((x / Math.max(1, rails.width)) * 360)))
-                    panel.applyHsv()
-                }
-                onPressed: function(mouse) { pick(mouse.x) }
-                onPositionChanged: function(mouse) { if (pressed) pick(mouse.x) }
-            }
+        ColorWheel {
+            id: wheel
+            objectName: "colorWheel"
+            Layout.alignment: Qt.AlignHCenter
+            Layout.preferredWidth: Math.max(100, Math.min(220, colourColumn.width))
+            Layout.preferredHeight: width
+            hue: panel.hue
+            saturation: panel.saturation
+            value: panel.value
+            triangle: panel.triangleWheel
+            onPickedHue: function(v) { panel.hue = v; panel.applyHsv() }
+            onPickedSV: function(s, v) { panel.saturation = s; panel.value = v; panel.applyHsv() }
         }
 
         // ---- Exact values

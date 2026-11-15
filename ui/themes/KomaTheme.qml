@@ -34,66 +34,66 @@ QtObject {
     // --- Surface ladder -----------------------------------------------------
     // Dark: a grey graphite, not black. The desk sits lighter than the chrome
     // so the artwork floats above the interface instead of sinking into it.
-    readonly property color windowBg: isDark ? "#313439" : "#e7e9ec"    // outer frame
-    readonly property color menubarBg: isDark ? "#2c2f34" : "#dfe2e6"   // application menu
-    readonly property color toolbarBg: isDark ? "#34373c" : "#eaecf0"   // command bar
-    readonly property color paneBg: isDark ? "#3b3e44" : "#f5f6f8"      // docked panel body
-    readonly property color paneBgAlt: isDark ? "#36393e" : "#eef0f3"   // rows, stripes, wells
-    readonly property color paneHeaderBg: isDark ? "#32353a" : "#e8eaee" // tab strip
-    readonly property color panelInsetBg: isDark ? "#31343a" : "#eceef2" // grouped area inside a panel
-    readonly property color canvasBg: isDark ? "#4d5157" : "#ccd0d5"    // desk around the artwork
+    readonly property color windowBg: isDark ? "#2c2c2c" : "#eeeeee"    // outer frame
+    readonly property color menubarBg: isDark ? "#2c2c2c" : "#eeeeee"   // application menu
+    readonly property color toolbarBg: isDark ? "#2c2c2c" : "#eeeeee"   // command bar
+    readonly property color paneBg: isDark ? "#383838" : "#f4f4f4"      // docked panel body
+    readonly property color paneBgAlt: isDark ? "#333333" : "#eeeeee"   // rows, stripes, wells
+    readonly property color paneHeaderBg: isDark ? "#2c2c2c" : "#eeeeee" // tab strip
+    readonly property color panelInsetBg: isDark ? "#292929" : "#eeeeee" // grouped area inside a panel
+    readonly property color canvasBg: isDark ? "#454545" : "#e8e8e8"    // desk around the artwork
     readonly property color canvasPaper: "#ffffff"
     readonly property color canvasEdge: isDark ? "#1b1d20" : "#8b9096"  // paper outline
     readonly property color previewPaper: isDark ? "#dde1e6" : "#ffffff"
-    readonly property color inputBg: isDark ? "#2f3237" : "#ffffff"     // fields, value boxes
-    readonly property color inputBgHover: isDark ? "#353940" : "#f4f6f8"
-    readonly property color buttonBg: isDark ? "#3f434a" : "#e2e5ea"
-    readonly property color buttonBgHover: isDark ? "#484d55" : "#d8dcE2"
-    readonly property color buttonBgPress: isDark ? "#545a63" : "#cbd0d7"
-    readonly property color toolRailBg: isDark ? "#2f3237" : "#e2e5ea"  // left tool strip
-    readonly property color statusbarBg: isDark ? "#2c2f34" : "#dfe2e6"
-    readonly property color floatingBg: isDark ? "#3b3e44" : "#f7f8fa"
-    readonly property color toolActive: isDark ? "#43628c" : "#c6d9ee"
-    readonly property color rowSelected: isDark ? "#3d4754" : "#dbe7f4"
+    readonly property color inputBg: isDark ? "#292929" : "#ffffff"     // fields, value boxes
+    readonly property color inputBgHover: isDark ? "#343434" : "#f7f7f7"
+    readonly property color buttonBg: isDark ? "#404040" : "#e4e4e4"
+    readonly property color buttonBgHover: isDark ? "#4a4a4a" : "#dadada"
+    readonly property color buttonBgPress: isDark ? "#5a5a5a" : "#c9c9c9"
+    readonly property color toolRailBg: isDark ? "#292929" : "#e4e4e4"  // left tool strip
+    readonly property color statusbarBg: isDark ? "#2c2c2c" : "#eeeeee"
+    readonly property color floatingBg: isDark ? "#383838" : "#f4f4f4"
+    readonly property color toolActive: isDark ? "#505050" : "#d5d5d5"
+    readonly property color rowSelected: isDark ? "#505050" : "#d5d5d5"
 
     // The canvas paints its own transparency checkerboard with these.
-    readonly property color transparencyLight: isDark ? "#7e828a" : "#ffffff"
-    readonly property color transparencyDark: isDark ? "#63676e" : "#e6e8eb"
+    readonly property color transparencyLight: isDark ? "#828282" : "#ffffff"
+    readonly property color transparencyDark: isDark ? "#666666" : "#e8e8e8"
 
     // --- Structure ----------------------------------------------------------
     // `hairline` separates parts of the same surface; `border` outlines a
     // control or a floating window. `outline` is the strongest.
-    readonly property color hairline: isDark ? "#2a2d31" : "#dcdfe4"
-    readonly property color border: isDark ? "#24272b" : "#c8ccd2"
-    readonly property color borderLight: isDark ? "#4a4e55" : "#c2c7ce"
-    readonly property color outline: isDark ? "#1c1e22" : "#a9aeb5"
+    readonly property color hairline: isDark ? "#5c5c5c" : "#cccccc"
+    readonly property color border: isDark ? "#666666" : "#aaaaaa"
+    readonly property color borderLight: isDark ? "#888888" : "#888888"
+    readonly property color outline: isDark ? "#888888" : "#888888"
     readonly property color separator: hairline
     readonly property int hairlineWidth: 1
     readonly property int focusWidth: 2
 
     // --- Text ---------------------------------------------------------------
-    readonly property color text: isDark ? "#e2e4e8" : "#23262b"
-    readonly property color textMuted: isDark ? "#a3a7ae" : "#565b63"
-    readonly property color textSubtle: isDark ? "#7b8087" : "#83888f"
+    readonly property color text: isDark ? "#ededed" : "#222222"
+    readonly property color textMuted: isDark ? "#c6c6c6" : "#555555"
+    readonly property color textSubtle: isDark ? "#909090" : "#808080"
     readonly property color textInverted: isDark ? "#101114" : "#ffffff"
-    readonly property color textAccent: isDark ? "#8fb2e0" : "#1d5e97"
-    readonly property color textEmber: isDark ? "#e8b878" : "#8c5a1d"
-    readonly property color textOnActive: isDark ? "#ffffff" : "#16334f"
-    readonly property color textOnActiveMuted: isDark ? "#dbe4f0" : "#37587a"
+    readonly property color textAccent: isDark ? "#ededed" : "#222222"
+    readonly property color textEmber: isDark ? "#ededed" : "#222222"
+    readonly property color textOnActive: isDark ? "#ffffff" : "#222222"
+    readonly property color textOnActiveMuted: isDark ? "#ededed" : "#333333"
     // The dark theme's accent is light enough to fill a button, so text on it
     // has to be ink rather than white; both themes keep > 4.5:1 against accent.
-    readonly property color textOnAccent: isDark ? "#10161c" : "#ffffff"
+    readonly property color textOnAccent: isDark ? "#222222" : "#ffffff"
     // Micro labels (section headings) sit a step below muted text.
-    readonly property color textSectionLabel: isDark ? "#8b9098" : "#6d737b"
+    readonly property color textSectionLabel: isDark ? "#bdbdbd" : "#666666"
 
     // --- Accents ------------------------------------------------------------
     // Ink: structure, selection, focus. Ember: the painting instrument.
-    readonly property color accent: isDark ? "#6f9bd4" : "#1d5e97"
-    readonly property color accentSoft: isDark ? "#4a6a92" : "#a8c6e4"
-    readonly property color accentWash: isDark ? "#2b3a4d" : "#dce9f7"
-    readonly property color ember: isDark ? "#d99a5b" : "#b0701f"
-    readonly property color emberSoft: isDark ? "#7d5c38" : "#e8c79a"
-    readonly property color selection: isDark ? "#3f6ea8" : "#2f6ea8"
+    readonly property color accent: isDark ? "#c8c8c8" : "#222222"
+    readonly property color accentSoft: isDark ? "#888888" : "#bbbbbb"
+    readonly property color accentWash: isDark ? "#505050" : "#d5d5d5"
+    readonly property color ember: isDark ? "#c8c8c8" : "#555555"
+    readonly property color emberSoft: isDark ? "#777777" : "#bbbbbb"
+    readonly property color selection: isDark ? "#707070" : "#555555"
     readonly property color warning: isDark ? "#d2a054" : "#8a5c10"
     readonly property color error: isDark ? "#cf6f6f" : "#a33232"
     readonly property color success: isDark ? "#7fb27f" : "#2f7a3f"
@@ -172,7 +172,7 @@ QtObject {
     readonly property int toolButtonSize: 34
     readonly property int toolIconSize: 21
     readonly property int paletteGap: 2
-    readonly property int paletteWidth: 2 * toolButtonSize + paletteGap + 2 * 7
+    readonly property int paletteWidth: toolButtonSize + 8
     readonly property int leftDockWidth: 248
     readonly property int splitterHit: 7      // grab area around a dock divider
     readonly property int splitterVisual: 5   // how much of the divider is drawn
@@ -194,19 +194,19 @@ QtObject {
     property string iconSelectedPref: ""
     property string iconDisabledPref: ""
 
-    readonly property color iconNormalDefault: isDark ? "#c2c5ca" : "#4a4e55"
-    readonly property color iconHoverDefault: isDark ? "#eef0f2" : "#24272b"
+    readonly property color iconNormalDefault: isDark ? "#dedede" : "#555555"
+    readonly property color iconHoverDefault: isDark ? "#f4f4f4" : "#333333"
     // In the light theme a selected icon is the accent itself, so the two can
     // never drift apart; the dark theme needs a lighter tint to stay readable
     // on its selected background.
-    readonly property color iconSelectedDefault: isDark ? "#d7e6f8" : root.accent
-    readonly property color iconDisabledDefault: isDark ? "#787d85" : "#a2a6ac"
+    readonly property color iconSelectedDefault: isDark ? "#ededed" : root.accent
+    readonly property color iconDisabledDefault: isDark ? "#858585" : "#999999"
 
     readonly property color iconNormal: root.tint(iconNormalPref, iconNormalDefault)
     readonly property color iconHover: root.tint(iconHoverPref, iconHoverDefault)
     readonly property color iconSelected: root.tint(iconSelectedPref, iconSelectedDefault)
     readonly property color iconDisabled: root.tint(iconDisabledPref, iconDisabledDefault)
-    readonly property color iconOff: isDark ? "#666b72" : "#9ea2a8"
+    readonly property color iconOff: isDark ? "#a0a0a0" : "#888888"
 
     readonly property bool iconNormalCustom: root.validColor(iconNormalPref)
     readonly property bool iconHoverCustom: root.validColor(iconHoverPref)

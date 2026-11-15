@@ -34,7 +34,8 @@ Design goals, in order:
 | Version | Status | Description |
 | ------- | ------ | ----------- |
 | 1 | legacy, read-only | Flat illustration layout: magic + version + illustration body + CRC. Written by KomaPaint ≤ the format milestone. |
-| 2 | current | Unified project envelope: magic + version + one typed document + asset section + CRC. Written by this build. |
+| 2 | read/write | Unified project envelope: magic + version + one typed document + asset section + CRC. Used when all layers have default blend and label. |
+| 3 | read/write | Same envelope, with per-layer blend mode and colour label bytes. Required when either value is non-default. |
 
 **Extension rule.** Only `.koma` is ever used. The extension is purely a
 convention for the operating system and the file dialogs — serialization
@@ -93,6 +94,17 @@ the document bounds. Rectangles are never all-zero, never out of bounds, and
 their pixels satisfy the premultiplied invariant (`r <= a`, `g <= a`,
 `b <= a`).
 
+### Version 3 layer metadata
+
+Version 3 uses the version 2 envelope and illustration layout, except that
+**each layer** has two `quint8` fields immediately after opacity and before
+its rectangle count: blend mode (`0` Normal, `1` Multiply, `2` Screen,
+`3` Overlay), then colour label (`0` none, `1..7` palette index). Values
+outside these ranges are invalid. Version 1 and 2 layers load as Normal with
+no label. A document using either non-default value is written as version 3;
+otherwise it is written as version 2. Older builds reject version 3 rather than
+silently discarding metadata.
+
 ### Version 1 (legacy) layout
 
 ```
@@ -105,18 +117,19 @@ offset  size    field
 
 ## Compatibility and migration
 
-* **Opening.** This build reads version 1 and version 2 files
+* **Opening.** This build reads version 1, 2 and 3 files
   transparently. Version 1 files were produced by earlier KomaPaint builds
   and use the same extension, the same magic and the same illustration
   payload; opening them is lossless and changes nothing on disk.
-* **Saving.** This build always writes version 2. The first save of a
-  previously-opened version 1 file migrates it to version 2 **in place** —
+* **Saving.** Default layer metadata is written as version 2; non-default
+  blend or label metadata requires version 3. Saving a version 1 file
+  migrates it to version 2 or 3 **in place** —
   the file is never renamed or left in a half-written state (see *Save
   safety* below), and the artwork round-trips exactly.
 * **No competing extensions.** There is no legacy/temporary extension to
   support: `.koma` has been the only native extension since the first
   persisted build. Older files are the version 1 files described here.
-* **Unknown versions.** A file with a version other than 1 or 2 is
+* **Unknown versions.** A file with a version other than 1, 2 or 3 is
   rejected with a clear error before any construction happens. A file that
   uses reserved document kinds (comic page / comic project) or declares a
   non-empty shared asset section is rejected as *"uses features this
@@ -135,7 +148,9 @@ the name in the file dialog.
 ## Save safety
 
 `DocumentFile::save` first serializes the whole project in memory; any
-failure there means the destination is never opened. It then writes to a
+failure there means the destination is never opened. Values that cannot be
+represented or read back (including overlong or invalid-Unicode names and
+out-of-range layer counts) fail the save rather than being silently truncated. It then writes to a
 temporary file in the destination directory (`QSaveFile`, direct-write
 fallback disabled), flushes and closes it, and only then atomically
 replaces the target. If any step fails, the target file is never opened
@@ -179,8 +194,7 @@ are out of scope for the current milestone.
 
 * Comic pages, multi-page projects and shared assets (reserved only).
 * Undo history (never serialized).
-* Layer selection state is kept (`active layer index`); layer blend modes,
-  masks and groups do not exist yet and therefore cannot appear.
-* No thumbnails, previews, autosave or recent-files metadata yet.
-* No crash-recovery journal. A crash mid-session loses unsaved work, as in
-  most editors; a crash mid-*save* is safe (see above).
+* Layer selection state is kept (`active layer index`); masks and groups do
+  not exist yet and therefore cannot appear.
+* Thumbnails, previews and workspace/recovery metadata are not stored in the
+  project file. Recovery snapshots are managed separately by the workspace.

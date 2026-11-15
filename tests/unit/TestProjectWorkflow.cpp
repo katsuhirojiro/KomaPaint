@@ -55,17 +55,16 @@ void TestProjectWorkflow::createAndPaint()
     QVERIFY(window);
     window->show();
     QVERIFY(QTest::qWaitForWindowExposed(window));
-    auto* toolbar = root->findChild<QQuickItem*>(QStringLiteral("newProjectToolbarButton"));
     auto* dialog = root->findChild<QObject*>(QStringLiteral("newProjectDialog"));
     auto* create = root->findChild<QQuickItem*>(QStringLiteral("createProjectButton"));
     auto* name = root->findChild<QQuickItem*>(QStringLiteral("projectNameInput"));
     auto* canvas = root->findChild<CanvasViewport*>(QStringLiteral("canvasViewport"));
-    QVERIFY(toolbar && dialog && create && name && canvas);
+    QVERIFY(dialog && create && name && canvas);
     auto click = [window](QQuickItem* item) {
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
                           item->mapToScene(QPointF(item->width()/2, item->height()/2)).toPoint());
     };
-    click(toolbar);
+    QVERIFY(QMetaObject::invokeMethod(root, "requestNewDocument"));
     QTRY_VERIFY(dialog->property("visible").toBool());
     QTRY_VERIFY(create->isEnabled());
     QVERIFY(create->width() > 0 && create->height() > 0);
@@ -132,7 +131,6 @@ void TestProjectWorkflow::replaceOpenedArtwork()
     window->show();
     QVERIFY(QTest::qWaitForWindowExposed(window));
     auto* canvas = root->findChild<CanvasViewport*>(QStringLiteral("canvasViewport"));
-    auto* toolbar = root->findChild<QQuickItem*>(QStringLiteral("newProjectToolbarButton"));
     auto* dialog = root->findChild<QObject*>(QStringLiteral("newProjectDialog"));
     auto* discard = root->findChild<QObject*>(QStringLiteral("discardForNewDialog"));
     auto* name = root->findChild<QQuickItem*>(QStringLiteral("projectNameInput"));
@@ -144,7 +142,7 @@ void TestProjectWorkflow::replaceOpenedArtwork()
     auto* background = root->findChild<QQuickItem*>(QStringLiteral("projectBackgroundButton"));
     auto* colorDialog = root->findChild<QObject*>(QStringLiteral("projectColorDialog"));
     auto* create = root->findChild<QQuickItem*>(QStringLiteral("createProjectButton"));
-    QVERIFY(canvas && toolbar && dialog && discard && name && width && height && dpi && units && transparent && background && colorDialog && create);
+    QVERIFY(canvas && dialog && discard && name && width && height && dpi && units && transparent && background && colorDialog && create);
     auto click = [window](QQuickItem* item) {
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
                           item->mapToScene(QPointF(item->width()/2, item->height()/2)).toPoint());
@@ -169,7 +167,7 @@ void TestProjectWorkflow::replaceOpenedArtwork()
     auto* previous = workspace.document();
     QVERIFY(workspace.history()->canUndo());
     const int originalTab = workspace.activeTab();
-    click(toolbar);
+    QVERIFY(QMetaObject::invokeMethod(root, "requestNewDocument"));
     QTRY_VERIFY(dialog->property("visible").toBool());
     QVERIFY(!discard->property("visible").toBool());
     QCOMPARE(workspace.document(), previous);

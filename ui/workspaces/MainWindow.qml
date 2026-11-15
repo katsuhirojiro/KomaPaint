@@ -157,6 +157,8 @@ ApplicationWindow {
     readonly property bool editingText: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
     Shortcut { sequence: "Ctrl+Z"; enabled: !root.editingText && Workspace.history.canUndo; onActivated: Workspace.history.undo() }
     Shortcut { sequence: "Ctrl+Y"; enabled: !root.editingText && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
+    Shortcut { sequence: "Ctrl+N"; enabled: !root.editingText; onActivated: root.requestNewDocument() }
+    Shortcut { sequence: "Ctrl+Shift+Z"; enabled: !root.editingText && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
     Shortcut { sequence: "Ctrl+O"; enabled: !root.editingText; onActivated: root.requestOpenImage() }
     Shortcut { sequence: "Ctrl+S"; enabled: !root.editingText; onActivated: root.saveImage() }
     Shortcut { sequence: "Ctrl+Shift+S"; enabled: !root.editingText; onActivated: saveImageDialog.open() }
@@ -368,9 +370,9 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
-        // ------------------------------------------------------- Menu + brand
-        // One shell: the brand, the menus and the workspace name share a single
-        // 30 px band. Qt Quick menus cannot render `&` mnemonics, so the labels
+        // ------------------------------------------------------- Application menu
+        // Menus have a dedicated band above the command bar.
+        // Qt Quick menus cannot render `&` mnemonics, so the labels
         // are shown as written ('File', not '&File') instead of leaking the raw
         // ampersand into the interface.
         MenuBar {
@@ -378,7 +380,7 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.preferredHeight: KP.menubarHeight
             padding: 0
-            leftPadding: 110
+            leftPadding: KP.gapS
             rightPadding: KP.gapM
 
             background: Rectangle {
@@ -392,27 +394,7 @@ ApplicationWindow {
                     color: KP.hairline
                 }
 
-                RowLayout {
-                    anchors.left: parent.left
-                    anchors.leftMargin: KP.gapL
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: KP.gapS
-                    Rectangle {
-                        Layout.alignment: Qt.AlignVCenter
-                        Layout.preferredWidth: 7
-                        Layout.preferredHeight: 7
-                        radius: 2
-                        color: KP.ember
-                    }
-                    Text {
-                        Layout.alignment: Qt.AlignVCenter
-                        text: qsTr("KomaPaint")
-                        color: KP.text
-                        font.pixelSize: KP.fontS
-                        font.weight: Font.DemiBold
-                        font.letterSpacing: 0.3
-                    }
-                }
+
             }
 
             delegate: MenuBarItem {
@@ -420,7 +402,7 @@ ApplicationWindow {
                 contentItem: Text {
                     text: mbi.text.replace(/&/g, "")
                     color: mbi.highlighted ? KP.text : KP.textMuted
-                    font.pixelSize: KP.fontS
+                    font.pixelSize: KP.fontM
                     font.family: KP.fontUi
                     verticalAlignment: Text.AlignVCenter
                     horizontalAlignment: Text.AlignHCenter
@@ -565,6 +547,21 @@ ApplicationWindow {
                 KpMenuSeparator {
                 }
                 KpMenu {
+                    title: qsTr("Color")
+                    KpMenuItem {
+                        text: qsTr("Palette")
+                        checkable: true
+                        checked: root.dockRevision >= 0 && Dock.isVisible("palette")
+                        onTriggered: Dock.togglePanel("palette")
+                    }
+                    KpMenuItem {
+                        text: qsTr("Color Mixer")
+                        checkable: true
+                        checked: root.dockRevision >= 0 && Dock.isVisible("colormixer")
+                        onTriggered: Dock.togglePanel("colormixer")
+                    }
+                }
+                KpMenu {
                     id: panelsMenu
                     title: qsTr("&Panels")
                     // Driven by the dock model, so every panel the application
@@ -706,19 +703,28 @@ ApplicationWindow {
         MainToolbar {
             id: toolbar
             Layout.fillWidth: true
-            availablePanelIds: Object.keys(root.panelComponents)
             onNewDocumentRequested: root.requestNewDocument()
             onOpenRequested: root.requestOpenImage()
             onSaveRequested: root.saveImage()
-            onPreferencesRequested: preferencesDialog.open()
         }
 
         // ---------------------------------------------------------- Documents
-        DocumentTabs {
+        RowLayout {
             Layout.fillWidth: true
-            onActivateRequested: function(index) { Workspace.activateTab(index) }
-            onCloseRequested: function(index) { root.requestTabClose(index) }
-            onNewRequested: root.requestNewDocument()
+            spacing: 0
+            Rectangle {
+                Layout.preferredWidth: KP.paletteWidth
+                Layout.preferredHeight: KP.tabStripHeight
+                color: KP.toolRailBg
+                Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: KP.hairline }
+                Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: KP.hairline }
+            }
+            DocumentTabs {
+                Layout.fillWidth: true
+                onActivateRequested: function(index) { Workspace.activateTab(index) }
+                onCloseRequested: function(index) { root.requestTabClose(index) }
+                onNewRequested: root.requestNewDocument()
+            }
         }
 
         // ------------------------------------------- Workspace: tools + docking
@@ -775,6 +781,9 @@ ApplicationWindow {
         "layers": layersComponent,
         "properties": propertiesComponent,
         "color": colorComponent,
+        "palette": paletteComponent,
+        "colormixer": colorMixerComponent,
+        "assets": assetsComponent,
         "timeline": timelineComponent
     })
     // The dock areas the layout currently has, for the Panels menu.
@@ -786,7 +795,7 @@ ApplicationWindow {
         return qsTr("Bottom")
     }
     readonly property var panelMenuIds: ["subtool", "toolproperty", "brushsize",
-                                         "layers", "properties", "color", "timeline"]
+                                         "layers", "properties", "color", "palette", "colormixer", "assets", "timeline"]
     property int dockRevision: 0
     Connections {
         target: Dock
@@ -811,6 +820,9 @@ ApplicationWindow {
     Component { id: layersComponent; LayersPanel { objectName: "layersPanel" } }
     Component { id: propertiesComponent; PropertiesPanel { objectName: "propertiesPanel" } }
     Component { id: colorComponent; ColorPanel { objectName: "colorPanel" } }
+    Component { id: paletteComponent; PalettePanel { objectName: "palettePanel" } }
+    Component { id: colorMixerComponent; ColorMixerPanel { objectName: "colorMixerPanel" } }
+    Component { id: assetsComponent; AssetsPanel { objectName: "assetsPanel" } }
     Component { id: timelineComponent; TimelinePanel { objectName: "timelinePanel" } }
     Component {
         id: canvasComponentItem

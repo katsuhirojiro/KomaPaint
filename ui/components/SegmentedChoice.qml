@@ -18,10 +18,10 @@ Row {
             required property int index
             required property string modelData
             readonly property bool current: index === root.currentIndex
-            width: Math.floor(root.width / Math.max(1, root.options.length))
+            width: Math.floor((root.width - Math.max(0, root.options.length - 1) * root.spacing) / Math.max(1, root.options.length))
             height: KP.controlHeight
             hoverEnabled: true
-            focusPolicy: Qt.NoFocus
+            focusPolicy: Qt.TabFocus
             onClicked: if (!current) root.chosen(index)
             background: Rectangle {
                 color: segment.current ? KP.accentWash

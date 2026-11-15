@@ -220,7 +220,9 @@ Item {
                         property bool tabActive: tab.tabIndex === group.activeIndex
                         property bool tabHovered: tabMouse.containsMouse
 
-                        width: Math.min(180, Math.max(58, tabLabel.implicitWidth + (tab.tabActive ? 44 : 28)))
+                        width: Math.min(180, Math.max(48,
+                            Math.min(tabLabel.implicitWidth + (tab.tabActive ? 44 : 28),
+                                     (header.width - 50) / Math.max(1, group.panels.length))))
                         height: tabRow.height
                         color: tab.tabActive ? KP.paneBg
                              : tab.tabHovered ? KP.hoverOverlay
@@ -251,7 +253,7 @@ Item {
                             anchors.left: parent.left
                             anchors.leftMargin: tab.tabActive ? KP.gapM : KP.gapM - 2
                             anchors.verticalCenter: parent.verticalCenter
-                            width: Math.min(implicitWidth, 132)
+                            width: Math.max(0, Math.min(implicitWidth, tab.width - (tab.tabActive || tab.tabHovered ? 30 : 12)))
                             text: group.titleOf(modelData)
                             color: tab.tabActive ? KP.text : tab.tabHovered ? KP.text : KP.textMuted
                             font.family: KP.fontUi
@@ -349,6 +351,15 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 0
 
+                IconButton {
+                    objectName: "dockOptions_" + group.activePanelId
+                    cell: 22
+                    iconSize: 14
+                    glyph: "dots-h"
+                    tooltip: qsTr("Panel options")
+                    onActivated: { tabMenu.panel = group.activePanelId; tabMenu.popup() }
+                }
+
                 Item {
                     objectName: "dockCollapse" + (group.registered ? group.groupId : "f" + group.floatingId)
                     width: 20
@@ -413,6 +424,35 @@ Item {
         objectName: "dockPanelMenu"
         property string panel: ""
 
+        KpMenuItem {
+            text: qsTr("Compact thumbnails")
+            visible: tabMenu.panel === "layers" && content.item && content.item.thumbnailSize !== undefined
+            checkable: true
+            checked: visible && content.item.thumbnailSize === 24
+            onTriggered: content.item.setThumbnailSize(24)
+        }
+        KpMenuItem {
+            text: qsTr("Medium thumbnails")
+            visible: tabMenu.panel === "layers" && content.item && content.item.thumbnailSize !== undefined
+            checkable: true
+            checked: visible && content.item.thumbnailSize === 32
+            onTriggered: content.item.setThumbnailSize(32)
+        }
+        KpMenuItem {
+            text: qsTr("Large thumbnails")
+            visible: tabMenu.panel === "layers" && content.item && content.item.thumbnailSize !== undefined
+            checkable: true
+            checked: visible && content.item.thumbnailSize === 48
+            onTriggered: content.item.setThumbnailSize(48)
+        }
+        KpMenuItem {
+            text: qsTr("Resize thumbnails with wheel")
+            visible: tabMenu.panel === "layers" && content.item && content.item.thumbnailWheelEnabled !== undefined
+            checkable: true
+            checked: visible && content.item.thumbnailWheelEnabled
+            onTriggered: content.item.setThumbnailWheelEnabled(!content.item.thumbnailWheelEnabled)
+        }
+        KpMenuSeparator { visible: tabMenu.panel === "layers" }
         KpMenuItem {
             text: qsTr("Float panel")
             enabled: tabMenu.panel.length > 0 && group.floatingId < 0

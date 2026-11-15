@@ -1,0 +1,40 @@
+# Layers workspace — second visual proposal
+
+**Design only.** These images are constructed mockups, not screenshots or working functionality. This revision supersedes the Layers layout in the [previous proposal](layer-workspace-right-panel-redesign.md), while keeping its neutral styling, general workspace and triangular colour selector. The notes below explain the pictures without putting explanatory labels into the panel.
+
+## Actual workspace and interaction states
+
+1. [Full workspace: Layers and two references visible while drawing](design-proposal/layers-workspace-v2-full.png) ([SVG](design-proposal/layers-workspace-v2-full.svg))
+2. [Large, medium and compact thumbnails](design-proposal/layers-workspace-v2-sizes.png) ([SVG](design-proposal/layers-workspace-v2-sizes.svg))
+3. [Side colour-label picker open](design-proposal/layers-workspace-v2-label.png) ([SVG](design-proposal/layers-workspace-v2-label.svg))
+4. [Contextual icon actions open](design-proposal/layers-workspace-v2-context.png) ([SVG](design-proposal/layers-workspace-v2-context.svg))
+5. [Canvas Viewer tab](design-proposal/layers-workspace-v2-viewer.png) ([SVG](design-proposal/layers-workspace-v2-viewer.svg))
+
+The mockups use the supplied normalized layer PNGs from `ui/assets/icons/layers/`, light-tinted for the dark theme. Their proportions and shapes are preserved; no repository icon assets were edited. These include raster, vector, folder, mask, reference, alpha-lock, transparency-lock, visibility, merge, move and delete icons. Small utility glyphs such as the disclosure triangle, clipping arrow and ordinary row lock are neutral schematic glyphs where a distinct supplied icon was not suitable. The selected layer's **opacity slider and percentage are visibly present** immediately below blend mode in every Layers view: the selected Shadows example is at 72%. It is layer opacity, not brush opacity.
+
+## Reading the panel
+
+- **Character** is a colour-labelled folder. Its indented raster children include Linework, clipped Shadows, and Base colour. The bent arrow on Shadows shows it clips to Base colour directly below. Texture is a mask attached and indented beneath Base colour. **Details** is a nested, colour-labelled folder with two further raster children. Rough sketch is hidden and locked; Pose reference is a locked reference layer; Paper is a separate locked raster layer. The displayed artwork and miniatures are schematic examples.
+- A narrow, persistent colour rail at the left of every row is the layer/folder label target. Clicking it opens the small swatch picker shown in image 3; the neutral swatch clears the label. It applies to the clicked row or, when explicitly invoked for a selection, to the selected eligible rows. Selecting a swatch changes a functional layer label, never the artwork or general interface palette. Swatches need names, non-colour identification and keyboard/screen-reader access in the real UI; the icon-only mockup intentionally has no permanent labels.
+- The selected row is indicated with neutral brightness and an edge, not coloured selection chrome. Visibility is on the right; a slashed eye indicates hidden. Ordinary row lock is distinct from the two supplied layer-lock icons in the header. Hover, keyboard focus and tooltips supply names without turning the interface into a row of text. The exact semantic distinction between the supplied alpha-lock and transparency-lock icons needs confirmation against the implemented model before enabling them; do not invent two different operations if the application only supports one.
+- The compact header keeps blend mode, the supplied lock icons, clipping, thumbnail-size selector, and layer-opacity slider/value together. The bottom icon strip provides creation and common structure actions. Image 4 shows a possible contextual action strip for the selected row; actions are type/selection-dependent, with disabled states and accessible names/shortcuts. Context menus may contain descriptive text when needed for accessibility and discoverability; the persistent panel itself does not replace these icons with labels.
+
+## Scaling, density and input
+
+The three panels show the **same 11-layer structure**, selection, labels, eye and lock controls at **48, 32 and 24 logical pixels**, respectively. The size number in each header corresponds to its thumbnail size. Medium is the proposed default. These are testable starting presets, not hard limits on document size, layer count or hierarchy. The compact mode keeps names and controls readable; panel resizing, list scrolling, elision with full-name tooltip and appropriate minimum hit targets preserve usability at other widths and scales.
+
+In image 2, the cursor sits on the selected layer's thumbnail; the nearby mouse/wheel diagram represents the proposed gesture. With the pointer **over a thumbnail**, wheel up selects the next larger preset and wheel down the next smaller preset, respecting platform scroll direction. Accumulate high-resolution wheel deltas; consume the event at endpoints rather than unexpectedly scrolling the list. Over the rest of the list, the wheel scrolls normally. The selected row and list anchor stay stable; no artwork or selection changes. The header menu and keyboard provide an explicit alternative, and a preference can disable hover-wheel resizing for touchpads. Show a tooltip on hover, not permanent instructional text; keep target and focus behavior accessible.
+
+## Tabs and simultaneous references
+
+Layers, Canvas Viewer and References are the three primary right-workspace destinations. By default they can share a tab group to save space. In the full mockup, References has been split below Layers: **both reference images and the active layer list remain visible beside the canvas while drawing**. The References tab remains a launcher/focus target for the detached instance, not a second conflicting copy. Users can redock, resize, float, close and reopen it; colour remains a separately dockable group. The split is illustrative, not a fixed minimum workspace width. At smaller window sizes, users can tab or float panels and the list scrolls.
+
+The References view can display more than one imported image at once; each image retains its own pan, zoom and rotation. Collections, previous/next navigation, add/remove and independent view controls are accessible through its controls or contextual menu; reference images are separate from the document's reference-layer type and are not exported as artwork. Persist layout and image-view state; decide embedded versus linked file policy before implementation.
+
+The Viewer picture shows the entire canvas and the actual main-view viewport outline. Dragging the outline pans the main view; clicking elsewhere centres it. The zoom controls affect the main canvas; Fit and Centre are explicit. For extreme zoom, keep an accurate outline with a larger invisible hit area; rotation/mirroring need an accurate transformed outline rather than a misleading rectangle.
+
+## Design dependencies and validation
+
+This is a proposal, not a claim that folders, masks, clipping, multi-selection, labels, reference collections or the Viewer already work. These require model/compositor, undo/redo, persistence and UI work; unsupported controls must not be enabled as decoration. Test folder/mask ownership and clipping during reordering; avoid invalid drops, silent clipping changes and cycles. Selection and property controls must handle mixed values, hidden selected descendants and atomic batch undo. Cache and coalesce previews for complex/sparse documents without arbitrary layer or nesting limits. Validate full-width and narrow layouts, target sizes, contrast, icon recognizability, screen readers, wheel routing, high-DPI and focus behavior in both dark and light themes.
+
+**Review:** Does the side colour rail and swatch picker feel right, and is the split layout the preferred way to keep references visible? Should the 48 / 32 / 24 starting sizes and thumbnail-only wheel interaction be taken forward for usability testing?

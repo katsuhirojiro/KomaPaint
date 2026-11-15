@@ -199,43 +199,6 @@ Rectangle {
         standardButtons: Dialog.Ok
         contentItem: Label { id: brushError; color: KP.text; wrapMode: Text.WordWrap; width: 360 }
     }
-    // ---- The artwork's edge ------------------------------------------------
-    // The paper sits on the desk with a soft shadow and a crisp edge, which is
-    // what makes the canvas read as the centre of the workspace rather than a
-    // light rectangle in the middle of a dark one. All four parts are drawn
-    // outside the paper, so nothing is ever painted over the artwork.
-    Item {
-        anchors.fill: parent
-        visible: ws.paperVisible
-        z: 2
-
-        readonly property real px: ws.paperRect.x
-        readonly property real py: ws.paperRect.y
-        readonly property real pw: ws.paperRect.width
-        readonly property real ph: ws.paperRect.height
-
-        Rectangle {
-            // Diffuse contact shadow: two offset outlines, no blur pass.
-            x: parent.px - 3
-            y: parent.py - 3
-            width: parent.pw + 6
-            height: parent.ph + 6
-            color: "transparent"
-            border.width: 3
-            border.color: KP.shadowSoft
-            antialiasing: true
-        }
-        Rectangle {
-            x: Math.round(parent.px) - 1
-            y: Math.round(parent.py) - 1
-            width: Math.round(parent.pw) + 2
-            height: Math.round(parent.ph) + 2
-            color: "transparent"
-            border.width: 1
-            border.color: KP.canvasEdge
-        }
-    }
-
     // ---- Navigation HUD ----------------------------------------------------
     // Zooming and fitting sit under the hand, at the corner of the canvas, with
     // the zoom as a real readout. It floats, so it is allowed a shadow.

@@ -4,19 +4,8 @@ import QtQuick.Layouts
 import "../components"
 import "../themes"
 
-// Layers.
-//
-// The panel is a stack, so it is drawn as one: rows sit flush against each other
-// with no boxes, the active layer is marked by an ember edge and a wash, and the
-// two states that matter while painting — visible and locked — are always on the
-// row, in a fixed column, so they read the same whether the row is selected or
-// not. Opacity is shown on the selected row only, where it is being used, and
-// names are set in the interface face while the count and percentages are set in
-// tabular figures.
-//
-// Layer thumbnails need the engine to hand pixels to QML (a QQuickImageProvider
-// over the tile store); until that exists the row carries the layer's kind and
-// state rather than a placeholder picture pretending to be artwork.
+// The live raster stack. Unsupported layer types and compositing controls
+// remain disabled until the document model can represent them safely.
 Rectangle {
     id: panel
     color: KP.paneBg
@@ -24,6 +13,33 @@ Rectangle {
     readonly property int active: Workspace.layers.activeLayerIndex
     readonly property var activeLayer: layerList.count > 0 ? Workspace.layers.layerAt(active) : null
     readonly property int barHeight: 28
+
+    property int thumbnailSize: 32
+    property bool thumbnailWheelEnabled: true
+    readonly property var thumbnailPresets: [24, 32, 48]
+    readonly property var labelColors: ["transparent", "#ba9871", "#a591aa", "#8aa18f", "#ad8c82", "#8198a0", "#c0b38e", "#9b9b9b"]
+    readonly property var labelNames: [qsTr("No label"), qsTr("Ochre"), qsTr("Violet"), qsTr("Green"), qsTr("Rose"), qsTr("Blue"), qsTr("Sand"), qsTr("Grey")]
+    function setThumbnailSize(size) {
+        if (thumbnailPresets.indexOf(size) < 0 || thumbnailSize === size) return
+        const first = layerList.indexAt(2, layerList.contentY + 2)
+        const offset = first >= 0 ? layerList.contentY - first * (thumbnailSize + 8) : 0
+        thumbnailSize = size
+        Workspace.setSessionValue("ui.layers.thumbnailSize", size)
+        if (first >= 0) Qt.callLater(function() {
+            layerList.contentY = Math.max(0, Math.min(first * (thumbnailSize + 8) + offset,
+                                                     layerList.contentHeight - layerList.height))
+        })
+    }
+    function setThumbnailWheelEnabled(enabled) {
+        thumbnailWheelEnabled = enabled
+        Workspace.setSessionValue("ui.layers.thumbnailWheel", enabled)
+    }
+    Component.onCompleted: {
+        const size = Number(Workspace.sessionValue("ui.layers.thumbnailSize", 32))
+        if (thumbnailPresets.indexOf(size) >= 0) thumbnailSize = size
+        const enabled = Workspace.sessionValue("ui.layers.thumbnailWheel", true)
+        thumbnailWheelEnabled = enabled === true || enabled === "true" || enabled === 1 || enabled === "1"
+    }
 
     component BarRule: Rectangle {
         Layout.leftMargin: KP.gapXS
@@ -48,6 +64,38 @@ Rectangle {
                 anchors.rightMargin: KP.gapS
                 spacing: 0
 
+                ComboBox {
+                    id: blendMode
+                    objectName: "layerBlendMode"
+                    Layout.preferredWidth: 94
+                    Layout.preferredHeight: 24
+                    model: [qsTr("Normal"), qsTr("Multiply"), qsTr("Screen"), qsTr("Overlay")]
+                    currentIndex: panel.activeLayer ? panel.activeLayer.blendMode : 0
+                    enabled: panel.activeLayer !== null
+                    Accessible.name: qsTr("Layer blend mode")
+                    onActivated: function(index) { if (panel.activeLayer) panel.activeLayer.blendMode = index }
+                    contentItem: Text {
+                        leftPadding: KP.gapS
+                        rightPadding: 16
+                        text: blendMode.displayText
+                        color: KP.text
+                        font.pixelSize: KP.fontS
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
+                    background: Rectangle {
+                        color: KP.inputBg
+                        border.width: 1
+                        border.color: blendMode.activeFocus ? KP.focusRing : KP.border
+                    }
+                    indicator: KpGlyph {
+                        x: blendMode.width - width - 5
+                        y: (blendMode.height - height) / 2
+                        name: "chevron-down"
+                        size: 10
+                        color: KP.iconNormal
+                    }
+                }
                 IconButton {
                     objectName: "layerLockButton"
                     cell: 22
@@ -66,28 +114,7 @@ Rectangle {
                     tooltip: qsTr("Lock transparent pixels")
                     available: false
                 }
-                IconButton {
-                    cell: 22
-                    iconSize: 16
-                    iconName: "layers/reference"
-                    tooltip: qsTr("Set as reference layer")
-                    available: false
-                }
-                IconButton {
-                    cell: 22
-                    iconSize: 16
-                    iconName: "layers/mask"
-                    tooltip: qsTr("Layer mask")
-                    available: false
-                }
                 Item { Layout.fillWidth: true }
-                IconButton {
-                    cell: 22
-                    iconSize: 16
-                    iconName: "layers/merge-down"
-                    tooltip: qsTr("Merge with layer below")
-                    available: false
-                }
             }
 
             Rectangle {
@@ -96,6 +123,65 @@ Rectangle {
                 anchors.bottom: parent.bottom
                 height: 1
                 color: KP.hairline
+            }
+        }
+
+        // The slider always shows the selected layer's opacity; it is not brush opacity.
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.leftMargin: KP.panelInset
+            Layout.rightMargin: KP.panelInset
+            Layout.preferredHeight: 32
+            spacing: KP.gapM
+            Slider {
+                id: layerOpacitySlider
+                objectName: "layerOpacitySlider"
+                Layout.fillWidth: true
+                from: 0; to: 100; stepSize: 1
+                value: panel.activeLayer ? Math.round(panel.activeLayer.opacity * 100) : 0
+                enabled: panel.activeLayer !== null
+                Accessible.name: qsTr("Layer opacity")
+                ToolTip.text: qsTr("Layer opacity")
+                ToolTip.visible: hovered
+                ToolTip.delay: 500
+                property var editingLayer: null
+                onPressedChanged: if (pressed) editingLayer = panel.activeLayer
+                onMoved: {
+                    // Keyboard moves have no press; a drag must stay on the layer
+                    // it started on even if selection changes while it is held.
+                    const target = pressed ? editingLayer : panel.activeLayer
+                    if (target && target === panel.activeLayer) target.opacity = value / 100
+                }
+                background: Rectangle {
+                    x: layerOpacitySlider.leftPadding
+                    y: layerOpacitySlider.topPadding + layerOpacitySlider.availableHeight / 2 - height / 2
+                    width: layerOpacitySlider.availableWidth; height: 3
+                    color: KP.borderLight
+                    Rectangle { width: layerOpacitySlider.visualPosition * parent.width; height: parent.height; color: KP.text }
+                }
+                handle: Rectangle {
+                    x: layerOpacitySlider.leftPadding + layerOpacitySlider.visualPosition * (layerOpacitySlider.availableWidth - width)
+                    y: layerOpacitySlider.topPadding + layerOpacitySlider.availableHeight / 2 - height / 2
+                    width: 10; height: 10; radius: 5
+                    color: layerOpacitySlider.enabled ? KP.text : KP.textSubtle
+                    border.width: layerOpacitySlider.activeFocus ? 2 : 0
+                    border.color: KP.focusRing
+                }
+            }
+            KpNumberField {
+                id: layerOpacityField
+                objectName: "layerOpacityField"
+                Layout.preferredWidth: 58
+                Layout.preferredHeight: 24
+                enabled: panel.activeLayer !== null
+                value: panel.activeLayer ? Math.round(panel.activeLayer.opacity * 100) : 0
+                from: 0; to: 100; unit: "%"
+                Accessible.name: qsTr("Layer opacity percentage")
+                property var editingLayer: null
+                onEditingChanged: if (editing) editingLayer = panel.activeLayer
+                onEdited: function(v) {
+                    if (editingLayer && editingLayer === panel.activeLayer) editingLayer.opacity = v / 100
+                }
             }
         }
 
@@ -110,7 +196,6 @@ Rectangle {
             spacing: 0
             boundsBehavior: Flickable.StopAtBounds
             currentIndex: Workspace.layers.activeLayerIndex
-            onCurrentIndexChanged: Workspace.layers.setActiveLayerIndex(currentIndex)
             ScrollBar.vertical: KpScrollBar { policy: ScrollBar.AsNeeded }
 
             delegate: AbstractButton {
@@ -125,14 +210,35 @@ Rectangle {
                 readonly property string layerName: layerObject ? layerObject.name : ""
                 readonly property bool layerVisible: layerObject ? layerObject.visible : true
                 readonly property bool layerLocked: layerObject ? layerObject.locked : false
+                readonly property int labelIndex: layerObject ? layerObject.colorLabel : 0
                 readonly property real layerOpacity: layerObject ? layerObject.opacity : 1
+                property bool renaming: false
+                function startRename() {
+                    Workspace.layers.setActiveLayerIndex(index)
+                    renaming = true
+                    renameField.text = layerName
+                    Qt.callLater(function() {
+                        if (!row.renaming) return
+                        renameField.forceActiveFocus()
+                        renameField.selectAll()
+                    })
+                }
+                function finishRename(commit) {
+                    if (!renaming) return
+                    const name = renameField.text.trim()
+                    renaming = false
+                    if (commit && name.length > 0 && layerObject) layerObject.name = name
+                }
 
                 width: layerList.width
-                height: 30
+                height: panel.thumbnailSize + 8
                 hoverEnabled: true
-                focusPolicy: Qt.NoFocus
+                focusPolicy: Qt.StrongFocus
                 Accessible.name: row.layerName
-                onClicked: layerList.currentIndex = row.index
+                Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_F2) { row.startRename(); event.accepted = true }
+                }
+                onClicked: Workspace.layers.setActiveLayerIndex(row.index)
 
                 background: Rectangle {
                     color: row.current ? KP.rowSelected
@@ -164,55 +270,243 @@ Rectangle {
                         anchors.rightMargin: KP.gapS
                         spacing: KP.gapS
 
-                        Text {
+                        AbstractButton {
+                            id: labelButton
+                            objectName: "layerLabel" + row.index
                             Layout.alignment: Qt.AlignVCenter
                             Layout.preferredWidth: 14
-                            text: (row.index + 1)
-                            color: row.current ? KP.textMuted : KP.textSubtle
-                            font.pixelSize: KP.fontMicro
-                            font.family: KP.fontMono
-                            horizontalAlignment: Text.AlignRight
+                            Layout.preferredHeight: Math.max(24, panel.thumbnailSize)
+                            padding: 0
+                            Accessible.name: qsTr("Layer colour label: %1").arg(panel.labelNames[row.labelIndex])
+                            ToolTip.text: Accessible.name
+                            ToolTip.visible: hovered
+                            ToolTip.delay: 500
+                            onClicked: labelMenu.open()
+                            background: Rectangle {
+                                x: 3; y: 2; width: 8; height: parent.height - 4
+                                color: row.labelIndex ? panel.labelColors[row.labelIndex] : KP.paneBgAlt
+                                border.width: labelButton.activeFocus ? 1 : 0
+                                border.color: KP.focusRing
+                            }
+                            contentItem: Item { }
+                            Popup {
+                                id: labelMenu
+                                x: labelButton.width
+                                y: 0
+                                padding: KP.gapS
+                                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                                background: Rectangle { color: KP.floatingBg; border.color: KP.border }
+                                contentItem: Row {
+                                    spacing: KP.gapXS
+                                    Repeater {
+                                        model: panel.labelColors.length
+                                        delegate: AbstractButton {
+                                            required property int index
+                                            width: 26; height: 26
+                                            Accessible.name: panel.labelNames[index]
+                                            ToolTip.text: panel.labelNames[index]
+                                            ToolTip.visible: hovered
+                                            ToolTip.delay: 500
+                                            onClicked: {
+                                                if (row.layerObject) row.layerObject.colorLabel = index
+                                                labelMenu.close()
+                                            }
+                                            background: Rectangle {
+                                                anchors.fill: parent
+                                                anchors.margins: 3
+                                                color: index === 0 ? KP.paneBgAlt : panel.labelColors[index]
+                                                border.width: row.labelIndex === index || parent.activeFocus ? 2 : 1
+                                                border.color: row.labelIndex === index || parent.activeFocus ? KP.text : KP.border
+                                            }
+                                            contentItem: Item { }
+                                        }
+                                    }
+                                }
+                            }
                         }
                         KpIcon {
                             Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 18
+                            Layout.preferredHeight: 18
+                            size: 18
                             name: "layers/new-raster"
-                            size: 15
-                            color: row.current ? KP.iconSelected : KP.iconOff
-                            opacity: row.layerVisible ? 1 : 0.5
+                            color: row.layerVisible ? KP.iconNormal : KP.iconOff
                         }
-                        Text {
-                            id: nameLabel
+                        Item {
+                            id: thumbnail
+                            objectName: "layerThumbnail" + row.index
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: panel.thumbnailSize
+                            Layout.preferredHeight: panel.thumbnailSize
+                            opacity: row.layerVisible ? 1 : 0.55
+                            clip: true
+                            // Neutral checkerboard denotes transparent pixels.
+                            Grid {
+                                anchors.fill: parent
+                                columns: 4; rows: 4
+                                Repeater {
+                                    model: 16
+                                    Rectangle {
+                                        required property int index
+                                        width: thumbnail.width / 4; height: thumbnail.height / 4
+                                        color: (Math.floor(index / 4) + index % 4) % 2 ? "#bfbfbf" : "#eeeeee"
+                                    }
+                                }
+                            }
+                            Canvas {
+                                id: thumbnailCanvas
+                                renderStrategy: Canvas.Immediate
+                                anchors.fill: parent
+                                onWidthChanged: requestPaint()
+                                onHeightChanged: requestPaint()
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    ctx.clearRect(0, 0, width, height)
+                                    if (!row.layerObject) return
+                                    const side = panel.thumbnailSize
+                                    const pixels = row.layerObject.thumbnailPixels(side)
+                                    if (pixels.length !== side * side) return
+                                    const image = ctx.createImageData(side, side)
+                                    for (let i = 0; i < pixels.length; ++i) {
+                                        const pixel = pixels[i] >>> 0
+                                        image.data[i * 4] = (pixel >>> 16) & 255
+                                        image.data[i * 4 + 1] = (pixel >>> 8) & 255
+                                        image.data[i * 4 + 2] = pixel & 255
+                                        image.data[i * 4 + 3] = (pixel >>> 24) & 255
+                                    }
+                                    ctx.putImageData(image, 0, 0)
+                                }
+                            }
+                            Rectangle { anchors.fill: parent; color: "transparent"; border.width: 1; border.color: KP.borderLight }
+                            MouseArea {
+                                id: thumbnailWheel
+                                objectName: "thumbnailWheel" + row.index
+                                anchors.fill: parent
+                                acceptedButtons: Qt.NoButton
+                                hoverEnabled: true
+                                property real delta: 0
+                                onExited: delta = 0
+                                onWheel: function(wheel) {
+                                    if (!panel.thumbnailWheelEnabled) { wheel.accepted = false; return }
+                                    const amount = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.pixelDelta.y
+                                    delta += amount
+                                    while (Math.abs(delta) >= 120) {
+                                        const direction = delta > 0 ? 1 : -1
+                                        const i = panel.thumbnailPresets.indexOf(panel.thumbnailSize)
+                                        const next = Math.max(0, Math.min(panel.thumbnailPresets.length - 1, i + direction))
+                                        panel.setThumbnailSize(panel.thumbnailPresets[next])
+                                        delta -= direction * 120
+                                    }
+                                    wheel.accepted = true
+                                }
+                                ToolTip.visible: containsMouse && panel.thumbnailWheelEnabled
+                                ToolTip.delay: 700
+                                ToolTip.text: qsTr("Wheel: thumbnail size")
+                            }
+                            Timer {
+                                id: thumbnailTimer
+                                interval: 250
+                                repeat: false
+                                onTriggered: thumbnailCanvas.requestPaint()
+                            }
+                            Connections {
+                                target: row.layerObject
+                                function onArtworkChanged() { if (!thumbnailTimer.running) thumbnailTimer.start() }
+                            }
+                            Connections {
+                                target: Workspace.document
+                                function onSizeChanged() { thumbnailCanvas.requestPaint() }
+                            }
+                            Connections {
+                                target: row
+                                function onLayerObjectChanged() { thumbnailCanvas.requestPaint() }
+                            }
+                        }
+                        Item {
+                            id: nameArea
                             Layout.alignment: Qt.AlignVCenter
                             Layout.fillWidth: true
-                            text: row.layerName
-                            color: row.current ? KP.textAccent
-                                 : row.layerVisible ? KP.text : KP.textSubtle
-                            font.pixelSize: KP.fontS + 1
-                            font.weight: row.current ? Font.Medium : Font.Normal
-                            elide: Text.ElideRight
-                            verticalAlignment: Text.AlignVCenter
+                            Layout.preferredHeight: 24
+                            Text {
+                                id: nameLabel
+                                anchors.fill: parent
+                                visible: !row.renaming
+                                text: row.layerName
+                                color: row.current ? KP.textAccent : row.layerVisible ? KP.text : KP.textSubtle
+                                font.pixelSize: KP.fontS + 1
+                                font.weight: row.current ? Font.Medium : Font.Normal
+                                elide: Text.ElideRight
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                visible: !row.renaming
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                hoverEnabled: true
+                                onClicked: function(mouse) {
+                                    Workspace.layers.setActiveLayerIndex(row.index)
+                                    if (mouse.button === Qt.RightButton) rowMenu.popup()
+                                    else row.forceActiveFocus()
+                                }
+                                onDoubleClicked: function(mouse) {
+                                    if (mouse.button === Qt.LeftButton) row.startRename()
+                                }
+                                ToolTip.text: row.layerName
+                                ToolTip.visible: containsMouse && nameLabel.truncated
+                                ToolTip.delay: 700
+                            }
+                            TextField {
+                                id: renameField
+                                objectName: "layerRename" + row.index
+                                anchors.fill: parent
+                                visible: row.renaming
+                                selectByMouse: true
+                                font.pixelSize: KP.fontS + 1
+                                Accessible.name: qsTr("Layer name")
+                                onEditingFinished: row.finishRename(true)
+                                Keys.onEscapePressed: function(event) {
+                                    row.finishRename(false)
+                                    event.accepted = true
+                                }
+                            }
+                            KpMenu {
+                                id: rowMenu
+                                KpMenuItem { text: qsTr("Rename"); onTriggered: row.startRename() }
+                                KpMenuItem {
+                                    text: row.layerVisible ? qsTr("Hide layer") : qsTr("Show layer")
+                                    onTriggered: if (row.layerObject) row.layerObject.visible = !row.layerVisible
+                                }
+                                KpMenuItem {
+                                    text: row.layerLocked ? qsTr("Unlock layer") : qsTr("Lock layer")
+                                    onTriggered: if (row.layerObject) row.layerObject.locked = !row.layerLocked
+                                }
+                                KpMenuSeparator { }
+                                KpMenuItem {
+                                    text: qsTr("Move up")
+                                    enabled: row.index > 0
+                                    onTriggered: Workspace.layers.moveLayer(row.index, row.index - 1)
+                                }
+                                KpMenuItem {
+                                    text: qsTr("Move down")
+                                    enabled: row.index < layerList.count - 1
+                                    onTriggered: Workspace.layers.moveLayer(row.index, row.index + 1)
+                                }
+                                KpMenuItem {
+                                    text: qsTr("Delete layer")
+                                    enabled: layerList.count > 1
+                                    onTriggered: Workspace.layers.removeLayer(row.index)
+                                }
+                            }
                         }
                         Item {
                             id: toggles
                             Layout.alignment: Qt.AlignVCenter
-                            Layout.preferredWidth: opacityLabel.width + 2 * 20 + KP.gapXS
+                            Layout.preferredWidth: 44
                             Layout.preferredHeight: 24
 
-                            Text {
-                                id: opacityLabel
-                                anchors.left: parent.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 30
-                                text: Math.round(row.layerOpacity * 100) + "%"
-                                color: row.current ? KP.textMuted : KP.textSubtle
-                                font.pixelSize: KP.fontMicro
-                                font.family: KP.fontMono
-                                horizontalAlignment: Text.AlignRight
-                                verticalAlignment: Text.AlignVCenter
-                            }
                             IconButton {
                                 objectName: "layerVisible" + row.index
-                                x: opacityLabel.width + KP.gapXS
+                                x: 0
                                 cell: 20
                                 iconSize: 15
                                 iconName: "layers/visible"
@@ -223,7 +517,7 @@ Rectangle {
                             }
                             IconButton {
                                 objectName: "layerLocked" + row.index
-                                x: opacityLabel.width + KP.gapXS + 20
+                                x: 22
                                 cell: 20
                                 iconSize: 15
                                 iconName: "layers/lock"
