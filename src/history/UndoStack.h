@@ -26,6 +26,7 @@ public:
     QString redoText() const;
     qulonglong memoryBytes() const { return m_bytes + m_currentBytes; }
     bool beginStroke(Layer* layer);
+    bool beginMaterialStroke(Layer* layer);
     bool commitStroke();
     bool cancelStroke();
     bool strokeActive() const { return bool(m_current); }
@@ -44,6 +45,9 @@ private:
     struct StrokeCommand {
         QPointer<Layer> layer;
         std::vector<SparseTileStore::TileSnapshot> before, after;
+        std::vector<material::MaterialTileSnapshot> materialBefore, materialAfter;
+        std::vector<std::size_t> materialBeforeCharges;
+        bool materialStroke = false;
         std::vector<CompactTile> compact;
         std::size_t bytes = 0;
         std::shared_ptr<DocumentMemoryBudget> budget;
@@ -53,7 +57,10 @@ private:
     };
     static SparseTileStore::CaptureResult capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept;
     SparseTileStore::CaptureResult captureTile(TilePoint tile, bool existed, std::span<const std::uint32_t> pixels);
+    static bool captureMaterial(void* context, TilePoint tile, std::span<const material::MaterialEntry> entries) noexcept;
+    bool captureMaterialTile(TilePoint tile, std::span<const material::MaterialEntry> entries);
     void finishCapture();
+    void finishMaterialCapture();
     void tryCompact() noexcept;
     void replay(bool forward);
     void detachCapture() noexcept;

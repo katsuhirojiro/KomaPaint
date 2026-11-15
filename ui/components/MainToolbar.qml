@@ -80,33 +80,33 @@ Rectangle {
 
         // ---- Edit
         Row {
-            visible: bar.showEditGroup
+            visible: bar.showEditGroup && Workspace.document !== null
             Layout.alignment: Qt.AlignVCenter
             spacing: KP.gapXS
 
             KpButton {
                 glyph: "undo"
-                tip: Workspace.history.canUndo
+                tip: Workspace.history && Workspace.history.canUndo
                      ? qsTr("Undo %1 (Ctrl+Z)").arg(Workspace.history.undoText)
                      : qsTr("Nothing to undo")
-                enabled: Workspace.history.canUndo
-                onClicked: Workspace.history.undo()
+                enabled: Workspace.history !== null && Workspace.history.canUndo
+                onClicked: if (Workspace.history) Workspace.history.undo()
             }
             KpButton {
                 glyph: "redo"
-                tip: Workspace.history.canRedo
+                tip: Workspace.history && Workspace.history.canRedo
                      ? qsTr("Redo %1 (Ctrl+Shift+Z)").arg(Workspace.history.redoText)
                      : qsTr("Nothing to redo")
-                enabled: Workspace.history.canRedo
-                onClicked: Workspace.history.redo()
+                enabled: Workspace.history !== null && Workspace.history.canRedo
+                onClicked: if (Workspace.history) Workspace.history.redo()
             }
         }
 
-        BarRule { visible: bar.showEditGroup && bar.showViewGroup; Layout.alignment: Qt.AlignVCenter }
+        BarRule { visible: Workspace.document !== null && bar.showEditGroup && bar.showViewGroup; Layout.alignment: Qt.AlignVCenter }
 
         // ---- View
         Row {
-            visible: bar.showViewGroup
+            visible: bar.showViewGroup && Workspace.document !== null
             Layout.alignment: Qt.AlignVCenter
             spacing: KP.gapXS
 

@@ -254,8 +254,9 @@ void TestWorkspaceSession::viewStateBelongsToEachDocument()
     QCOMPARE(ws.zoom(), 250.0);
 
     QVERIFY(ws.newProject(QStringLiteral("Beta"), 64, 48, true, QStringLiteral("white"), 72));
-    // A new project keeps the tool in the user's hand but has no view yet.
-    QCOMPARE(ws.activeTool(), QStringLiteral("eraser"));
+    // A new project takes the global default tool, while its view starts
+    // independently of the previous project's saved view.
+    QCOMPARE(ws.activeTool(), QStringLiteral("brush"));
     QVERIFY(!ws.activeViewStored());
     QCOMPARE(ws.zoom(), 100.0);
     ws.setActiveTool(QStringLiteral("fill"));
@@ -393,14 +394,13 @@ void TestWorkspaceSession::closingOneDocumentLeavesTheOthers()
     QCOMPARE(pixel(ws, {1, 1}), 0U);
 
     // Closing the active tab activates a neighbour; closing the last tab
-    // leaves an empty untitled document rather than no document.
+    // leaves the genuine empty workspace, with no hidden document or history.
     QVERIFY(ws.closeTab(0, true));
     QCOMPARE(ws.document(), gamma);
     QVERIFY(ws.closeTab(0, true));
-    QCOMPARE(ws.projectTabs().size(), 1);
-    QVERIFY(ws.document() != gamma);
-    QVERIFY(!ws.document()->isModified());
-    QVERIFY(!ws.history()->canUndo());
+    QCOMPARE(ws.projectTabs().size(), 0);
+    QVERIFY(!ws.document());
+    QVERIFY(!ws.history());
     QVERIFY(!ws.closeTab(5));
     QVERIFY(!ws.closeTab(-1));
 }
@@ -414,14 +414,17 @@ void TestWorkspaceSession::snapshotsCoverUnsavedAndModifiedSavedDocuments()
     const QString saved = dir.filePath(QStringLiteral("saved.koma"));
     const QString clean = dir.filePath(QStringLiteral("clean.koma"));
     WorkspaceState ws; QVERIFY(ws.initializeRecovery(recovery));
-    // The untouched start-up document holds no work and gets no snapshot.
+    // The empty start-up workspace has no project to snapshot.
     QVERIFY(ws.persistWorkspace());
     QVERIFY(snapshotFiles(recovery).isEmpty());
 
     QVERIFY(ws.newProject(QStringLiteral("Unsaved"), 100, 80, true, QStringLiteral("white"), 72));
     QVERIFY(paint(ws, {1, 1}, kRed));
-    QVERIFY(ws.newProject(QStringLiteral("Saved"), 100, 80, true, QStringLiteral("white"), 72));
+    QVERIFY(ws.newProject(QStringLiteral("Saved"), 600, 192, true, QStringLiteral("white"), 72));
     QVERIFY(paint(ws, {1, 1}, kGreen));
+    const auto savedMaterial = material::makeResidualPaint(0xffa54b35U, 0.8, 0.3, 0.2, "gouache");
+    QCOMPARE(ws.layers()->layerAt(0)->materialTiles().setBatch({300, 80}, savedMaterial),
+             material::MaterialTileStore::Result::Changed);
     QVERIFY(ws.saveToPath(saved));
     QVERIFY(paint(ws, {2, 2}, kBlue));  // newer than the file
     QVERIFY(ws.newProject(QStringLiteral("Clean"), 100, 80, true, QStringLiteral("white"), 72));
@@ -449,9 +452,12 @@ void TestWorkspaceSession::snapshotsCoverUnsavedAndModifiedSavedDocuments()
     // it is an ordinary document file.
     std::unique_ptr<CanvasDocument> snapshot(DocumentFile::open(snapshotOf(recovery, QStringLiteral("Saved"))));
     QVERIFY(snapshot);
-    QCOMPARE(snapshot->size(), QSize(100, 80));
+    QCOMPARE(snapshot->size(), QSize(600, 192));
     QCOMPARE(snapshot->layers()->layerAt(0)->tiles().pixel({1, 1}).value(), kGreen);
     QCOMPARE(snapshot->layers()->layerAt(0)->tiles().pixel({2, 2}).value(), kBlue);
+    const auto recoveredMaterial = snapshot->layers()->layerAt(0)->materialTiles().batchAt({300, 80});
+    QVERIFY(recoveredMaterial && recoveredMaterial->pigmentMass() > 0.0);
+    QVERIFY(recoveredMaterial->mediumId == "gouache");
     // Taking the snapshot changed nothing in the live documents.
     QVERIFY(ws.activateTab(1));
     QVERIFY(ws.document()->isModified());
@@ -486,9 +492,10 @@ void TestWorkspaceSession::recoversEachEntryIndependently()
     connect(&ws, &WorkspaceState::fileErrorOccurred, &ws, [&messages](const QString& m) { messages << m; });
     QVERIFY(ws.recoveryAvailable());
     QCOMPARE(ws.recoveryEntries().size(), 2);
-    // Nothing is opened until the user decides.
-    QCOMPARE(ws.projectTabs().size(), 1);
-    QVERIFY(!ws.document()->isModified());
+    // Nothing is opened until the user decides; recovery startup has no
+    // placeholder project or invisible document.
+    QCOMPARE(ws.projectTabs().size(), 0);
+    QVERIFY(!ws.document());
 
     // The list tells saved from never-saved work and names the original.
     const auto unsavedEntry = entryNamed(ws, QStringLiteral("Unsaved"));
@@ -505,7 +512,7 @@ void TestWorkspaceSession::recoversEachEntryIndependently()
 
     // Recover only the saved project.
     QVERIFY(ws.recoverEntry(savedEntry.value(QStringLiteral("key")).toString()));
-    QCOMPARE(ws.projectTabs().size(), 1);  // replaced the empty start-up tab
+    QCOMPARE(ws.projectTabs().size(), 1);  // restored as the first real project
     QCOMPARE(ws.document()->title(), QStringLiteral("Saved"));
     QCOMPARE(ws.currentFile(), saved);
     QVERIFY(ws.document()->isModified());          // it differs from the file
@@ -572,7 +579,7 @@ void TestWorkspaceSession::discardsOneEntryAndKeepsTheOthers()
         QCOMPARE(indexProjects(recovery).size(), 1);
         QVERIFY(ws.recoveryAvailable());
         QCOMPARE(ws.recoveryEntries().size(), 1);
-        QCOMPARE(ws.projectTabs().size(), 1);  // discarding opens nothing
+        QCOMPARE(ws.projectTabs().size(), 0);  // discarding opens nothing
         QVERIFY(!ws.discardEntry(QStringLiteral("no-such-entry")));
         // "Decide later": the remaining entry is simply left alone.
     }
@@ -1190,7 +1197,8 @@ void TestWorkspaceSession::sessionRestoresTabsActiveDocumentAndViews()
         QVERIFY(!ws.saveSession());
         QVERIFY(!QFile::exists(session));
         QVERIFY(ws.restoreSession());  // first launch: nothing to restore
-        QCOMPARE(ws.projectTabs().size(), 1);
+        QCOMPARE(ws.projectTabs().size(), 0);
+        QVERIFY(!ws.document());
         const quint32 colors[] = {kRed, kGreen, kBlue};
         for (int i = 0; i < names.size(); ++i) {
             QVERIFY(ws.newProject(names.at(i), 80 + i * 10, 60, true, QStringLiteral("white"), 72));
@@ -1220,7 +1228,7 @@ void TestWorkspaceSession::sessionRestoresTabsActiveDocumentAndViews()
     connect(&ws, &WorkspaceState::fileErrorOccurred, &ws, [&messages](const QString& m) { messages << m; });
     QVERIFY(ws.initializeRecovery(recovery));
     QVERIFY(ws.initializeSession(session));
-    QCOMPARE(ws.projectTabs().size(), 1);  // nothing happens until asked
+    QCOMPARE(ws.projectTabs().size(), 0);  // nothing happens until asked
     QVERIFY(ws.restoreSession());
     QVERIFY(messages.isEmpty());
     QVERIFY(!ws.restoreSession());  // once only
@@ -1392,7 +1400,8 @@ void TestWorkspaceSession::sessionFileIsValidatedAndReplacedAtomically()
     WorkspaceState ws;
     QVERIFY(ws.initializeSession(path));
     QVERIFY(ws.restoreSession());
-    QCOMPARE(ws.projectTabs().size(), 1);
+    QCOMPARE(ws.projectTabs().size(), 0);
+    QVERIFY(!ws.document());
     QCOMPARE(SessionStore::load(path, &loaded, &error), SessionStore::LoadResult::Loaded);
     QCOMPARE(loaded.documents.size(), std::size_t(0));
 }

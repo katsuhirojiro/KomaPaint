@@ -64,7 +64,7 @@ public:
     QStringList typeIds() const;
 
     // Stable ids of the types this build knows. Illustration is the only type
-    // defined by the current .koma version 2 format.
+    // defined by the current .koma format.
     static QString illustrationTypeId();
 
 private:

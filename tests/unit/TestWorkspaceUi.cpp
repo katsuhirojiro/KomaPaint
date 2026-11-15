@@ -120,6 +120,7 @@ private slots:
     void eachProjectKeepsItsOwnViewAndTool();
     void closeQuestionsCancelKeepsEverything();
     void tabCloseTouchesOnlyThatProject();
+    void startsAndReturnsToAnEmptyWorkspace();
     void sessionRestoresProjectsAndLayoutAtStartup();
     void toolbarOpenAndSaveAreConnected();
 
@@ -201,8 +202,10 @@ void TestWorkspaceUi::recoveryListRecoversAndDiscardsSingleEntries()
     auto* dialog = app.root->findChild<QObject*>(QStringLiteral("recoveryChoiceDialog"));
     QVERIFY(dialog);
     QTRY_VERIFY(dialog->property("opened").toBool());
-    // Nothing was opened or deleted by merely showing the list.
-    QCOMPARE(ws.projectTabs().size(), 1);
+    // Nothing was opened or deleted by merely showing the list; the startup
+    // workspace remains truly empty until an explicit recovery choice.
+    QCOMPARE(ws.projectTabs().size(), 0);
+    QVERIFY(!ws.document());
     QCOMPARE(snapshotFiles(recovery).size(), 3);
     auto* list = qobject_cast<QQuickItem*>(app.root->findChild<QObject*>(QStringLiteral("recoveryEntryList")));
     QVERIFY(list);
@@ -281,9 +284,9 @@ void TestWorkspaceUi::eachProjectKeepsItsOwnViewAndTool()
     auto& ws = app.parts.workspace;
     auto* canvas = qobject_cast<CanvasViewport*>(findInWindow(app.window, QStringLiteral("canvasViewport")));
     QVERIFY(canvas);
-    QTRY_VERIFY(canvas->width() > 100 && canvas->height() > 100);
 
     QVERIFY(ws.newProject(QStringLiteral("Wide"), 800, 200, true, QStringLiteral("white"), 72));
+    QTRY_VERIFY(canvas->width() > 100 && canvas->height() > 100);
     QTRY_COMPARE(canvas->document(), static_cast<QObject*>(ws.document()));
     // A project shown for the first time is fitted, and that becomes its view.
     QTRY_VERIFY(ws.activeViewStored());
@@ -506,6 +509,47 @@ void TestWorkspaceUi::tabCloseTouchesOnlyThatProject()
     QCOMPARE(snapshotFiles(recovery).size(), 2);
     QCOMPARE(tabTitle(ws, 0), QStringLiteral("One"));
     QCOMPARE(tabTitle(ws, 1), QStringLiteral("Three"));
+}
+
+void TestWorkspaceUi::startsAndReturnsToAnEmptyWorkspace()
+{
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    Running app;
+    QVERIFY(start(app, QStringLiteral("WorkspaceUiEmpty"), dir.filePath(QStringLiteral("recovery")),
+                  dir.filePath(QStringLiteral("session.json"))));
+    auto& ws = app.parts.workspace;
+    QCOMPARE(ws.projectTabs().size(), 0);
+    QVERIFY(!ws.document());
+    QVERIFY(!ws.history());
+    auto* empty = findInWindow(app.window, QStringLiteral("emptyWorkspace"));
+    auto* invite = findInWindow(app.window, QStringLiteral("emptyWorkspaceInvitation"));
+    auto* create = findInWindow(app.window, QStringLiteral("emptyWorkspaceNewProjectButton"));
+    QVERIFY(empty && empty->isVisible());
+    QVERIFY(invite && invite->property("text").toString().contains(QStringLiteral("Nothing here yet")));
+    QVERIFY(create && create->isVisible());
+    if (auto* canvas = qobject_cast<CanvasViewport*>(findInWindow(app.window, QStringLiteral("canvasViewport"))))
+        QVERIFY(!canvas->document());
+
+    click(app.window, create);
+    auto* dialog = app.root->findChild<QObject*>(QStringLiteral("newProjectDialog"));
+    QVERIFY(dialog);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+    QTRY_VERIFY(!dialog->property("visible").toBool());
+    QCOMPARE(ws.projectTabs().size(), 0);
+
+    QVERIFY(ws.newProject(QStringLiteral("First"), 120, 80, true, QStringLiteral("white"), 72));
+    QCOMPARE(ws.projectTabs().size(), 1);
+    QVERIFY(ws.document());
+    QVERIFY(!empty->isVisible());
+    QVERIFY(ws.closeTab(0, true));
+    QCOMPARE(ws.projectTabs().size(), 0);
+    QVERIFY(!ws.document());
+    QTRY_VERIFY(empty->isVisible());
+
+    QVERIFY(ws.newProject(QStringLiteral("Second"), 96, 96, true, QStringLiteral("white"), 72));
+    QCOMPARE(ws.projectTabs().size(), 1);
+    QCOMPARE(ws.document()->title(), QStringLiteral("Second"));
 }
 
 void TestWorkspaceUi::sessionRestoresProjectsAndLayoutAtStartup()

@@ -20,6 +20,7 @@
         <file alias="components/PropertySlider.qml">../ui/components/PropertySlider.qml</file>
         <file alias="components/SegmentedChoice.qml">../ui/components/SegmentedChoice.qml</file>
         <file alias="components/PreferencesDialog.qml">../ui/components/PreferencesDialog.qml</file>
+        <file alias="components/KomaSettingsDialog.qml">../ui/components/KomaSettingsDialog.qml</file>
         <file alias="components/KpGlyph.qml">../ui/components/KpGlyph.qml</file>
         <file alias="components/KpButton.qml">../ui/components/KpButton.qml</file>
         <file alias="components/KpNumberField.qml">../ui/components/KpNumberField.qml</file>

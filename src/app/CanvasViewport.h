@@ -2,6 +2,7 @@
 #include "../canvas/CpuTileCompositor.h"
 #include "../drawing/BrushEngine.h"
 #include "../drawing/StrokeStabilizer.h"
+#include "../material/MaterialEngine.h"
 #include <memory>
 #include <QQuickPaintedItem>
 #include <QColor>
@@ -95,6 +96,8 @@ private:
     QPointer<UndoStack> m_history;
     QPointer<Layer> m_strokeLayer;
     std::unique_ptr<BrushStroke> m_stroke;
+    std::unique_ptr<material::MaterialStroke> m_materialStroke;
+    std::unique_ptr<material::BrushReservoir> m_materialReservoir;
     StrokeStabilizer m_stabilizer;
     CompositeInvalidation m_invalidation;
     std::map<TilePoint, CacheEntry, TilePointLess> m_cache;

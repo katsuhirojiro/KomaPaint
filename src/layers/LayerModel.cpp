@@ -2,12 +2,15 @@
 
 namespace komapaint {
 
-LayerModel::LayerModel(QObject* parent) : QAbstractListModel(parent)
+LayerModel::LayerModel(QObject* parent, bool createDefaultLayer) : QAbstractListModel(parent)
 {
+    if (!createDefaultLayer) return;
     auto* l = new Layer(QStringLiteral("Layer 1"), this);
     l->tiles().setDocumentBudget(m_documentBudget);
+    l->materialTiles().setDocumentBudget(m_documentBudget);
     l->setIndex(0);
     m_layers.append(l);
+    m_active = 0;
     connect(l, &Layer::nameChanged,       this, [this,l]{ onLayerChanged(l, {NameRole}); });
     connect(l, &Layer::visibilityChanged, this, [this,l]{ onLayerChanged(l, {VisibleRole}); });
     connect(l, &Layer::lockedChanged,     this, [this,l]{ onLayerChanged(l, {LockedRole}); });
@@ -20,9 +23,11 @@ bool LayerModel::resizeEmptyLayers(const QSize& size)
 {
     if (size.width() <= 0 || size.height() <= 0) return false;
     for (const auto* layer : m_layers)
-        if (layer->tiles().allocatedTiles() != 0 || !layer->tiles().dirtyRegions().empty()) return false;
+        if (layer->tiles().allocatedTiles() != 0 || !layer->tiles().dirtyRegions().empty()
+            || layer->materialTiles().allocatedTiles() != 0 || !layer->materialTiles().dirtyRegions().empty()) return false;
     for (auto* layer : m_layers)
-        if (!layer->tiles().resizeEmpty(size.width(), size.height())) return false;
+        if (!layer->tiles().resizeEmpty(size.width(), size.height())
+            || !layer->materialTiles().resizeEmpty(size.width(), size.height())) return false;
     m_canvasSize = size;
     return true;
 }
@@ -85,7 +90,9 @@ void LayerModel::addLayer()
     beginInsertRows({}, row, row);
     auto* l = new Layer(QString("Layer %1").arg(row + 1), this);
     l->tiles().setDocumentBudget(m_documentBudget);
+    l->materialTiles().setDocumentBudget(m_documentBudget);
     l->tiles().resizeEmpty(m_canvasSize.width(), m_canvasSize.height());
+    l->materialTiles().resizeEmpty(m_canvasSize.width(), m_canvasSize.height());
     l->setIndex(row);
     connect(l, &Layer::nameChanged,       this, [this,l]{ onLayerChanged(l, {NameRole}); });
     connect(l, &Layer::visibilityChanged, this, [this,l]{ onLayerChanged(l, {VisibleRole}); });
@@ -95,6 +102,10 @@ void LayerModel::addLayer()
     connect(l, &Layer::colorLabelChanged, this, [this,l]{ onLayerChanged(l, {ColorLabelRole}); });
     m_layers.append(l);
     endInsertRows();
+    if (m_active < 0) {
+        m_active = row;
+        emit activeLayerIndexChanged(m_active);
+    }
 }
 
 void LayerModel::removeLayer(int row)
@@ -103,7 +114,7 @@ void LayerModel::removeLayer(int row)
     // A synchronous artwork callback runs inside the store or a brush dab.
     // Deleting any layer there can invalidate an active operation's owner.
     for (const auto* layer : m_layers)
-        if (layer->tiles().notifyingChange()) return;
+        if (layer->tiles().notifyingChange() || layer->materialTiles().notifyingChange()) return;
     const int previousActive = m_active;
     beginRemoveRows({}, row, row);
     delete m_layers.takeAt(row);

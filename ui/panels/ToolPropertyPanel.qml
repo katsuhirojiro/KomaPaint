@@ -108,6 +108,29 @@ Rectangle {
                 spacing: 0
 
                 PanelSection {
+                    objectName: "paintingMediumSection"
+                    width: parent.width
+                    title: qsTr("Painting medium")
+                    hint: panel.brush.traditionalMedia
+                        ? (panel.brush.erase ? qsTr("gouache · lift material") : qsTr("gouache · composition-preserving"))
+                        : qsTr("digital · raster")
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+                    Item {
+                        width: parent.width
+                        height: mediumChoice.height
+                        SegmentedChoice {
+                            id: mediumChoice
+                            objectName: "paintingMediumChoice"
+                            width: parent.width
+                            options: [qsTr("Digital"), qsTr("Gouache")]
+                            currentIndex: panel.brush.traditionalMedia ? 1 : 0
+                            onChosen: function(index) { panel.brush.traditionalMedia = index === 1 }
+                        }
+                    }
+                }
+
+                PanelSection {
                     width: parent.width
                     title: qsTr("Stroke")
                     hint: qsTr("size · opacity · density")

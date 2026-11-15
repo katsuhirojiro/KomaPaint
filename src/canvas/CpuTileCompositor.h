@@ -6,6 +6,7 @@
 #include <vector>
 
 namespace komapaint {
+class Layer;
 // Compositing modes operate on straight RGB colours but store premultiplied
 // ARGB. Normal is the existing source-over behavior and remains the default.
 enum class BlendMode { Normal, Multiply, Screen, Overlay };
@@ -17,6 +18,9 @@ struct CompositeLayer {
     bool visible = true;
     double opacity = 1.0;
     BlendMode blendMode = BlendMode::Normal;
+    // Optional layer source used by the viewport to build a disposable rendered
+    // tile for its material plane before handing pixels to this compositor.
+    Layer* materialSource = nullptr;
     bool operator==(const CompositeLayer&) const = default;
 };
 struct CompositeTile {

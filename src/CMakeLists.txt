@@ -5,6 +5,7 @@
 add_subdirectory(core)
 add_subdirectory(app)
 add_subdirectory(canvas)
+add_subdirectory(material)
 add_subdirectory(drawing)
 add_subdirectory(layers)
 add_subdirectory(animation)

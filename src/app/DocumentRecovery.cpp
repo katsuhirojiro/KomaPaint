@@ -7,6 +7,8 @@
 
 #include <QFile>
 
+#include <limits>
+
 #ifdef Q_OS_WIN
 #include <io.h>
 #else
@@ -32,8 +34,8 @@ bool flushCommittedFile(const QString& path)
 }
 
 // The illustration adapter. It delegates to DocumentFile, which owns the
-// .koma version 2 illustration payload and therefore keeps normal saving and
-// recovery snapshots byte-compatible for this document type.
+// .koma illustration payload and therefore keeps normal saving and recovery
+// snapshots byte-compatible for this document type.
 class IllustrationRecoveryAdapter final : public DocumentRecoveryAdapter
 {
 public:
@@ -67,13 +69,23 @@ public:
     }
     quint64 estimatedSnapshotBytes(const CanvasDocument& document) const override
     {
-        // .koma stores the allocated tile pixels uncompressed, so the pixel
-        // bytes plus a generous allowance for names and tables is an upper
-        // estimate of the file size.
+        // .koma stores digital tiles and sparse material cells uncompressed.
+        // Include conservative material composition/tile overhead and per-layer
+        // metadata so recovery-space checks account for both authoritative planes.
         quint64 bytes = 64U * 1024U;
         const auto* model = document.layers();
-        for (int i = 0; i < model->rowCount(); ++i)
-            bytes += static_cast<quint64>(model->layerAt(i)->tiles().allocatedPixelBytes()) + 8U * 1024U;
+        for (int i = 0; i < model->rowCount(); ++i) {
+            const auto* layer = model->layerAt(i);
+            const quint64 rasterBytes = static_cast<quint64>(layer->tiles().allocatedPixelBytes());
+            const quint64 materialMemory = static_cast<quint64>(layer->materialTiles().allocatedBytes());
+            const quint64 materialBytes = materialMemory > (std::numeric_limits<quint64>::max() - bytes) / 2
+                ? std::numeric_limits<quint64>::max() : materialMemory * 2;
+            if (rasterBytes > std::numeric_limits<quint64>::max() - bytes
+                || materialBytes > std::numeric_limits<quint64>::max() - bytes - rasterBytes
+                || 8U * 1024U > std::numeric_limits<quint64>::max() - bytes - rasterBytes - materialBytes)
+                return std::numeric_limits<quint64>::max();
+            bytes += rasterBytes + materialBytes + 8U * 1024U;
+        }
         return bytes;
     }
 };

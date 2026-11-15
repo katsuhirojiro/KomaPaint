@@ -27,8 +27,8 @@ class KomaPaintApp : public QObject
 public:
     // fileToOpen: optional path (or file: URL) to open once the main window
     // exists — used when the user double-clicks a .koma file. A failed open
-    // surfaces through the ordinary error dialog; the untitled document is
-    // left in place and untouched.
+    // surfaces through the ordinary error dialog; the empty workspace remains
+    // untouched.
     explicit KomaPaintApp(const QString& fileToOpen = QString(), QObject* parent = nullptr);
     ~KomaPaintApp() override;
 

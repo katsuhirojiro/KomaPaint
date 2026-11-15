@@ -91,6 +91,14 @@ target_link_libraries(test_stroke_stabilizer PRIVATE komapaint::drawing)
 set_target_properties(test_stroke_stabilizer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_stroke_stabilizer COMMAND test_stroke_stabilizer)
 
+# Material/pigment model is pure C++ and is exercised independently of QML.
+add_executable(test_material_engine TestMaterialEngine.cpp)
+target_link_libraries(test_material_engine PRIVATE komapaint::material)
+set_target_properties(test_material_engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_material_engine COMMAND test_material_engine)
+komapaint_add_test(test_material_document TestMaterialDocument.cpp)
+target_link_libraries(test_material_document PRIVATE komapaint::drawing)
+
 komapaint_add_test(test_project_workflow TestProjectWorkflow.cpp)
 target_sources(test_project_workflow PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
 target_link_libraries(test_project_workflow PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)

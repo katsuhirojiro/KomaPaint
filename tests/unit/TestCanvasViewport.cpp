@@ -38,6 +38,7 @@ private slots:
     void dirtyAndLayers();
     void blendModeChangesInvalidateComposite();
     void brushInputAndLayerRules();
+    void traditionalMediaStrokeRendersAndUsesMaterialHistory();
     void strokeFailureDiagnostics();
     void compositeCacheAccounting();
     void qmlMouseStroke();
@@ -185,6 +186,62 @@ void TestCanvasViewport::brushInputAndLayerRules()
     view.cancelStroke();
     QCOMPARE(layer->tiles().pixel({325, 220}).value(), beforeCancel);
 }
+void TestCanvasViewport::traditionalMediaStrokeRendersAndUsesMaterialHistory()
+{
+    CanvasDocument document;
+    document.setSize(QSize(256, 256));
+    UndoStack history;
+    CanvasViewport view;
+    view.setWidth(320);
+    view.setHeight(280);
+    view.setHistory(&history);
+    view.setDocument(&document);
+    view.refreshNow();
+
+    BrushSettings brush;
+    brush.setTraditionalMedia(true);
+    brush.setSize(18);
+    const QPointF point = view.documentToViewport(100, 100);
+    QVERIFY(view.beginStroke(point.x(), point.y(), 1.0, &brush, QColor(220, 35, 20)));
+    view.endStroke(point.x(), point.y(), 1.0);
+    QVERIFY(!history.strokeActive());
+    QVERIFY(document.isModified());
+
+    Layer* layer = document.layers()->layerAt(0);
+    QVERIFY(layer);
+    const auto cell = layer->materialTiles().cellAt({100, 100});
+    QVERIFY(cell && !cell->empty());
+    QCOMPARE(layer->tiles().pixel({100, 100}).value(), 0U);
+    view.refreshNow();
+    const auto sampled = view.colorAt(point.x(), point.y());
+    QVERIFY(sampled.isValid());
+    const QColor rendered = sampled.value<QColor>();
+    QVERIFY(rendered.red() > rendered.green());
+    QVERIFY(rendered.red() > rendered.blue());
+
+    QVERIFY(history.canUndo());
+    history.undo();
+    const auto undone = layer->materialTiles().cellAt({100, 100});
+    QVERIFY(!undone || undone->empty());
+    QVERIFY(history.canRedo());
+    history.redo();
+    const auto redone = layer->materialTiles().cellAt({100, 100});
+    QVERIFY(redone && !redone->empty());
+    QCOMPARE(layer->tiles().pixel({100, 100}).value(), 0U);
+
+    const auto materialBeforeErase = layer->materialTiles().batchAt({100, 100});
+    QVERIFY(materialBeforeErase && materialBeforeErase->pigmentMass() > 0.0);
+    brush.setErase(true);
+    QVERIFY(view.beginStroke(point.x(), point.y(), 1.0, &brush, QColor(220, 35, 20)));
+    view.endStroke(point.x(), point.y(), 1.0);
+    const auto materialAfterErase = layer->materialTiles().batchAt({100, 100});
+    QVERIFY(materialAfterErase && materialAfterErase->pigmentMass() < materialBeforeErase->pigmentMass());
+    history.undo();
+    const auto materialAfterUndo = layer->materialTiles().batchAt({100, 100});
+    QVERIFY(materialAfterUndo);
+    QVERIFY(std::abs(materialAfterUndo->pigmentMass() - materialBeforeErase->pigmentMass()) < 1e-6);
+}
+
 void TestCanvasViewport::strokeFailureDiagnostics()
 {
     CanvasDocument doc;

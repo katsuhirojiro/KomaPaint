@@ -36,6 +36,7 @@ Design goals, in order:
 | 1 | legacy, read-only | Flat illustration layout: magic + version + illustration body + CRC. Written by KomaPaint ≤ the format milestone. |
 | 2 | read/write | Unified project envelope: magic + version + one typed document + asset section + CRC. Used when all layers have default blend and label. |
 | 3 | read/write | Same envelope, with per-layer blend mode and colour label bytes. Required when either value is non-default. |
+| 4 | read/write | Adds a per-layer sparse material composition table and material-pixel records. Required when material-painted content exists. |
 
 **Extension rule.** Only `.koma` is ever used. The extension is purely a
 convention for the operating system and the file dialogs — serialization
@@ -105,6 +106,39 @@ no label. A document using either non-default value is written as version 3;
 otherwise it is written as version 2. Older builds reject version 3 rather than
 silently discarding metadata.
 
+### Version 4 material data
+
+Version 4 retains the version 3 envelope, layer metadata and digital ARGB
+rectangles. After each layer's digital rectangles it stores a composition table
+and a sparse list of material pixels. Digital pixels and material cells remain
+separate document planes: RGB is never used to reconstruct a paint composition.
+
+The per-layer material records are independent of in-memory tile size:
+
+```
+quint64 composition count (includes empty sentinel at ID 0)
+per composition, in stable local ID order:
+    UTF-8 medium ID
+    quint64 pigment component count
+    per component:
+        UTF-8 pigment ID (empty only for an explicitly unidentified RGB residual)
+        quint32 residual ARGB (opaque RGB only for unidentified residuals; zero for named IDs)
+        double normalized pigment mass fraction
+quint64 material pixel count
+per material pixel, sorted by document y then x:
+    quint64 document x, quint64 document y
+    quint64 composition ID (nonzero, indexing this layer's table)
+    six IEEE-754 floats: pigment mass, water, binder, filler, wetness, consistency
+```
+
+The material pixel coordinates are document-space integers. Reopening may
+retile them using the current build's sparse tile size without changing their
+composition. The composition table is immutable during a store lifetime and
+shared by cells through IDs; the six per-cell values retain quantities and
+medium state. Rendered display pixels are disposable outputs and are not
+serialized as a substitute for these records. Versions 1-3 contain no material
+plane and migrate losslessly as digital-only layers.
+
 ### Version 1 (legacy) layout
 
 ```
@@ -117,19 +151,20 @@ offset  size    field
 
 ## Compatibility and migration
 
-* **Opening.** This build reads version 1, 2 and 3 files
+* **Opening.** This build reads version 1, 2, 3 and 4 files
   transparently. Version 1 files were produced by earlier KomaPaint builds
   and use the same extension, the same magic and the same illustration
   payload; opening them is lossless and changes nothing on disk.
-* **Saving.** Default layer metadata is written as version 2; non-default
-  blend or label metadata requires version 3. Saving a version 1 file
-  migrates it to version 2 or 3 **in place** —
+* **Saving.** Default digital-only layer metadata is written as version 2;
+  non-default blend or label metadata requires version 3; material-painted
+  content requires version 4. Saving an older file migrates it to the required
+  version **in place** —
   the file is never renamed or left in a half-written state (see *Save
   safety* below), and the artwork round-trips exactly.
 * **No competing extensions.** There is no legacy/temporary extension to
   support: `.koma` has been the only native extension since the first
   persisted build. Older files are the version 1 files described here.
-* **Unknown versions.** A file with a version other than 1, 2 or 3 is
+* **Unknown versions.** A file with a version other than 1, 2, 3 or 4 is
   rejected with a clear error before any construction happens. A file that
   uses reserved document kinds (comic page / comic project) or declares a
   non-empty shared asset section is rejected as *"uses features this

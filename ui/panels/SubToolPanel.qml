@@ -84,6 +84,64 @@ Rectangle {
             }
         }
 
+        // ---- Preset discovery. Search and category filtering operate on the
+        // same engine-backed catalog used to apply these configurations.
+        RowLayout {
+            objectName: "subToolFilters"
+            Layout.fillWidth: true
+            Layout.leftMargin: KP.panelInset
+            Layout.rightMargin: KP.gapS
+            Layout.preferredHeight: 34
+            spacing: KP.gapS
+            visible: panel.painting
+
+            KpTextField {
+                id: searchField
+                objectName: "subToolSearch"
+                Layout.fillWidth: true
+                Layout.preferredHeight: KP.controlHeightSmall + 2
+                placeholder: qsTr("Search subtools")
+                text: panel.library.searchText
+                onEdited: function(value) { panel.library.searchText = value }
+            }
+            ComboBox {
+                id: categoryChoice
+                objectName: "subToolCategory"
+                Layout.preferredWidth: 112
+                Layout.preferredHeight: KP.controlHeightSmall + 2
+                model: [qsTr("All categories")].concat(panel.library.categories)
+                currentIndex: panel.library.categoryFilter.length === 0
+                              ? 0 : Math.max(0, model.indexOf(panel.library.categoryFilter))
+                font.pixelSize: KP.fontXS
+                Accessible.name: qsTr("Filter subtools by category")
+                onActivated: function(index) {
+                    panel.library.categoryFilter = index === 0 ? "" : panel.library.categories[index - 1]
+                }
+                contentItem: Text {
+                    leftPadding: KP.gapS
+                    rightPadding: 16
+                    text: categoryChoice.displayText
+                    color: KP.text
+                    font.pixelSize: KP.fontXS
+                    verticalAlignment: Text.AlignVCenter
+                    elide: Text.ElideRight
+                }
+                background: Rectangle {
+                    color: KP.inputBg
+                    border.width: 1
+                    border.color: categoryChoice.activeFocus ? KP.focusRing : KP.border
+                    radius: KP.radiusS
+                }
+                indicator: KpGlyph {
+                    x: categoryChoice.width - width - 4
+                    y: (categoryChoice.height - height) / 2
+                    name: "chevron-down"
+                    size: 10
+                    color: KP.iconNormal
+                }
+            }
+        }
+
         // ---- Presets
         ListView {
             id: list
@@ -100,15 +158,16 @@ Rectangle {
                 id: row
                 required property int index
                 required property var modelData
-                readonly property bool current: index === panel.library.currentIndex
+                readonly property int presetIndex: modelData.index
+                readonly property bool current: presetIndex === panel.library.currentIndex
 
-                objectName: "subTool" + index
+                objectName: "subTool" + presetIndex
                 width: list.width
                 height: panel.rowHeight
                 hoverEnabled: true
                 focusPolicy: Qt.NoFocus
                 Accessible.name: modelData.name
-                onClicked: panel.library.select(index)
+                onClicked: panel.library.select(presetIndex)
 
                 background: Rectangle {
                     color: row.current ? KP.rowSelected
@@ -218,6 +277,19 @@ Rectangle {
                     }
                 }
             }
+        }
+
+        Text {
+            objectName: "subToolNoResults"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: panel.painting && list.count === 0
+            text: qsTr("No subtools match this search.")
+            color: KP.textSubtle
+            font.pixelSize: KP.fontS
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            wrapMode: Text.WordWrap
         }
 
         // ---- Not a painting tool

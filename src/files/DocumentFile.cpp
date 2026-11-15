@@ -19,8 +19,10 @@
 #include <map>
 #include <memory>
 #include <new>
+#include <queue>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace komapaint {
@@ -31,7 +33,7 @@ constexpr qsizetype MagicSize = 9;
 constexpr qsizetype MinFileBytes = 48;
 
 // Versions 1 and 2 share a flat illustration payload. Version 3 extends
-// the v2 envelope with layer metadata; unknown versions are rejected.
+// the v2 layer records with metadata; version 4 adds material cell records.
 
 // ---- little-endian writers ---------------------------------------------------
 
@@ -55,6 +57,25 @@ void putDouble(QByteArray& out, double v)
     static_assert(sizeof(bits) == sizeof(v));
     std::memcpy(&bits, &v, sizeof(bits));
     putU64(out, bits);
+}
+void putFloat(QByteArray& out, float v)
+{
+    quint32 bits = 0;
+    static_assert(sizeof(bits) == sizeof(v));
+    std::memcpy(&bits, &v, sizeof(bits));
+    putU32(out, bits);
+}
+bool putUtf8String(QByteArray& out, const std::string& value)
+{
+    if (value.size() > std::numeric_limits<quint32>::max()
+        || value.size() > static_cast<std::size_t>(std::numeric_limits<qsizetype>::max())) return false;
+    const auto valueSize = static_cast<qsizetype>(value.size());
+    const QString text = QString::fromUtf8(value.data(), valueSize);
+    const QByteArray bytes = text.toUtf8();
+    if (bytes.size() != valueSize || std::memcmp(bytes.constData(), value.data(), value.size()) != 0) return false;
+    putU32(out, static_cast<quint32>(bytes.size()));
+    out.append(bytes);
+    return true;
 }
 bool putUtf8(QByteArray& out, const QString& text, qsizetype maxBytes)
 {
@@ -144,6 +165,13 @@ public:
         std::memcpy(&v, &bits, sizeof(v));
         return true;
     }
+    bool readFloat(float& v)
+    {
+        quint32 bits = 0;
+        if (!readU32(bits)) return false;
+        std::memcpy(&v, &bits, sizeof(v));
+        return true;
+    }
     bool readUtf8(qsizetype maxBytes, QString& out)
     {
         quint32 length = 0;
@@ -186,7 +214,7 @@ public:
         m_pos += size;
         return true;
     }
-    // Offset of the next unread byte (for the v2 document-length record).
+    // Offset of the next unread byte (for the v2-v4 document-length record).
     qsizetype position() const { return m_pos; }
 
 private:
@@ -206,16 +234,22 @@ struct RectRecord {
     quint32 width = 0, height = 0;
     const char* pixels = nullptr; // w*h*4 bytes, little-endian premultiplied ARGB
 };
+struct MaterialPixelRecord {
+    quint64 x = 0, y = 0;
+    material::MaterialCell cell{};
+};
 struct LayerRecord {
     QString name;
     bool visible = true, locked = false;
     double opacity = 1.0;
     quint8 blendMode = 0, colorLabel = 0;
     std::vector<RectRecord> rects;
+    std::vector<material::MaterialComposition> materialCompositions;
+    std::vector<MaterialPixelRecord> materialPixels;
 };
 // The illustration document payload: the exact byte body that existed as
 // "the format" in version 1 and that is embedded inside the version 2
-// project envelope. Shared by the v1 (legacy) reader and the v2 envelope
+// project envelope. Shared by the v1 (legacy) reader and the v2-v4 envelope
 // reader. Note: this build never stores nor reads the tile size; artwork
 // is always document-space rectangles of premultiplied ARGB pixels.
 struct IllustrationPayload {
@@ -281,7 +315,7 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
         record.locked = locked != 0;
         if (!reader.readDouble(record.opacity) || !std::isfinite(record.opacity) || record.opacity < 0.0 || record.opacity > 1.0)
             return fail(QStringLiteral("\"%1\" has an invalid layer opacity.").arg(path));
-        if (version >= DocumentFile::FormatVersion &&
+        if (version >= DocumentFile::LayerMetadataVersion &&
             (!reader.readU8(record.blendMode) || record.blendMode > 3 ||
              !reader.readU8(record.colorLabel) || record.colorLabel > 7))
             return fail(QStringLiteral("\"%1\" has invalid layer metadata.").arg(path));
@@ -322,6 +356,86 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
             rect.pixels = payloadBytes;
             record.rects.push_back(rect);
         }
+        if (version >= DocumentFile::FormatVersion) {
+            quint64 compositionCount = 0;
+            if (!reader.readU64(compositionCount) || compositionCount == 0
+                || compositionCount > static_cast<quint64>(reader.remaining() / 12))
+                return fail(QStringLiteral("\"%1\" has an invalid material composition table.").arg(path));
+            record.materialCompositions.reserve(static_cast<std::size_t>(compositionCount));
+            for (quint64 ci = 0; ci < compositionCount; ++ci) {
+                QString medium;
+                quint64 componentCount = 0;
+                if (!reader.readUtf8(std::numeric_limits<qsizetype>::max(), medium)
+                    || !reader.readU64(componentCount)
+                    || componentCount > static_cast<quint64>(reader.remaining() / 16))
+                    return fail(QStringLiteral("\"%1\" has a truncated material composition.").arg(path));
+                material::MaterialComposition composition;
+                const QByteArray mediumBytes = medium.toUtf8();
+                composition.mediumId.assign(mediumBytes.constData(), static_cast<std::size_t>(mediumBytes.size()));
+                composition.pigments.reserve(static_cast<std::size_t>(componentCount));
+                for (quint64 pi = 0; pi < componentCount; ++pi) {
+                    QString pigmentName;
+                    quint32 residual = 0;
+                    double proportion = 0.0;
+                    if (!reader.readUtf8(std::numeric_limits<qsizetype>::max(), pigmentName)
+                        || !reader.readU32(residual) || !reader.readDouble(proportion)
+                        || !std::isfinite(proportion) || proportion <= 0.0)
+                        return fail(QStringLiteral("\"%1\" has an invalid material pigment component.").arg(path));
+                    const QByteArray pigmentBytes = pigmentName.toUtf8();
+                    std::string pigmentId(pigmentBytes.constData(), static_cast<std::size_t>(pigmentBytes.size()));
+                    if ((pigmentId.empty() && (residual >> 24U) != 0xffU)
+                        || (!pigmentId.empty() && residual != 0))
+                        return fail(QStringLiteral("\"%1\" has an invalid residual pigment identity.").arg(path));
+                    composition.pigments.push_back({std::move(pigmentId), residual, proportion});
+                }
+                if (ci == 0) {
+                    if (!composition.mediumId.empty() || !composition.pigments.empty())
+                        return fail(QStringLiteral("\"%1\" has an invalid material composition sentinel.").arg(path));
+                } else {
+                    double total = 0.0;
+                    for (const auto& component : composition.pigments) total += component.mass;
+                    if (composition.mediumId.empty()
+                        || (!composition.pigments.empty() && (!std::isfinite(total) || std::abs(total - 1.0) > 1e-9)))
+                        return fail(QStringLiteral("\"%1\" has a non-normalized material composition.").arg(path));
+                }
+                record.materialCompositions.push_back(std::move(composition));
+            }
+            quint64 materialPixelCount = 0;
+            if (!reader.readU64(materialPixelCount) || materialPixelCount > static_cast<quint64>(reader.remaining() / 48))
+                return fail(QStringLiteral("\"%1\" has an invalid material pixel count.").arg(path));
+            record.materialPixels.reserve(static_cast<std::size_t>(materialPixelCount));
+            std::pair<quint64, quint64> previous{};
+            bool firstMaterialPixel = true;
+            for (quint64 mi = 0; mi < materialPixelCount; ++mi) {
+                MaterialPixelRecord pixel;
+                quint64 compositionId = 0;
+                if (!reader.readU64(pixel.x) || !reader.readU64(pixel.y) || !reader.readU64(compositionId)
+                    || compositionId == 0 || compositionId >= compositionCount
+                    || !reader.readFloat(pixel.cell.pigmentMass) || !reader.readFloat(pixel.cell.water)
+                    || !reader.readFloat(pixel.cell.binder) || !reader.readFloat(pixel.cell.filler)
+                    || !reader.readFloat(pixel.cell.wetness) || !reader.readFloat(pixel.cell.consistency))
+                    return fail(QStringLiteral("\"%1\" has a truncated material pixel.").arg(path));
+                if (pixel.x >= docWidth || pixel.y >= docHeight
+                    || !std::isfinite(pixel.cell.pigmentMass) || pixel.cell.pigmentMass < 0.0F
+                    || !std::isfinite(pixel.cell.water) || pixel.cell.water < 0.0F
+                    || !std::isfinite(pixel.cell.binder) || pixel.cell.binder < 0.0F
+                    || !std::isfinite(pixel.cell.filler) || pixel.cell.filler < 0.0F
+                    || !std::isfinite(pixel.cell.wetness) || pixel.cell.wetness < 0.0F || pixel.cell.wetness > 1.0F
+                    || !std::isfinite(pixel.cell.consistency) || pixel.cell.consistency < 0.0F || pixel.cell.consistency > 1.0F
+                    || (pixel.cell.pigmentMass == 0.0F && pixel.cell.water == 0.0F
+                        && pixel.cell.binder == 0.0F && pixel.cell.filler == 0.0F)
+                    || (record.materialCompositions[static_cast<std::size_t>(compositionId)].pigments.empty()
+                        && pixel.cell.pigmentMass != 0.0F))
+                    return fail(QStringLiteral("\"%1\" has an invalid material pixel.").arg(path));
+                pixel.cell.compositionId = static_cast<std::size_t>(compositionId);
+                const std::pair<quint64, quint64> position{pixel.y, pixel.x};
+                if (!firstMaterialPixel && position <= previous)
+                    return fail(QStringLiteral("\"%1\" has duplicate or unsorted material pixels.").arg(path));
+                previous = position;
+                firstMaterialPixel = false;
+                record.materialPixels.push_back(pixel);
+            }
+        }
         records.push_back(std::move(record));
     }
     if (reader.remaining() != 0)
@@ -339,7 +453,7 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
 }
 
 // Serializes the illustration document body exactly as a v1 file stores it
-// (and as a v2 illustration payload stores it). Returns false only on
+// (and as the digital portion of a v2-v4 illustration payload stores it). Returns false only on
 // internal inconsistency (which the caller must treat as a save failure).
 bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, QByteArray* out, QString* error)
 {
@@ -387,7 +501,7 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
         putU8(buffer, layer->isVisible() ? 1 : 0);
         putU8(buffer, layer->isLocked() ? 1 : 0);
         putDouble(buffer, layer->opacity());
-        if (version >= DocumentFile::FormatVersion) {
+        if (version >= DocumentFile::LayerMetadataVersion) {
             putU8(buffer, static_cast<quint8>(layer->blendMode()));
             putU8(buffer, static_cast<quint8>(layer->colorLabel()));
         }
@@ -429,6 +543,119 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
             if (!anyNonZero)
                 return fail(QStringLiteral("Internal error: an empty tile was reported as present."));
         }
+        if (version >= DocumentFile::FormatVersion) {
+            const auto& materialStore = layer->materialTiles();
+            const auto& compositions = materialStore.compositions();
+            putU64(buffer, static_cast<quint64>(compositions.size()));
+            for (std::size_t id = 0; id < compositions.size(); ++id) {
+                const auto& composition = compositions[id];
+                if ((id == 0 && (!composition.mediumId.empty() || !composition.pigments.empty()))
+                    || (id != 0 && composition.mediumId.empty()))
+                    return fail(QStringLiteral("A layer has an invalid material composition table. The file was not changed."));
+                if (!putUtf8String(buffer, composition.mediumId))
+                    return fail(QStringLiteral("A material medium identifier is not valid UTF-8. The file was not changed."));
+                putU64(buffer, static_cast<quint64>(composition.pigments.size()));
+                double proportionSum = 0.0;
+                for (const auto& pigment : composition.pigments) {
+                    if (!std::isfinite(pigment.mass) || pigment.mass <= 0.0
+                        || (pigment.pigmentId.empty() && (pigment.residualArgb >> 24U) != 0xffU)
+                        || (!pigment.pigmentId.empty() && pigment.residualArgb != 0))
+                        return fail(QStringLiteral("A layer contains invalid pigment composition data. The file was not changed."));
+                    proportionSum += pigment.mass;
+                    if (!putUtf8String(buffer, pigment.pigmentId))
+                        return fail(QStringLiteral("A pigment identifier is not valid UTF-8. The file was not changed."));
+                    putU32(buffer, pigment.residualArgb);
+                    putDouble(buffer, pigment.mass);
+                }
+                if (!composition.pigments.empty()
+                    && (!std::isfinite(proportionSum) || std::abs(proportionSum - 1.0) > 1e-9))
+                    return fail(QStringLiteral("A layer contains a non-normalized pigment composition. The file was not changed."));
+            }
+
+            std::vector<TilePoint> materialPoints = materialStore.allocatedTilePoints();
+            std::sort(materialPoints.begin(), materialPoints.end(), [](TilePoint a, TilePoint b) {
+                return a.y < b.y || (a.y == b.y && a.x < b.x);
+            });
+            quint64 materialPixelCount = 0;
+            for (TilePoint tile : materialPoints) {
+                const auto entries = materialStore.tileEntries(tile);
+                if (entries.size() > std::numeric_limits<quint64>::max() - materialPixelCount)
+                    return fail(QStringLiteral("The material content is too large to save."));
+                materialPixelCount += static_cast<quint64>(entries.size());
+            }
+            const auto& materialGeometry = materialStore.geometry();
+            if (materialGeometry.width() != geometry.width() || materialGeometry.height() != geometry.height())
+                return fail(QStringLiteral("A material layer has invalid geometry. The file was not changed."));
+            struct MaterialCursor {
+                quint64 x = 0, y = 0;
+                std::size_t tileIndex = 0, entryIndex = 0;
+            };
+            struct LaterMaterialPixel {
+                bool operator()(const MaterialCursor& a, const MaterialCursor& b) const noexcept
+                {
+                    return a.y != b.y ? a.y > b.y : a.x > b.x;
+                }
+            };
+            std::priority_queue<MaterialCursor, std::vector<MaterialCursor>, LaterMaterialPixel> ordered;
+            const auto cursorFor = [&](std::size_t tileIndex, std::size_t entryIndex) {
+                const TilePoint tile = materialPoints[tileIndex];
+                const auto entries = materialStore.tileEntries(tile);
+                const auto local = entries[entryIndex].localIndex;
+                const auto tileSize = static_cast<std::size_t>(materialGeometry.tileSize());
+                const auto x = tile.x * materialGeometry.tileSize() + static_cast<std::int64_t>(local % tileSize);
+                const auto y = tile.y * materialGeometry.tileSize() + static_cast<std::int64_t>(local / tileSize);
+                return MaterialCursor{static_cast<quint64>(x), static_cast<quint64>(y), tileIndex, entryIndex};
+            };
+            // Merge each tile's locally sorted cells into document y/x order.
+            // This avoids a second allocation proportional to every material
+            // pixel when saving large sparse artwork.
+            for (std::size_t tileIndex = 0; tileIndex < materialPoints.size(); ++tileIndex) {
+                if (!materialStore.tileEntries(materialPoints[tileIndex]).empty())
+                    ordered.push(cursorFor(tileIndex, 0));
+            }
+            putU64(buffer, materialPixelCount);
+            quint64 written = 0;
+            quint64 previousX = 0, previousY = 0;
+            bool first = true;
+            while (!ordered.empty()) {
+                const MaterialCursor item = ordered.top();
+                ordered.pop();
+                const TilePoint tile = materialPoints[item.tileIndex];
+                const auto entries = materialStore.tileEntries(tile);
+                const auto& cell = entries[item.entryIndex].cell;
+                if (item.x >= static_cast<quint64>(materialGeometry.width())
+                    || item.y >= static_cast<quint64>(materialGeometry.height())
+                    || cell.compositionId == 0 || cell.compositionId >= compositions.size()
+                    || !std::isfinite(cell.pigmentMass) || cell.pigmentMass < 0.0F
+                    || !std::isfinite(cell.water) || cell.water < 0.0F
+                    || !std::isfinite(cell.binder) || cell.binder < 0.0F
+                    || !std::isfinite(cell.filler) || cell.filler < 0.0F
+                    || !std::isfinite(cell.wetness) || cell.wetness < 0.0F || cell.wetness > 1.0F
+                    || !std::isfinite(cell.consistency) || cell.consistency < 0.0F || cell.consistency > 1.0F
+                    || (!first && (item.y < previousY || (item.y == previousY && item.x <= previousX))))
+                    return fail(QStringLiteral("A layer contains invalid or unordered material pixels. The file was not changed."));
+                constexpr quint64 pixelRecordBytes = 48;
+                if (static_cast<quint64>(buffer.size()) > DocumentFile::MaxFileBytes - 32 - pixelRecordBytes)
+                    return fail(QStringLiteral("The material content is too large for the native file format. The file was not changed."));
+                putU64(buffer, item.x);
+                putU64(buffer, item.y);
+                putU64(buffer, static_cast<quint64>(cell.compositionId));
+                putFloat(buffer, cell.pigmentMass);
+                putFloat(buffer, cell.water);
+                putFloat(buffer, cell.binder);
+                putFloat(buffer, cell.filler);
+                putFloat(buffer, cell.wetness);
+                putFloat(buffer, cell.consistency);
+                ++written;
+                previousX = item.x;
+                previousY = item.y;
+                first = false;
+                const std::size_t next = item.entryIndex + 1;
+                if (next < entries.size()) ordered.push(cursorFor(item.tileIndex, next));
+            }
+            if (written != materialPixelCount)
+                return fail(QStringLiteral("The material content changed while saving. The file was not changed."));
+        }
     }
     if (static_cast<quint64>(buffer.size()) > DocumentFile::MaxFileBytes - 32)
         return fail(QStringLiteral("The document is too large for the native file format. The file was not changed."));
@@ -436,7 +663,7 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
 }
 
 // Builds the detached document from a validated payload. Shared by the v1
-// and v2 readers. Returns nullptr only if the restored artwork exceeds the
+// and v2-v4 readers. Returns nullptr only if the restored artwork exceeds the
 // memory limit or cannot be restored.
 CanvasDocument* buildDocument(const IllustrationPayload& payload, const QString& path, QString* error)
 {
@@ -464,8 +691,7 @@ CanvasDocument* buildDocument(const IllustrationPayload& payload, const QString&
         layer->setOpacity(record.opacity);
         layer->setBlendMode(record.blendMode);
         layer->setColorLabel(record.colorLabel);
-        if (record.rects.empty()) continue;
-
+        if (!record.rects.empty()) {
         // Re-tile the stored document-space rectangles onto this build's tile
         // geometry. The file format never stores tile size, so a file written
         // by any KomaPaint build loads identically everywhere.
@@ -548,6 +774,31 @@ CanvasDocument* buildDocument(const IllustrationPayload& payload, const QString&
         }
         if (!snapshots.empty() && store.restoreTiles(snapshots) != SparseTileStore::WriteResult::Changed)
             return fail(QStringLiteral("The artwork in \"%1\" exceeds the memory limit or cannot be restored.").arg(path));
+        }
+
+        if (!record.materialCompositions.empty()) {
+            auto& materialStore = layer->materialTiles();
+            if (!materialStore.importCompositions(record.materialCompositions))
+                return fail(QStringLiteral("The material composition data in \"%1\" exceeds available memory or is invalid.").arg(path));
+            const auto& geometry = materialStore.geometry();
+            std::map<TilePoint, std::vector<material::MaterialEntry>, TilePointLess> stagedMaterial;
+            for (const auto& pixel : record.materialPixels) {
+                const auto address = geometry.address({static_cast<std::int64_t>(pixel.x),
+                                                       static_cast<std::int64_t>(pixel.y)});
+                if (!address) return fail(QStringLiteral("The material content in \"%1\" is out of bounds.").arg(path));
+                const auto localIndex = static_cast<std::size_t>(address->local.y)
+                    * static_cast<std::size_t>(geometry.tileSize())
+                    + static_cast<std::size_t>(address->local.x);
+                stagedMaterial[address->tile].push_back({localIndex, pixel.cell});
+            }
+            std::vector<material::MaterialTileSnapshot> materialSnapshots;
+            materialSnapshots.reserve(stagedMaterial.size());
+            for (auto& [tile, entries] : stagedMaterial)
+                materialSnapshots.push_back({tile, std::move(entries)});
+            if (!materialSnapshots.empty()
+                && materialStore.restoreTiles(materialSnapshots) != material::MaterialTileStore::Result::Changed)
+                return fail(QStringLiteral("The material content in \"%1\" exceeds available memory or cannot be restored.").arg(path));
+        }
     }
     document->layers()->setActiveLayerIndex(static_cast<int>(payload.activeLayer));
     document->setTitle(payload.title);
@@ -579,10 +830,10 @@ bool DocumentFile::save(const CanvasDocument& document, const QString& path, QSt
     quint16 writeVersion = FlatEnvelopeVersion;
     for (int row = 0; row < document.layers()->rowCount(); ++row) {
         const auto* layer = document.layers()->layerAt(row);
-        if (layer->blendMode() != 0 || layer->colorLabel() != 0) {
+        if (layer->blendMode() != 0 || layer->colorLabel() != 0)
+            writeVersion = std::max(writeVersion, LayerMetadataVersion);
+        if (layer->materialTiles().allocatedTiles() != 0)
             writeVersion = FormatVersion;
-            break;
-        }
     }
     QByteArray payload;
     payload.reserve(1024 * 1024);
@@ -604,8 +855,8 @@ bool DocumentFile::save(const CanvasDocument& document, const QString& path, QSt
         return false;
     };
 
-    // Version 2/3 envelope: one document, empty asset section and CRC.
-    // Version 3 is selected only when extended metadata is needed.
+    // Version 2-4 envelope: one document, empty asset section and CRC.
+    // Version 3 adds layer metadata; version 4 adds authoritative materials.
     QByteArray header;
     header.reserve(64);
     header.append(Magic, MagicSize);
@@ -678,8 +929,8 @@ CanvasDocument* DocumentFile::open(const QString& path, QString* error) try
         const qsizetype payloadBegin = MagicSize + 2;
         if (!parseIllustrationPayload(data, payloadBegin, contentEnd, version, path, &payload, error))
             return nullptr;
-    } else if (version == FlatEnvelopeVersion || version == FormatVersion) {
-        // Version 2/3: unified project envelope.
+    } else if (version == FlatEnvelopeVersion || version == LayerMetadataVersion || version == FormatVersion) {
+        // Versions 2-4: unified project envelope.
         quint32 documentCount = 0;
         if (!head.readU32(documentCount)) return fail(QStringLiteral("\"%1\" is truncated.").arg(path));
         if (documentCount == 0 || documentCount > MaxDocuments)

@@ -1,49 +1,105 @@
 #include "SubToolLibrary.h"
 #include "BrushSettings.h"
+
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QResource>
 #include <QVariantMap>
+
+#include <cmath>
+
+// This catalog is compiled into the application library, not maintained as a
+// second set of presentation-only presets in QML or C++.
+static void initializeBrushPresetResources()
+{
+    Q_INIT_RESOURCE(brush_presets);
+}
 
 namespace komapaint {
 namespace {
-using V = SubToolLibrary::Values;
-// size, opacity, flow (density), spacing, hardness, stabilization, textured.
-// Every value lies inside the range BrushSettings accepts.
-V values(int size, int opacity, int flow, int spacing, int hardness, int stabilization, bool textured = false)
+
+bool readInteger(const QJsonObject& object, const char* key, int minimum, int maximum, int* result)
 {
-    return V{size, opacity, flow, spacing, hardness, stabilization, textured};
-}
+    const QJsonValue value = object.value(QLatin1String(key));
+    if (!value.isDouble()) return false;
+    const double number = value.toDouble();
+    if (!std::isfinite(number) || std::floor(number) != number || number < minimum || number > maximum)
+        return false;
+    *result = static_cast<int>(number);
+    return true;
 }
 
-SubToolLibrary::SubToolLibrary(BrushSettings* brush, QObject* parent) : QObject(parent), m_brush(brush)
+bool parseValues(const QJsonObject& object, SubToolLibrary::Values* values)
 {
-    auto add = [this](const char* tool, bool erase, std::initializer_list<std::pair<const char*, V>> list) {
-        Group group; group.tool = QString::fromLatin1(tool); group.erase = erase;
-        for (const auto& [name, v] : list) group.entries.push_back({tr(name), v, v});
-        m_groups.push_back(std::move(group));
-    };
-    add("pen", false, {
-        {QT_TR_NOOP("Fine pen"),      values(4, 100, 100, 5, 100, 20)},
-        {QT_TR_NOOP("Marker"),        values(18, 100, 100, 8, 100, 10)},
-        {QT_TR_NOOP("Rough pen"),     values(8, 100, 90, 8, 100, 10, true)},
-    });
-    add("pencil", false, {
-        {QT_TR_NOOP("Sketch pencil"), values(6, 90, 70, 10, 100, 0, true)},
-        {QT_TR_NOOP("Soft pencil"),   values(12, 70, 45, 10, 60, 0, true)},
-    });
-    add("brush", false, {
-        // The first brush equals the BrushSettings defaults, so a fresh
-        // workspace paints exactly as it did before sub tools existed.
-        {QT_TR_NOOP("Round brush"),   values(16, 100, 100, 15, 100, 0)},
-        {QT_TR_NOOP("Soft brush"),    values(40, 100, 35, 10, 30, 0)},
-        {QT_TR_NOOP("Dry brush"),     values(32, 90, 55, 15, 90, 0, true)},
-    });
-    add("airbrush", false, {
-        {QT_TR_NOOP("Soft airbrush"), values(90, 100, 8, 8, 0, 0)},
-        {QT_TR_NOOP("Fine spray"),    values(36, 100, 14, 8, 10, 0, true)},
-    });
-    add("eraser", true, {
-        {QT_TR_NOOP("Hard eraser"),   values(24, 100, 100, 10, 100, 0)},
-        {QT_TR_NOOP("Soft eraser"),   values(60, 100, 35, 10, 20, 0)},
-    });
+    if (!values) return false;
+    auto& v = *values;
+    if (!readInteger(object, "size", BrushSettings::MinSize, BrushSettings::MaxSize, &v.size)
+        || !readInteger(object, "opacity", 0, 100, &v.opacity)
+        || !readInteger(object, "flow", 0, 100, &v.flow)
+        || !readInteger(object, "spacing", BrushSettings::MinSpacing, BrushSettings::MaxSpacing, &v.spacing)
+        || !readInteger(object, "hardness", 0, 100, &v.hardness)
+        || !readInteger(object, "stabilization", 0, 100, &v.stabilization)
+        || !object.value(QStringLiteral("textured")).isBool()) return false;
+    v.textured = object.value(QStringLiteral("textured")).toBool();
+    const QJsonValue traditionalMedia = object.value(QStringLiteral("traditionalMedia"));
+    if (!traditionalMedia.isUndefined() && !traditionalMedia.isBool()) return false;
+    v.traditionalMedia = traditionalMedia.toBool(false);
+    return true;
+}
+
+} // namespace
+
+SubToolLibrary::SubToolLibrary(BrushSettings* brush, QObject* parent)
+    : QObject(parent), m_brush(brush)
+{
+    initializeBrushPresetResources();
+    QFile file(QStringLiteral(":/brushes/presets.json"));
+    if (!file.open(QIODevice::ReadOnly)) {
+        m_loadError = QStringLiteral("The bundled brush preset catalog could not be opened.");
+    } else {
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+        const QJsonObject root = document.object();
+        const QJsonArray groups = root.value(QStringLiteral("groups")).toArray();
+        if (parseError.error != QJsonParseError::NoError || !document.isObject()
+            || root.value(QStringLiteral("version")).toInt(-1) != 1 || groups.isEmpty()) {
+            m_loadError = QStringLiteral("The bundled brush preset catalog is invalid.");
+        } else {
+            for (const QJsonValue& groupValue : groups) {
+                const QJsonObject object = groupValue.toObject();
+                const QString tool = object.value(QStringLiteral("tool")).toString();
+                const QJsonArray presets = object.value(QStringLiteral("presets")).toArray();
+                if (tool.isEmpty() || !object.value(QStringLiteral("erase")).isBool() || presets.isEmpty()
+                    || groupIndex(tool) >= 0) {
+                    m_loadError = QStringLiteral("The bundled brush preset catalog contains an invalid tool group.");
+                    m_groups.clear();
+                    break;
+                }
+                Group group;
+                group.tool = tool;
+                group.erase = object.value(QStringLiteral("erase")).toBool();
+                for (const QJsonValue& presetValue : presets) {
+                    const QJsonObject preset = presetValue.toObject();
+                    const QString name = preset.value(QStringLiteral("name")).toString().trimmed();
+                    const QString category = preset.value(QStringLiteral("category")).toString().trimmed();
+                    Values values;
+                    if (!presetValue.isObject() || name.isEmpty() || category.isEmpty()
+                        || !parseValues(preset, &values)) {
+                        m_loadError = QStringLiteral("The bundled brush preset catalog contains an invalid preset.");
+                        m_groups.clear();
+                        break;
+                    }
+                    group.entries.push_back({name, category, values, values});
+                }
+                if (!m_loadError.isEmpty()) break;
+                m_groups.push_back(std::move(group));
+            }
+        }
+    }
+    if (!m_loadError.isEmpty()) qWarning("[KomaPaint] %s", qUtf8Printable(m_loadError));
+
     connect(m_brush, &BrushSettings::changed, this, [this] {
         if (m_applying || m_group < 0) return;
         capture();
@@ -72,11 +128,43 @@ void SubToolLibrary::setTool(const QString& tool)
     if (tool == m_tool) return;
     m_tool = tool;
     m_group = groupIndex(tool);
-    // A tool that does not paint leaves the brush settings as they are.
+    if (!m_categoryFilter.isEmpty() && !categories().contains(m_categoryFilter)) {
+        m_categoryFilter.clear();
+        emit filterChanged();
+    }
+    // A tool that does not paint leaves the current engine settings alone.
     if (m_group >= 0) apply();
     emit toolChanged();
     emit subToolsChanged();
     emit currentChanged();
+}
+
+void SubToolLibrary::setSearchText(const QString& text)
+{
+    const QString normalized = text.trimmed();
+    if (m_searchText == normalized) return;
+    m_searchText = normalized;
+    emit filterChanged();
+    emit subToolsChanged();
+}
+
+void SubToolLibrary::setCategoryFilter(const QString& category)
+{
+    const QString normalized = category.trimmed();
+    const QString accepted = categories().contains(normalized) ? normalized : QString();
+    if (m_categoryFilter == accepted) return;
+    m_categoryFilter = accepted;
+    emit filterChanged();
+    emit subToolsChanged();
+}
+
+QStringList SubToolLibrary::categories() const
+{
+    QStringList result;
+    if (m_group < 0) return result;
+    for (const auto& entry : m_groups[static_cast<std::size_t>(m_group)].entries)
+        if (!result.contains(entry.category)) result.append(entry.category);
+    return result;
 }
 
 void SubToolLibrary::select(int index)
@@ -103,42 +191,53 @@ void SubToolLibrary::resetCurrent()
 
 void SubToolLibrary::apply()
 {
+    if (m_group < 0) return;
     const auto& group = m_groups[static_cast<std::size_t>(m_group)];
-    const V v = group.entries[static_cast<std::size_t>(group.current)].current;
+    const Values values = group.entries[static_cast<std::size_t>(group.current)].current;
     m_applying = true;
-    m_brush->setSize(v.size);
-    m_brush->setOpacity(v.opacity);
-    m_brush->setFlow(v.flow);
-    m_brush->setSpacing(v.spacing);
-    m_brush->setHardness(v.hardness);
-    m_brush->setStabilization(v.stabilization);
-    m_brush->setTextured(v.textured);
+    m_brush->setSize(values.size);
+    m_brush->setOpacity(values.opacity);
+    m_brush->setFlow(values.flow);
+    m_brush->setSpacing(values.spacing);
+    m_brush->setHardness(values.hardness);
+    m_brush->setStabilization(values.stabilization);
+    m_brush->setTextured(values.textured);
+    m_brush->setTraditionalMedia(values.traditionalMedia);
     m_brush->setErase(group.erase);
     m_applying = false;
 }
 
 void SubToolLibrary::capture()
 {
+    if (m_group < 0) return;
     auto& group = m_groups[static_cast<std::size_t>(m_group)];
-    auto& v = group.entries[static_cast<std::size_t>(group.current)].current;
-    v.size = m_brush->size();
-    v.opacity = m_brush->opacity();
-    v.flow = m_brush->flow();
-    v.spacing = m_brush->spacing();
-    v.hardness = m_brush->hardness();
-    v.stabilization = m_brush->stabilization();
-    v.textured = m_brush->textured();
+    auto& values = group.entries[static_cast<std::size_t>(group.current)].current;
+    values.size = m_brush->size();
+    values.opacity = m_brush->opacity();
+    values.flow = m_brush->flow();
+    values.spacing = m_brush->spacing();
+    values.hardness = m_brush->hardness();
+    values.stabilization = m_brush->stabilization();
+    values.textured = m_brush->textured();
+    values.traditionalMedia = m_brush->traditionalMedia();
 }
 
 QVariantList SubToolLibrary::subTools() const
 {
     QVariantList list;
     if (m_group < 0) return list;
-    for (const auto& entry : m_groups[static_cast<std::size_t>(m_group)].entries) {
+    const auto& entries = m_groups[static_cast<std::size_t>(m_group)].entries;
+    for (std::size_t index = 0; index < entries.size(); ++index) {
+        const auto& entry = entries[index];
+        if (!m_categoryFilter.isEmpty() && entry.category != m_categoryFilter) continue;
+        if (!m_searchText.isEmpty() && !entry.name.contains(m_searchText, Qt::CaseInsensitive)
+            && !entry.category.contains(m_searchText, Qt::CaseInsensitive)) continue;
         QVariantMap item;
+        item.insert(QStringLiteral("index"), static_cast<int>(index));
         item.insert(QStringLiteral("name"), entry.name);
-        // Everything the preset's stroke preview paints with, so a row is
-        // drawn from the real settings instead of guessed defaults.
+        item.insert(QStringLiteral("category"), entry.category);
+        // These values are the exact settings applied to BrushSettings and
+        // consumed by the rasterizer, not values invented by the panel.
         item.insert(QStringLiteral("size"), entry.current.size);
         item.insert(QStringLiteral("opacity"), entry.current.opacity);
         item.insert(QStringLiteral("flow"), entry.current.flow);
@@ -171,4 +270,5 @@ bool SubToolLibrary::isModified() const
     const auto& entry = group.entries[static_cast<std::size_t>(group.current)];
     return !(entry.current == entry.defaults);
 }
+
 } // namespace komapaint

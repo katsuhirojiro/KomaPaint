@@ -10,6 +10,7 @@ ColorWheel 1.0 ColorWheel.qml
 PropertySlider 1.0 PropertySlider.qml
 SegmentedChoice 1.0 SegmentedChoice.qml
 PreferencesDialog 1.0 PreferencesDialog.qml
+KomaSettingsDialog 1.0 KomaSettingsDialog.qml
 KpGlyph 1.0 KpGlyph.qml
 KpButton 1.0 KpButton.qml
 KpNumberField 1.0 KpNumberField.qml

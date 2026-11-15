@@ -21,6 +21,7 @@ add_library(komapaint_app STATIC
     SessionStore.h
     SubToolLibrary.cpp
     SubToolLibrary.h
+    ../../resources/brush_presets.qrc
     WorkspaceState.cpp
     WorkspaceState.h
 )

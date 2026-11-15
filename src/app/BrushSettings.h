@@ -17,6 +17,7 @@ class BrushSettings : public QObject {
     Q_PROPERTY(int stabilization READ stabilization WRITE setStabilization NOTIFY changed)
     // True while an eraser is selected: strokes remove paint from the layer.
     Q_PROPERTY(bool erase READ erase WRITE setErase NOTIFY changed)
+    Q_PROPERTY(bool traditionalMedia READ traditionalMedia WRITE setTraditionalMedia NOTIFY changed)
     Q_PROPERTY(int minimumSize READ minimumSize CONSTANT)
     Q_PROPERTY(int maximumSize READ maximumSize CONSTANT)
     Q_PROPERTY(int minimumSpacing READ minimumSpacing CONSTANT)
@@ -33,6 +34,7 @@ public:
     int hardness() const { return m_hardness; }
     int stabilization() const { return m_stabilization; }
     bool erase() const { return m_erase; }
+    bool traditionalMedia() const { return m_traditionalMedia; }
     int minimumSize() const { return MinSize; }
     int maximumSize() const { return MaxSize; }
     int minimumSpacing() const { return MinSpacing; }
@@ -45,6 +47,7 @@ public:
     void setHardness(int v) { v = qBound(0, v, 100); if (m_hardness != v) { m_hardness = v; emit changed(); } }
     void setStabilization(int v) { v = qBound(0, v, 100); if (m_stabilization != v) { m_stabilization = v; emit changed(); } }
     void setErase(bool v) { if (m_erase != v) { m_erase = v; emit changed(); } }
+    void setTraditionalMedia(bool v) { if (m_traditionalMedia != v) { m_traditionalMedia = v; emit changed(); } }
 signals:
     void changed();
 private:
@@ -52,5 +55,6 @@ private:
     int m_hardness = 100, m_stabilization = 0;
     bool m_textured = false;
     bool m_erase = false;
+    bool m_traditionalMedia = false;
 };
 }

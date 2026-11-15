@@ -8,8 +8,8 @@
 
 namespace komapaint {
 
-// Model that lists the layers of the active document. In Phase 1 it ships
-// pre-populated with a single default layer so the UI has something to show.
+// Model that lists the layers of a document. Document-owned models start with
+// one raster layer; the workspace's detached empty-state model starts empty.
 
 class LayerModel : public QAbstractListModel
 {
@@ -21,7 +21,7 @@ class LayerModel : public QAbstractListModel
 public:
     enum Roles { NameRole = Qt::UserRole + 1, VisibleRole, LockedRole, OpacityRole, IndexRole, BlendModeRole, ColorLabelRole };
 
-    explicit LayerModel(QObject* parent = nullptr);
+    explicit LayerModel(QObject* parent = nullptr, bool createDefaultLayer = true);
 
     int      rowCount(const QModelIndex& parent = {}) const override;
     QVariant data(const QModelIndex& index, int role) const override;
@@ -46,7 +46,7 @@ private:
     std::shared_ptr<DocumentMemoryBudget> m_documentBudget = std::make_shared<DocumentMemoryBudget>();
     QSize m_canvasSize{1600, 1200};
     QList<Layer*> m_layers;
-    int           m_active = 0;
+    int           m_active = -1;
 };
 
 }  // namespace komapaint

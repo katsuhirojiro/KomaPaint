@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "groups": [
+    {
+      "tool": "pen",
+      "erase": false,
+      "presets": [
+        { "name": "Fine pen", "category": "Inking", "size": 4, "opacity": 100, "flow": 100, "spacing": 5, "hardness": 100, "stabilization": 20, "textured": false },
+        { "name": "Marker", "category": "Inking", "size": 18, "opacity": 100, "flow": 100, "spacing": 8, "hardness": 100, "stabilization": 10, "textured": false },
+        { "name": "Rough pen", "category": "Inking", "size": 8, "opacity": 100, "flow": 90, "spacing": 8, "hardness": 100, "stabilization": 10, "textured": true }
+      ]
+    },
+    {
+      "tool": "pencil",
+      "erase": false,
+      "presets": [
+        { "name": "Sketch pencil", "category": "Sketching", "size": 6, "opacity": 90, "flow": 70, "spacing": 10, "hardness": 100, "stabilization": 0, "textured": true },
+        { "name": "Soft pencil", "category": "Sketching", "size": 12, "opacity": 70, "flow": 45, "spacing": 10, "hardness": 60, "stabilization": 0, "textured": true }
+      ]
+    },
+    {
+      "tool": "brush",
+      "erase": false,
+      "presets": [
+        { "name": "Round brush", "category": "Paint", "size": 16, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 100, "stabilization": 0, "textured": false },
+        { "name": "Soft brush", "category": "Paint", "size": 40, "opacity": 100, "flow": 35, "spacing": 10, "hardness": 30, "stabilization": 0, "textured": false },
+        { "name": "Dry brush", "category": "Paint", "size": 32, "opacity": 90, "flow": 55, "spacing": 15, "hardness": 90, "stabilization": 0, "textured": true }
+      ]
+    },
+    {
+      "tool": "airbrush",
+      "erase": false,
+      "presets": [
+        { "name": "Soft airbrush", "category": "Airbrush", "size": 90, "opacity": 100, "flow": 8, "spacing": 8, "hardness": 0, "stabilization": 0, "textured": false },
+        { "name": "Fine spray", "category": "Airbrush", "size": 36, "opacity": 100, "flow": 14, "spacing": 8, "hardness": 10, "stabilization": 0, "textured": true }
+      ]
+    },
+    {
+      "tool": "eraser",
+      "erase": true,
+      "presets": [
+        { "name": "Hard eraser", "category": "Eraser", "size": 24, "opacity": 100, "flow": 100, "spacing": 10, "hardness": 100, "stabilization": 0, "textured": false },
+        { "name": "Soft eraser", "category": "Eraser", "size": 60, "opacity": 100, "flow": 35, "spacing": 10, "hardness": 20, "stabilization": 0, "textured": false }
+      ]
+    }
+  ]
+}

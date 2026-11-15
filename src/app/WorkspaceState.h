@@ -60,6 +60,7 @@ class WorkspaceState : public QObject
     Q_PROPERTY(QVariantList recoveryEntries READ recoveryEntries NOTIFY recoveryEntriesChanged)
     Q_PROPERTY(QString         currentFile READ currentFile NOTIFY currentFileChanged)
     Q_PROPERTY(QString         activeTool READ activeTool WRITE setActiveTool NOTIFY activeToolChanged)
+    Q_PROPERTY(QString         defaultTool READ defaultTool WRITE setDefaultTool NOTIFY defaultToolChanged)
     Q_PROPERTY(qreal           zoom      READ zoom      WRITE setZoom      NOTIFY zoomChanged)
 
 public:
@@ -68,12 +69,13 @@ public:
     BrushSettings* brush() const { return m_brush; }
     SubToolLibrary* subTools() const { return m_subTools; }
     CanvasDocument* document() const { return m_document; }
-    LayerModel*     layers()   const { return m_document->layers(); }
+    LayerModel*     layers()   const { return m_document ? m_document->layers() : m_emptyLayers; }
     TimelineState*  timeline() const { return m_timeline; }
     ColorPalette*   colors()   const { return m_colors; }
     UndoStack*      history()  const { return m_history; }
 
     QString activeTool() const { return m_activeTool; }
+    QString defaultTool() const { return m_defaultTool; }
     qreal   zoom()       const { return m_zoom; }
     QString currentFile() const { return m_currentFile; }
     QVariantList projectTabs() const;
@@ -188,11 +190,13 @@ public:
 
 public slots:
     void setActiveTool(const QString& tool);
+    void setDefaultTool(const QString& tool);
     void setZoom(qreal z);
 
 signals:
     void documentChanged();
     void activeToolChanged(const QString& tool);
+    void defaultToolChanged(const QString& tool);
     void zoomChanged(qreal zoom);
     void fitRequested();
     void currentFileChanged();
@@ -238,8 +242,8 @@ private:
     Tab makeTab(CanvasDocument* document, UndoStack* history, const QString& path) const;
     int tabIndexForPath(const QString& path) const;
     int tabIndexForId(const QUuid& id) const;
-    bool isPristinePlaceholder(const Tab& tab) const;
     bool tabNeedsSnapshot(const Tab& tab) const;
+    bool strokeActive() const { return m_history && m_history->strokeActive(); }
     void applyActiveTab();
     void loadPendingRecovery();
     void addDocument(CanvasDocument* document, const QString& path = {},
@@ -251,8 +255,7 @@ private:
     qint64 recoveryStorageAvailable() const;
 
     std::vector<Tab> m_tabs;
-    int m_activeTab = 0;
-    bool m_initialPlaceholder = true;
+    int m_activeTab = -1;
     QString m_recoveryDirectory;
     std::unique_ptr<QLockFile> m_recoveryLock;
     QTimer m_recoveryTimer;
@@ -266,14 +269,16 @@ private:
     bool m_sessionLoaded = false;      // a valid session file was read
     bool m_sessionRestorePending = false;  // restoreSession() has not run yet
     bool m_sessionBatch = false;       // suppress saves while restoring
-    BrushSettings* m_brush;
-    SubToolLibrary* m_subTools;
-    CanvasDocument* m_document;
-    TimelineState*  m_timeline;
-    ColorPalette*   m_colors;
-    UndoStack*      m_history;
+    BrushSettings* m_brush = nullptr;
+    SubToolLibrary* m_subTools = nullptr;
+    LayerModel* m_emptyLayers = nullptr; // empty compatibility model; never a document
+    CanvasDocument* m_document = nullptr;
+    TimelineState*  m_timeline = nullptr;
+    ColorPalette*   m_colors = nullptr;
+    UndoStack*      m_history = nullptr;
     ProjectCreationService* m_creationService;
     QString         m_activeTool = QStringLiteral("brush");
+    QString         m_defaultTool = QStringLiteral("brush");
     QString         m_currentFile;
     QString         m_creationError;
     qreal           m_zoom       = 100.0;

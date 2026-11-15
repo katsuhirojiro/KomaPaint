@@ -17,11 +17,21 @@ UndoStack::UndoStack(QObject* parent) : QObject(parent)
 UndoStack::~UndoStack() {
     if (m_current && m_current->layer) {
         detachCapture();
-        m_current->layer->tiles().rollbackRecordedStroke(m_current->before);
+        if (m_current->materialStroke)
+            m_current->layer->materialTiles().restoreTiles(m_current->materialBefore, false);
+        else m_current->layer->tiles().rollbackRecordedStroke(m_current->before);
     }
 }
-QString UndoStack::undoText() const { return canUndo() ? QStringLiteral("Brush stroke") : QString(); }
-QString UndoStack::redoText() const { return canRedo() ? QStringLiteral("Brush stroke") : QString(); }
+QString UndoStack::undoText() const
+{
+    return canUndo() ? (m_commands[m_cursor - 1]->materialStroke ? QStringLiteral("Material stroke")
+                                                                : QStringLiteral("Brush stroke")) : QString();
+}
+QString UndoStack::redoText() const
+{
+    return canRedo() ? (m_commands[m_cursor]->materialStroke ? QStringLiteral("Material stroke")
+                                                             : QStringLiteral("Brush stroke")) : QString();
+}
 bool UndoStack::beginStroke(Layer* layer)
 {
     if (!layer || m_current || m_replaying) return false;
@@ -63,6 +73,51 @@ bool UndoStack::beginStroke(Layer* layer)
         fail(QStringLiteral("Undo history is full.")); return false;
     }
 }
+bool UndoStack::beginMaterialStroke(Layer* layer)
+{
+    if (!layer || m_current || m_replaying) return false;
+    try {
+        if (m_commands.size() == m_commands.capacity()) {
+            const auto max = m_commands.max_size();
+            if (m_commands.size() == max) throw std::length_error("history full");
+            const auto growth = std::max<std::size_t>(m_commands.size(), 1);
+            const auto capacity = m_commands.size() + std::min(growth, max - m_commands.size());
+            if (capacity > std::numeric_limits<std::size_t>::max() / sizeof(m_commands[0]))
+                throw std::length_error("history index too large");
+            const auto bytes = capacity * sizeof(m_commands[0]);
+            auto budget = layer->materialTiles().documentBudget();
+            if (budget && !budget->reserve(DocumentMemoryBudget::Category::History, bytes)) {
+                fail(QStringLiteral("Not enough available memory to grow undo history. Free memory and try again."));
+                return false;
+            }
+            struct Reservation {
+                std::shared_ptr<DocumentMemoryBudget> budget;
+                std::size_t bytes;
+                ~Reservation() { if (budget) budget->release(DocumentMemoryBudget::Category::History, bytes); }
+            } reservation{std::move(budget), bytes};
+            m_commands.reserve(capacity);
+        }
+        m_current = std::make_unique<StrokeCommand>();
+        m_current->layer = layer;
+        m_current->budget = layer->materialTiles().documentBudget();
+        m_current->materialStroke = true;
+        m_current->materialBefore.reserve(4);
+        m_current->materialAfter.reserve(4);
+        m_current->materialBeforeCharges.reserve(4);
+        layer->materialTiles().setBeforeChange(&UndoStack::captureMaterial, this);
+        emit stackChanged();
+        return true;
+    } catch (const std::bad_alloc&) {
+        m_current.reset();
+        fail(QStringLiteral("Not enough memory to start material undo history."));
+        return false;
+    } catch (const std::length_error&) {
+        m_current.reset();
+        fail(QStringLiteral("Undo history is full."));
+        return false;
+    }
+}
+
 SparseTileStore::CaptureResult UndoStack::capture(void* context, TilePoint tile, bool existed, std::span<const std::uint32_t> pixels) noexcept
 {
     try { return static_cast<UndoStack*>(context)->captureTile(tile, existed, pixels); }
@@ -100,12 +155,51 @@ SparseTileStore::CaptureResult UndoStack::captureTile(TilePoint tile, bool exist
     reservation.retained = true;
     return SparseTileStore::CaptureResult::Ready;
 }
+bool UndoStack::captureMaterial(void* context, TilePoint tile,
+                                std::span<const material::MaterialEntry> entries) noexcept
+{
+    try { return static_cast<UndoStack*>(context)->captureMaterialTile(tile, entries); }
+    catch (const std::bad_alloc&) { return false; }
+    catch (const std::length_error&) { return false; }
+}
+bool UndoStack::captureMaterialTile(TilePoint tile, std::span<const material::MaterialEntry> entries)
+{
+    if (!m_current || !m_current->layer || !m_current->materialStroke) return false;
+    for (const auto& item : m_current->materialBefore) if (item.tile == tile) return true;
+    if (entries.size() > (std::numeric_limits<std::size_t>::max() - 512) / sizeof(material::MaterialEntry))
+        return false;
+    const std::size_t dataBytes = entries.size() * sizeof(material::MaterialEntry);
+    const std::size_t charge = dataBytes + 512;
+    if (charge > std::numeric_limits<std::size_t>::max() - m_bytes
+        || m_currentBytes > std::numeric_limits<std::size_t>::max() - m_bytes - charge) return false;
+    auto* budget = m_current->budget.get();
+    if (budget && dataBytes && !budget->reserve(DocumentMemoryBudget::Category::History, dataBytes)) return false;
+    struct Reservation {
+        DocumentMemoryBudget* budget; std::size_t bytes; bool retained = false;
+        ~Reservation() { if (budget && bytes && !retained) budget->release(DocumentMemoryBudget::Category::History, bytes); }
+    } reservation{budget, dataBytes};
+    material::MaterialTileSnapshot before{tile, std::vector<material::MaterialEntry>(entries.begin(), entries.end())};
+    material::MaterialTileSnapshot after{tile, {}};
+    m_current->materialBefore.reserve(m_current->materialBefore.size() + 1);
+    m_current->materialAfter.reserve(m_current->materialAfter.size() + 1);
+    m_current->materialBeforeCharges.reserve(m_current->materialBeforeCharges.size() + 1);
+    m_current->materialBefore.push_back(std::move(before));
+    m_current->materialAfter.push_back(std::move(after));
+    m_current->materialBeforeCharges.push_back(dataBytes);
+    m_current->historyBytes += dataBytes;
+    m_currentBytes += charge;
+    reservation.retained = true;
+    return true;
+}
 void UndoStack::detachCapture() noexcept
 {
-    if (m_current && m_current->layer) m_current->layer->tiles().setBeforeChange(nullptr, nullptr);
+    if (!m_current || !m_current->layer) return;
+    if (m_current->materialStroke) m_current->layer->materialTiles().setBeforeChange(nullptr, nullptr);
+    else m_current->layer->tiles().setBeforeChange(nullptr, nullptr);
 }
 void UndoStack::finishCapture()
 {
+    if (m_current->materialStroke) { finishMaterialCapture(); return; }
     auto& store = m_current->layer->tiles();
     for (std::size_t i = 0; i < m_current->before.size();) {
         auto pixels = store.tilePixels(m_current->before[i].tile);
@@ -125,6 +219,39 @@ void UndoStack::finishCapture()
         } else ++i;
     }
 }
+void UndoStack::finishMaterialCapture()
+{
+    auto& store = m_current->layer->materialTiles();
+    for (std::size_t i = 0; i < m_current->materialBefore.size();) {
+        const auto current = store.tileEntries(m_current->materialBefore[i].tile);
+        if (current.size() > std::numeric_limits<std::size_t>::max() / sizeof(material::MaterialEntry))
+            throw std::length_error("material tile history size overflow");
+        const std::size_t bytes = current.size() * sizeof(material::MaterialEntry);
+        auto* budget = m_current->budget.get();
+        if (budget && bytes && !budget->reserve(DocumentMemoryBudget::Category::History, bytes))
+            throw std::bad_alloc();
+        struct Reservation {
+            DocumentMemoryBudget* budget; std::size_t bytes; bool retained = false;
+            ~Reservation() { if (budget && bytes && !retained) budget->release(DocumentMemoryBudget::Category::History, bytes); }
+        } reservation{budget, bytes};
+        auto& after = m_current->materialAfter[i].entries;
+        after.assign(current.begin(), current.end());
+        m_current->historyBytes += bytes;
+        m_currentBytes += bytes;
+        reservation.retained = true;
+        if (m_current->materialBefore[i].entries == after) {
+            const auto beforeBytes = m_current->materialBeforeCharges[i];
+            if (budget && beforeBytes) budget->release(DocumentMemoryBudget::Category::History, beforeBytes);
+            if (budget && bytes) budget->release(DocumentMemoryBudget::Category::History, bytes);
+            m_current->historyBytes -= beforeBytes + bytes;
+            m_currentBytes -= beforeBytes + bytes + 512;
+            m_current->materialBefore.erase(m_current->materialBefore.begin() + static_cast<std::ptrdiff_t>(i));
+            m_current->materialAfter.erase(m_current->materialAfter.begin() + static_cast<std::ptrdiff_t>(i));
+            m_current->materialBeforeCharges.erase(m_current->materialBeforeCharges.begin() + static_cast<std::ptrdiff_t>(i));
+        } else ++i;
+    }
+}
+
 // Compact only after the complete raw rollback/fallback record is admitted.
 // Failure is optional: retain the already-reserved raw record unchanged.
 void UndoStack::tryCompact() noexcept
@@ -169,16 +296,28 @@ void UndoStack::tryCompact() noexcept
 }
 bool UndoStack::commitStroke()
 {
-    if (!m_current || (m_current->layer && m_current->layer->tiles().notifyingChange())) return false;
-    if (m_current->layer && m_current->layer->tiles().recordedStrokeFailed()) {
+    if (!m_current || (m_current->layer && (m_current->materialStroke
+            ? m_current->layer->materialTiles().notifyingChange()
+            : m_current->layer->tiles().notifyingChange()))) return false;
+    if (!m_current->materialStroke && m_current->layer && m_current->layer->tiles().recordedStrokeFailed()) {
         cancelStroke();
         return false;
     }
     detachCapture();
     if (!m_current->layer) { m_current.reset(); m_currentBytes = 0; fail(QStringLiteral("The stroke layer was removed; earlier history was retained.")); return false; }
-    finishCapture();
-    tryCompact();
-    m_current->layer->tiles().commitRecordedStroke();
+    try {
+        finishCapture();
+    } catch (const std::bad_alloc&) {
+        fail(QStringLiteral("Not enough memory to finish stroke history; the stroke was rolled back."));
+        cancelStroke();
+        return false;
+    } catch (const std::length_error&) {
+        fail(QStringLiteral("The stroke history record is too large; the stroke was rolled back."));
+        cancelStroke();
+        return false;
+    }
+    if (!m_current->materialStroke) tryCompact();
+    if (!m_current->materialStroke) m_current->layer->tiles().commitRecordedStroke();
     if (!m_current->compact.empty()) {
         const auto rawBytes = m_current->historyBytes - m_current->compactBytes;
         std::vector<SparseTileStore::TileSnapshot>().swap(m_current->before);
@@ -187,7 +326,7 @@ bool UndoStack::commitStroke()
         m_current->historyBytes = m_current->compactBytes;
         m_currentBytes = m_current->compactBytes + 512 * m_current->compact.size();
     }
-    if (m_current->before.empty() && m_current->compact.empty()) { m_current.reset(); m_currentBytes = 0; emit stackChanged(); return true; }
+    if (m_current->before.empty() && m_current->materialBefore.empty() && m_current->compact.empty()) { m_current.reset(); m_currentBytes = 0; emit stackChanged(); return true; }
     while (m_commands.size() > m_cursor) { m_bytes -= m_commands.back()->bytes; m_commands.pop_back(); }
     m_current->bytes = m_currentBytes; m_bytes += m_currentBytes; m_currentBytes = 0;
     m_commands.push_back(std::move(m_current)); ++m_cursor;
@@ -196,10 +335,19 @@ bool UndoStack::commitStroke()
 bool UndoStack::cancelStroke()
 {
     if (!m_current) return true;
-    if (m_current->layer && m_current->layer->tiles().notifyingChange()) return false;
+    if (m_current->layer && (m_current->materialStroke
+            ? m_current->layer->materialTiles().notifyingChange()
+            : m_current->layer->tiles().notifyingChange())) return false;
     detachCapture();
     if (!m_current->layer) { m_current.reset(); m_currentBytes = 0; fail(QStringLiteral("The stroke layer was removed; earlier history was retained.")); return false; }
-    if (!m_current->layer->tiles().rollbackRecordedStroke(m_current->before)) {
+    if (m_current->materialStroke) {
+        const auto result = m_current->layer->materialTiles().restoreTiles(m_current->materialBefore, false);
+        if (result != material::MaterialTileStore::Result::Changed
+            && result != material::MaterialTileStore::Result::Unchanged) {
+            fail(QStringLiteral("Could not roll back the material stroke; the history transaction is still active."));
+            return false;
+        }
+    } else if (!m_current->layer->tiles().rollbackRecordedStroke(m_current->before)) {
         fail(QStringLiteral("Could not roll back the stroke; the history transaction is still active."));
         return false;
     }
@@ -223,6 +371,28 @@ void UndoStack::replay(bool forward)
         std::size_t bytes = 0;
         ~Staging() { if (budget) budget->release(DocumentMemoryBudget::Category::RestoreStaging, bytes); }
     } staging{command->budget};
+    if (command->materialStroke) {
+        m_replaying = true;
+        QPointer<UndoStack> alive(this);
+        QPointer<Layer> layer = command->layer;
+        const auto& snapshots = forward ? command->materialAfter : command->materialBefore;
+        const auto result = layer->materialTiles().restoreTiles(snapshots, false);
+        if (result == material::MaterialTileStore::Result::Changed) {
+            if (forward) ++m_cursor; else --m_cursor;
+            for (const auto& snapshot : snapshots) {
+                if (!layer) break;
+                emit layer->artworkChanged(snapshot.tile.x, snapshot.tile.y);
+                if (!alive) return;
+            }
+        }
+        m_replaying = false;
+        if (result != material::MaterialTileStore::Result::Changed) {
+            fail(QStringLiteral("Material history replay could not be completed due to memory, tile or tracking limits. Artwork and history were not changed."));
+            return;
+        }
+        emit stackChanged();
+        return;
+    }
     std::vector<SparseTileStore::TileSnapshot> decoded;
     const auto* snapshots = forward ? &command->after : &command->before;
     m_replaying = true;

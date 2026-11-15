@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../canvas/SparseTileStore.h"
+#include "../material/MaterialTileStore.h"
 #include <QObject>
 #include <QString>
 #include <QColor>
@@ -27,6 +28,8 @@ public:
 
     SparseTileStore& tiles() { return m_tiles; }
     const SparseTileStore& tiles() const { return m_tiles; }
+    material::MaterialTileStore& materialTiles() { return m_materialTiles; }
+    const material::MaterialTileStore& materialTiles() const { return m_materialTiles; }
 
     QString name() const { return m_name; }
     bool    isVisible() const { return m_visible; }
@@ -61,6 +64,7 @@ signals:
 
 private:
     SparseTileStore m_tiles{1600, 1200};
+    material::MaterialTileStore m_materialTiles{1600, 1200};
     QString m_name    = QStringLiteral("Layer");
     bool    m_visible = true;
     bool    m_locked  = false;

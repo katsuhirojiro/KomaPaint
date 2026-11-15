@@ -8,10 +8,22 @@
 #include <stdexcept>
 
 namespace komapaint {
+namespace {
+const material::MaterialRenderer& layerMaterialRenderer()
+{
+    static const material::PigmentLibrary pigments;
+    static const material::MaterialEngine engine(pigments);
+    static const material::MaterialRenderer renderer(engine);
+    return renderer;
+}
+}
 
 Layer::Layer(QObject* parent) : QObject(parent)
 {
     m_tiles.setChangeCallback([](void* context, TilePoint tile) noexcept {
+        emit static_cast<Layer*>(context)->artworkChanged(tile.x, tile.y);
+    }, this);
+    m_materialTiles.setChangeCallback([](void* context, TilePoint tile) noexcept {
         emit static_cast<Layer*>(context)->artworkChanged(tile.x, tile.y);
     }, this);
 }
@@ -23,7 +35,7 @@ QVariantList Layer::thumbnailPixels(int side) const
     // The thumbnail is deliberately bounded and requested by a coalesced UI
     // timer, never from inside a tile-store mutation callback.
     side = std::clamp(side, 16, 64);
-    if (m_tiles.notifyingChange()) return {};
+    if (m_tiles.notifyingChange() || m_materialTiles.notifyingChange()) return {};
     const auto& geometry = m_tiles.geometry();
     if (!geometry.isValid() || geometry.width() <= 0 || geometry.height() <= 0) return {};
     try {
@@ -37,10 +49,23 @@ QVariantList Layer::thumbnailPixels(int side) const
         {
             QPainter painter(&image);
             painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-            for (const auto tile : m_tiles.allocatedTilePoints()) {
+            auto tilePoints = m_tiles.allocatedTilePoints();
+            const auto materialPoints = m_materialTiles.allocatedTilePoints();
+            tilePoints.insert(tilePoints.end(), materialPoints.begin(), materialPoints.end());
+            std::sort(tilePoints.begin(), tilePoints.end(), TilePointLess{});
+            tilePoints.erase(std::unique(tilePoints.begin(), tilePoints.end()), tilePoints.end());
+            for (const auto tile : tilePoints) {
                 const auto bounds = geometry.tileBounds(tile);
-                const auto pixels = m_tiles.tilePixels(tile);
-                if (!bounds || pixels.empty()) continue;
+                if (!bounds) continue;
+                const auto digitalPixels = m_tiles.tilePixels(tile);
+                std::vector<std::uint32_t> materialOutput;
+                std::span<const std::uint32_t> pixels = digitalPixels;
+                if (!m_materialTiles.tileEntries(tile).empty()) {
+                    if (!layerMaterialRenderer().renderTile(m_materialTiles, tile, digitalPixels,
+                            material::gouacheProfile(), material::absorbentPaper(), &materialOutput)) return {};
+                    pixels = materialOutput;
+                }
+                if (pixels.empty()) continue;
                 const int tileSize = geometry.tileSize();
                 // QImage borrows this span only for the immediate draw call.
                 const QImage source(reinterpret_cast<const uchar*>(pixels.data()), tileSize, tileSize,

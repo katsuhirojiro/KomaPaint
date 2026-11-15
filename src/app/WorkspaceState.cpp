@@ -143,7 +143,7 @@ QString readableBytes(quint64 bytes)
 WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
 {
     connect(&m_recoveryTimer, &QTimer::timeout, this, [this] {
-        if (m_history->strokeActive()) return;
+        if (strokeActive()) return;
         QString error;
         if (persistInternal({}, {}, &error)) { m_lastTimerRecoveryError.clear(); return; }
         // A background snapshot that keeps failing for the same reason (for
@@ -158,15 +158,14 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     m_subTools = new SubToolLibrary(m_brush, this);
     m_subTools->setTool(m_activeTool);
     connect(this, &WorkspaceState::activeToolChanged, m_subTools, &SubToolLibrary::setTool);
-    m_document = new CanvasDocument(this);
+    m_emptyLayers = new LayerModel(this, false);
     m_timeline = new TimelineState(this);
     m_colors   = new ColorPalette(this);
-    m_history  = new UndoStack(this);
     m_creationService = new ProjectCreationService(this);
-    m_tabs.push_back(makeTab(m_document, m_history, {}));
-    connectLayerDeletion(m_document, m_history);
-    connect(m_document, &CanvasDocument::titleChanged, this, &WorkspaceState::tabsChanged);
-    connect(m_document, &CanvasDocument::modifiedChanged, this, &WorkspaceState::tabsChanged);
+    // A fresh installation starts with no document and no project tab. The
+    // detached empty layer model only keeps existing panel bindings safe.
+    m_document = nullptr;
+    m_history = nullptr;
 }
 
 void WorkspaceState::connectLayerDeletion(const CanvasDocument* document, UndoStack* history)
@@ -208,18 +207,11 @@ int WorkspaceState::tabIndexForId(const QUuid& id) const
     return -1;
 }
 
-bool WorkspaceState::isPristinePlaceholder(const Tab& tab) const
-{
-    return m_initialPlaceholder && m_tabs.size() == 1 && !tab.document->isModified()
-        && tab.path.isEmpty() && !tab.history->canUndo() && !tab.history->canRedo();
-}
-
 // A project needs a recovery snapshot when it holds work that is in no saved
 // file: it was never saved, or it changed since its last save. A saved,
 // unchanged project is already safe in its own .koma file.
 bool WorkspaceState::tabNeedsSnapshot(const Tab& tab) const
 {
-    if (isPristinePlaceholder(tab)) return false;
     return tab.path.isEmpty() || tab.document->isModified();
 }
 
@@ -241,6 +233,17 @@ QVariantList WorkspaceState::projectTabs() const
 // between tabs: the properties are views onto the tab that is now active.
 void WorkspaceState::applyActiveTab()
 {
+    if (m_activeTab < 0 || m_activeTab >= static_cast<int>(m_tabs.size())) {
+        const bool hadDocument = m_document != nullptr;
+        const bool hadFile = !m_currentFile.isEmpty();
+        m_document = nullptr;
+        m_history = nullptr;
+        m_currentFile.clear();
+        if (hadDocument) emit documentChanged();
+        if (hadFile) emit currentFileChanged();
+        emit tabsChanged();
+        return;
+    }
     const auto& tab = m_tabs[static_cast<std::size_t>(m_activeTab)];
     m_document = tab.document;
     m_history = tab.history;
@@ -260,7 +263,7 @@ bool WorkspaceState::activateTab(int index)
 {
     if (index < 0 || index >= static_cast<int>(m_tabs.size())) return false;
     if (index == m_activeTab) return true;
-    if (m_history->strokeActive()) {
+    if (strokeActive()) {
         emit fileErrorOccurred(QStringLiteral("Finish or cancel the current stroke before switching projects."));
         return false;
     }
@@ -279,13 +282,6 @@ void WorkspaceState::addDocument(CanvasDocument* document, const QString& path,
     connect(document, &CanvasDocument::modifiedChanged, this, &WorkspaceState::tabsChanged);
     Tab tab = makeTab(document, history, path);
     if (prepare) prepare(tab);
-    if (m_tabs.size() == 1 && isPristinePlaceholder(m_tabs.front())) {
-        auto old = m_tabs.front();
-        m_tabs.clear();
-        old.history->deleteLater(); old.document->deleteLater();
-        m_activeTab = -1;
-    }
-    m_initialPlaceholder = false;
     m_tabs.push_back(tab);
     activateTab(static_cast<int>(m_tabs.size()) - 1);
     saveSession();
@@ -293,25 +289,21 @@ void WorkspaceState::addDocument(CanvasDocument* document, const QString& path,
 
 bool WorkspaceState::closeTab(int index, bool discard)
 {
-    if (index < 0 || index >= static_cast<int>(m_tabs.size()) || m_history->strokeActive()) return false;
+    if (index < 0 || index >= static_cast<int>(m_tabs.size()) || strokeActive()) return false;
     const auto tab = m_tabs[static_cast<std::size_t>(index)];
     if (tab.history->strokeActive() || (tab.document->isModified() && !discard)) return false;
+    const int previousActive = m_activeTab;
     m_tabs.erase(m_tabs.begin() + index);
     tab.history->deleteLater(); tab.document->deleteLater();
     bool activated = false;
     if (m_tabs.empty()) {
-        auto* blank = new CanvasDocument(this);
-        auto* history = new UndoStack(this);
-        m_tabs.push_back(makeTab(blank, history, {}));
-        connectLayerDeletion(blank, history);
-        connect(blank, &CanvasDocument::titleChanged, this, &WorkspaceState::tabsChanged);
-        connect(blank, &CanvasDocument::modifiedChanged, this, &WorkspaceState::tabsChanged);
-        m_initialPlaceholder = true;
         m_activeTab = -1;
-        activated = activateTab(0);
+        applyActiveTab();
+        activated = true;
     } else {
-        int next = m_activeTab;
-        if (index < next) --next;
+        int next = previousActive;
+        if (next < 0) next = 0;
+        else if (index < next) --next;
         else if (index == next) next = std::min(index, static_cast<int>(m_tabs.size()) - 1);
         m_activeTab = -1;
         activated = activateTab(next);
@@ -360,12 +352,16 @@ void WorkspaceState::associateWithKomaFiles()
 
 void WorkspaceState::replaceDocument(CanvasDocument* next)
 {
-    addDocument(next);
+    addDocument(next, {}, [this](Tab& tab) {
+        // Global defaults are consulted when a project is created. Once the
+        // tab exists, its tool is stored and restored independently.
+        tab.tool = m_defaultTool;
+    });
 }
 
 bool WorkspaceState::newDocument(int width, int height, bool transparent, const QColor& background)
 {
-    if (m_history->strokeActive()) return false;
+    if (strokeActive()) return false;
     if (!CanvasDocument::validSize(QSize(width, height)) || !background.isValid()
         || background.alpha() != 255) return false;
     auto* next = new CanvasDocument(this);
@@ -384,7 +380,7 @@ bool WorkspaceState::newProject(const QString& name, int width, int height, bool
              << "name=" << name << "width=" << width << "height=" << height
              << "transparent=" << transparent << "bgColor=" << backgroundColor << "dpi=" << dpi;
 
-    if (m_history->strokeActive()) {
+    if (strokeActive()) {
         m_creationError = QStringLiteral("Finish or cancel the current stroke before creating a project.");
         emit creationErrorChanged();
         return false;
@@ -416,7 +412,11 @@ bool WorkspaceState::newProject(const QString& name, int width, int height, bool
 
 bool WorkspaceState::saveToPath(const QString& pathOrUrl)
 {
-    if (m_history->strokeActive()) { emit fileErrorOccurred(QStringLiteral("Finish or cancel the current stroke before saving.")); return false; }
+    if (!m_document || !m_history || m_activeTab < 0) {
+        emit fileErrorOccurred(QStringLiteral("There is no open project to save."));
+        return false;
+    }
+    if (strokeActive()) { emit fileErrorOccurred(QStringLiteral("Finish or cancel the current stroke before saving.")); return false; }
     QString path;
     if (pathOrUrl.isEmpty()) {
         // Bare save: reuse the current file if there is one.
@@ -459,7 +459,7 @@ bool WorkspaceState::saveToPath(const QString& pathOrUrl)
 
 bool WorkspaceState::openFromPath(const QString& pathOrUrl)
 {
-    if (m_history->strokeActive()) { emit fileErrorOccurred(QStringLiteral("Finish or cancel the current stroke before opening a file.")); return false; }
+    if (strokeActive()) { emit fileErrorOccurred(QStringLiteral("Finish or cancel the current stroke before opening a file.")); return false; }
     const QString requested = localPathFromQml(pathOrUrl);
     if (requested.isEmpty()) { emit fileErrorOccurred(QStringLiteral("No readable filename was given.")); return false; }
     const QString path = QFileInfo(requested).absoluteFilePath();
@@ -498,11 +498,24 @@ QPointF WorkspaceState::activeViewCenter() const
 
 void WorkspaceState::setActiveTool(const QString& tool)
 {
-    if (m_activeTool == tool) return;
+    // Keep legacy/session tool identifiers intact. The palette prevents users
+    // selecting unavailable tools; accepting a stored identifier avoids
+    // rewriting older session data or breaking programmatic integrations.
+    if (tool.isEmpty() || m_activeTool == tool) return;
     m_activeTool = tool;
     if (m_activeTab >= 0 && m_activeTab < static_cast<int>(m_tabs.size()))
         m_tabs[static_cast<std::size_t>(m_activeTab)].tool = tool;
     emit activeToolChanged(m_activeTool);
+}
+
+void WorkspaceState::setDefaultTool(const QString& tool)
+{
+    const bool supported = m_subTools->paints(tool) || tool == QStringLiteral("zoom")
+        || tool == QStringLiteral("hand") || tool == QStringLiteral("eyedropper");
+    if (!supported || m_defaultTool == tool) return;
+    m_defaultTool = tool;
+    if (m_tabs.empty()) setActiveTool(tool);
+    emit defaultToolChanged(m_defaultTool);
 }
 
 void WorkspaceState::setZoom(qreal z)
@@ -701,7 +714,7 @@ bool WorkspaceState::persistInternal(const QStringList& discardIds, const QStrin
         setError(QStringLiteral("The workspace recovery location is unavailable. The previous recovery state has not been changed."));
         return false;
     }
-    if (m_history->strokeActive()) {
+    if (strokeActive()) {
         setError(QStringLiteral("Finish or cancel the current stroke before saving recovery snapshots."));
         return false;
     }
@@ -864,7 +877,7 @@ bool WorkspaceState::recoverEntryInternal(const QString& key, QString* error, QS
 {
     auto setError = [error](const QString& message) { if (error) *error = message; };
     if (!m_recoveryLock) { setError(QStringLiteral("The workspace recovery location is unavailable.")); return false; }
-    if (m_history->strokeActive()) { setError(QStringLiteral("Finish or cancel the current stroke before recovering a project.")); return false; }
+    if (strokeActive()) { setError(QStringLiteral("Finish or cancel the current stroke before recovering a project.")); return false; }
     auto found = std::find_if(m_pendingRecovery.begin(), m_pendingRecovery.end(),
                               [&key](const RecoveryEntry& entry) { return entry.key == key; });
     if (found == m_pendingRecovery.end()) { setError(QStringLiteral("That recovery entry no longer exists.")); return false; }
@@ -974,7 +987,7 @@ bool WorkspaceState::recoverEntry(const QString& key)
 
 bool WorkspaceState::restoreWorkspace()
 {
-    if (!m_recoveryLock || m_pendingRecovery.empty() || m_history->strokeActive()) return false;
+    if (!m_recoveryLock || m_pendingRecovery.empty() || strokeActive()) return false;
     QStringList keys;
     for (const auto& entry : m_pendingRecovery) keys.append(entry.key);
     const QUuid active(m_recoveryActiveId);
@@ -1080,7 +1093,7 @@ bool WorkspaceState::initializeSession(const QString& filePath)
 bool WorkspaceState::restoreSession()
 {
     if (m_sessionPath.isEmpty() || !m_sessionRestorePending) return false;
-    if (m_history->strokeActive()) return false;
+    if (strokeActive()) return false;
     m_sessionRestorePending = false;
     if (!m_sessionLoaded) { saveSession(); return true; }
 
@@ -1091,7 +1104,8 @@ bool WorkspaceState::restoreSession()
     for (const auto& entry : m_pendingRecovery) waiting.insert(entry.tabId.toString(QUuid::WithoutBraces));
     // A file given on the command line was opened before this runs and
     // stays the active project.
-    const QUuid keepActive = isPristinePlaceholder(m_tabs.front()) ? QUuid() : m_tabs[static_cast<std::size_t>(m_activeTab)].id;
+    const QUuid keepActive = m_activeTab >= 0 && m_activeTab < static_cast<int>(m_tabs.size())
+        ? m_tabs[static_cast<std::size_t>(m_activeTab)].id : QUuid();
 
     QStringList problems;
     m_sessionBatch = true;
@@ -1187,7 +1201,7 @@ void WorkspaceState::finishShutdown(const QStringList& discardIds)
         if (tab.path.isEmpty() && !tab.document->isModified())
             discard.append(tab.id.toString(QUuid::WithoutBraces));
     QString error;
-    if (m_recoveryLock && !m_history->strokeActive() && !persistInternal(discard, {}, &error) && !error.isEmpty())
+    if (m_recoveryLock && !strokeActive() && !persistInternal(discard, {}, &error) && !error.isEmpty())
         qWarning("[KomaPaint] Recovery data could not be finalized at shutdown: %s", qUtf8Printable(error));
     saveSession();
 }

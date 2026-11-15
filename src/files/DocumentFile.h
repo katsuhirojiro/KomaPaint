@@ -9,15 +9,15 @@ namespace komapaint {
 class CanvasDocument;
 
 // Strict native .koma reader/writer. Versions 1 and 2 load with default
-// layer metadata. Version 3 adds blend and label bytes; unknown metadata and
-// versions are rejected rather than silently discarded. Files with only
-// default metadata are written as v2 for backwards compatibility. Artwork is
-// document-space premultiplied ARGB rectangles, independent of tile size.
+// layer metadata. Version 3 adds blend and label bytes; version 4 adds sparse
+// material composition. Unknown versions are rejected rather than silently
+// discarded. Digital artwork remains document-space ARGB rectangles.
 // See docs/architecture/file-format.md for the binary layout and safety model.
 class DocumentFile {
 public:
-    // Latest supported version; files with default metadata are written as v2.
-    static constexpr quint16 FormatVersion = 3;
+    // Latest supported version. Material content uses v4; v1-v3 remain readable.
+    static constexpr quint16 FormatVersion = 4;
+    static constexpr quint16 LayerMetadataVersion = 3;
     static constexpr quint16 FlatEnvelopeVersion = 2;
     // Legacy version written by KomaPaint before the project envelope
     // existed. Read-only support; never written.
@@ -46,7 +46,7 @@ public:
     // Returns a detached, unmodified document on success (caller takes
     // ownership), or nullptr on any failure. Never modifies the file and
     // never touches any other document, so a failed open cannot harm
-    // existing artwork. Versions 2 and 3 must describe exactly one
+    // existing artwork. Versions 2 through 4 must describe exactly one
     // illustration document.
     static CanvasDocument* open(const QString& path, QString* error = nullptr);
 

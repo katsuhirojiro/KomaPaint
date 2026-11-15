@@ -13,7 +13,9 @@ ApplicationWindow {
 
     visible: true
     // Keep "KomaPaint" as the leading token (packaging smoke test relies on it).
-    title: App.versionDisplay + " — " + Workspace.document.title + (Workspace.document.modified ? " *" : "")
+    title: App.versionDisplay + " — " + (Workspace.document
+          ? Workspace.document.title + (Workspace.document.modified ? " *" : "")
+          : qsTr("Nothing here yet"))
     width: Settings.windowSize.width
     height: Settings.windowSize.height
     visibility: Settings.windowMaximized ? Window.Maximized : Window.Windowed
@@ -155,13 +157,13 @@ ApplicationWindow {
                                            30, 40, 50, 60, 70, 80, 100,
                                            120, 150, 170, 200, 256]
     readonly property bool editingText: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
-    Shortcut { sequence: "Ctrl+Z"; enabled: !root.editingText && Workspace.history.canUndo; onActivated: Workspace.history.undo() }
-    Shortcut { sequence: "Ctrl+Y"; enabled: !root.editingText && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
+    Shortcut { sequence: "Ctrl+Z"; enabled: !root.editingText && Workspace.history && Workspace.history.canUndo; onActivated: Workspace.history.undo() }
+    Shortcut { sequence: "Ctrl+Y"; enabled: !root.editingText && Workspace.history && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
     Shortcut { sequence: "Ctrl+N"; enabled: !root.editingText; onActivated: root.requestNewDocument() }
-    Shortcut { sequence: "Ctrl+Shift+Z"; enabled: !root.editingText && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
+    Shortcut { sequence: "Ctrl+Shift+Z"; enabled: !root.editingText && Workspace.history && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
     Shortcut { sequence: "Ctrl+O"; enabled: !root.editingText; onActivated: root.requestOpenImage() }
-    Shortcut { sequence: "Ctrl+S"; enabled: !root.editingText; onActivated: root.saveImage() }
-    Shortcut { sequence: "Ctrl+Shift+S"; enabled: !root.editingText; onActivated: saveImageDialog.open() }
+    Shortcut { sequence: "Ctrl+S"; enabled: !root.editingText && Workspace.document; onActivated: root.saveImage() }
+    Shortcut { sequence: "Ctrl+Shift+S"; enabled: !root.editingText && Workspace.document; onActivated: saveImageDialog.open() }
     // Tool keys (shown in the tool palette tooltips).
     Shortcut { sequence: "Z"; enabled: !root.editingText; onActivated: Workspace.activeTool = "zoom" }
     Shortcut { sequence: "H"; enabled: !root.editingText; onActivated: Workspace.activeTool = "hand" }
@@ -255,7 +257,7 @@ ApplicationWindow {
         nameFilters: [qsTr("KomaPaint illustrations (*.koma)"), qsTr("All files (*)")]
         selectedFile: Workspace.currentFile.length > 0
                       ? root.fileUrlForPath(Workspace.currentFile)
-                      : Qt.resolvedUrl(Workspace.document.title + ".koma")
+                      : Qt.resolvedUrl((Workspace.document ? Workspace.document.title : qsTr("Untitled")) + ".koma")
         onAccepted: {
             if (Workspace.saveToPath(selectedFile.toString())) {
                 if (root.closeAction !== "") root.closeDecisionComplete(false)
@@ -435,11 +437,13 @@ ApplicationWindow {
                 }
                 KpMenuItem {
                     text: qsTr("&Save\tCtrl+S")
-                    onTriggered: root.saveImage()
+                    enabled: Workspace.document !== null
+                    onTriggered: if (Workspace.document) root.saveImage()
                 }
                 KpMenuItem {
                     text: qsTr("Save &As...\tCtrl+Shift+S")
-                    onTriggered: saveImageDialog.open()
+                    enabled: Workspace.document !== null
+                    onTriggered: if (Workspace.document) saveImageDialog.open()
                 }
                 KpMenuSeparator {
                 }
@@ -464,6 +468,11 @@ ApplicationWindow {
                     onTriggered: recoverySettingsDialog.open()
                 }
                 KpMenuItem {
+                    objectName: "komaSettingsMenuItem"
+                    text: qsTr("Koma Settings...")
+                    onTriggered: komaSettingsDialog.open()
+                }
+                KpMenuItem {
                     text: qsTr("Associate &.koma Files...")
                     onTriggered: Workspace.associateWithKomaFiles()
                 }
@@ -478,18 +487,18 @@ ApplicationWindow {
                 title: qsTr("&Edit")
                 KpMenuItem {
                     text: qsTr("&Undo")
-                    enabled: Workspace.history.canUndo
-                    onTriggered: Workspace.history.undo()
+                    enabled: Workspace.history !== null && Workspace.history.canUndo
+                    onTriggered: if (Workspace.history) Workspace.history.undo()
                 }
                 KpMenuItem {
                     text: qsTr("&Redo")
-                    enabled: Workspace.history.canRedo
-                    onTriggered: Workspace.history.redo()
+                    enabled: Workspace.history !== null && Workspace.history.canRedo
+                    onTriggered: if (Workspace.history) Workspace.history.redo()
                 }
                 KpMenuSeparator { }
                 KpMenuItem {
                     text: qsTr("Clear Artwork History...")
-                    enabled: Workspace.history.canUndo || Workspace.history.canRedo
+                    enabled: Workspace.history !== null && (Workspace.history.canUndo || Workspace.history.canRedo)
                     onTriggered: clearHistoryDialog.open()
                 }
                 KpMenuSeparator {
@@ -650,7 +659,8 @@ ApplicationWindow {
                 title: qsTr("&Layer")
                 KpMenuItem {
                     text: qsTr("New Layer")
-                    onTriggered: Workspace.layers.addLayer()
+                    enabled: Workspace.document !== null
+                    onTriggered: if (Workspace.document) Workspace.layers.addLayer()
                 }
                 KpMenuItem {
                     text: qsTr("Duplicate Layer")
@@ -658,7 +668,8 @@ ApplicationWindow {
                 }
                 KpMenuItem {
                     text: qsTr("Delete Layer")
-                    onTriggered: Workspace.layers.removeLayer(Workspace.layers.activeLayerIndex)
+                    enabled: Workspace.document !== null
+                    onTriggered: if (Workspace.document) Workspace.layers.removeLayer(Workspace.layers.activeLayerIndex)
                 }
                 KpMenuSeparator {
                 }
@@ -741,12 +752,14 @@ ApplicationWindow {
                 objectName: "toolPalette"
                 Layout.preferredWidth: KP.paletteWidth
                 Layout.fillHeight: true
+                visible: Workspace.document !== null
             }
 
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 0
+                visible: Workspace.document !== null
 
                 DockWorkspace {
                     id: dock
@@ -755,6 +768,41 @@ ApplicationWindow {
                     model: Dock
                     panelComponents: root.panelComponents
                     canvasComponent: root.canvasComponent
+                }
+            }
+
+            Item {
+                objectName: "emptyWorkspace"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: Workspace.document === null
+                Rectangle { anchors.fill: parent; color: KP.canvasBg }
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    width: Math.min(parent.width - 2 * KP.gapXL, 460)
+                    spacing: KP.gapM
+                    KpIcon {
+                        Layout.alignment: Qt.AlignHCenter
+                        name: "project-types/illustration"
+                        size: 42
+                        color: KP.iconOff
+                    }
+                    Text {
+                        objectName: "emptyWorkspaceInvitation"
+                        Layout.fillWidth: true
+                        text: qsTr("Nothing here yet. Create a new project to get started.")
+                        color: KP.text
+                        font.pixelSize: KP.fontM
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                    }
+                    KpButton {
+                        objectName: "emptyWorkspaceNewProjectButton"
+                        Layout.alignment: Qt.AlignHCenter
+                        label: qsTr("New Project")
+                        variant: "primary"
+                        onClicked: root.requestNewDocument()
+                    }
                 }
             }
         }
@@ -1170,6 +1218,10 @@ ApplicationWindow {
     NewProjectDialog {
         id: newProjectDialog
     }
+    KomaSettingsDialog {
+        id: komaSettingsDialog
+    }
+
     PreferencesDialog {
         id: preferencesDialog
     }

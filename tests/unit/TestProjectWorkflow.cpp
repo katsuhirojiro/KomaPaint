@@ -155,6 +155,10 @@ void TestProjectWorkflow::replaceOpenedArtwork()
         QCoreApplication::processEvents();
     };
     QTest::qWait(50);
+    // The workspace now starts empty: create the project explicitly before
+    // painting or saving it.
+    QVERIFY(workspace.newProject(QStringLiteral("Existing"), 640, 480, true,
+                                 QStringLiteral("white"), 72));
     draw();
     QTRY_VERIFY(workspace.document()->isModified());
     const auto file = dir.filePath(QStringLiteral("existing.koma"));

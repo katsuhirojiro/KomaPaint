@@ -13,8 +13,51 @@
 #include <cmath>
 #include <cstring>
 #include <new>
+#include <stdexcept>
 
 namespace komapaint {
+namespace {
+const material::MaterialEngine& canvasMaterialEngine()
+{
+    static const material::PigmentLibrary pigments;
+    static const material::MaterialEngine engine(pigments);
+    return engine;
+}
+
+const material::MaterialRenderer& canvasMaterialRenderer()
+{
+    static const material::MaterialRenderer renderer(canvasMaterialEngine());
+    return renderer;
+}
+
+bool prepareMaterialRenderLayers(std::vector<CompositeLayer>& layers, TilePoint tile,
+                                 std::vector<std::unique_ptr<SparseTileStore>>& temporaryStores)
+{
+    try {
+        temporaryStores.reserve(layers.size());
+        for (auto& compositeLayer : layers) {
+            Layer* source = compositeLayer.materialSource;
+            if (!source || source->materialTiles().tileEntries(tile).empty()) continue;
+            const auto& geometry = source->tiles().geometry();
+            std::vector<std::uint32_t> rendered;
+            if (!canvasMaterialRenderer().renderTile(source->materialTiles(), tile,
+                    source->tiles().tilePixels(tile), material::gouacheProfile(),
+                    material::absorbentPaper(), &rendered)) return false;
+            auto output = std::make_unique<SparseTileStore>(geometry.width(), geometry.height(), geometry.tileSize());
+            if (std::any_of(rendered.begin(), rendered.end(), [](std::uint32_t pixel) { return pixel != 0; })) {
+                std::vector<SparseTileStore::TileSnapshot> snapshot;
+                snapshot.push_back({tile, std::move(rendered)});
+                if (output->restoreTiles(snapshot, false) != SparseTileStore::WriteResult::Changed) return false;
+            }
+            compositeLayer.store = output.get();
+            temporaryStores.push_back(std::move(output));
+        }
+        return true;
+    } catch (const std::bad_alloc&) { return false; }
+      catch (const std::length_error&) { return false; }
+}
+} // namespace
+
 CanvasViewport::CanvasViewport(QQuickItem* parent) : QQuickPaintedItem(parent)
 {
     setOpaquePainting(true);
@@ -46,7 +89,10 @@ void CanvasViewport::setHistory(QObject* object)
     m_history = next;
     if (m_history) connect(m_history, &UndoStack::strokeRolledBack, this, [this] {
         if (!m_strokeLayer) return;
-        m_stroke.reset(); m_strokeLayer = nullptr;
+        m_stroke.reset();
+        m_materialStroke.reset();
+        m_materialReservoir.reset();
+        m_strokeLayer = nullptr;
         if (m_document) m_document->setModified(m_modifiedBeforeStroke);
         m_invalidation.reset(); clearCache();
         invalidateAll();
@@ -147,6 +193,7 @@ void CanvasViewport::changedTile(qint64 x, qint64 y)
 {
     qDebug() << "[CanvasViewport] changedTile() tile=(" << x << "," << y << ")";
     if (!m_document) return;
+    eraseCacheTile({x, y});
     const qreal side = m_document->layers()->layerAt(0)->tiles().geometry().tileSize();
     const qreal scale = m_zoom / 100;
     QRectF rect(m_origin.x() + x * side * scale, m_origin.y() + y * side * scale, side * scale, side * scale);
@@ -260,7 +307,7 @@ std::vector<CompositeLayer> CanvasViewport::layers() const
     result.reserve(static_cast<std::size_t>(model->rowCount()));
     for (int i = 0; i < model->rowCount(); ++i) {
         auto* l = model->layerAt(i);
-        result.push_back({&l->tiles(), l->isVisible(), l->opacity(), static_cast<BlendMode>(l->blendMode())});
+        result.push_back({&l->tiles(), l->isVisible(), l->opacity(), static_cast<BlendMode>(l->blendMode()), l});
     }
     return result;
 }
@@ -269,7 +316,10 @@ QImage CanvasViewport::composedTile(TilePoint tile, const std::vector<CompositeL
     auto found = m_cache.find(tile);
     if (found != m_cache.end()) { found->second.used = ++m_clock; return found->second.image; }
     if (list.empty()) return {};
-    auto composite = CpuTileCompositor::compose(list[0].store->geometry(), tile, list, background);
+    auto renderedLayers = list;
+    std::vector<std::unique_ptr<SparseTileStore>> materialStores;
+    if (!prepareMaterialRenderLayers(renderedLayers, tile, materialStores)) return {};
+    auto composite = CpuTileCompositor::compose(list[0].store->geometry(), tile, renderedLayers, background);
     if (!composite) return {};
     QImage image(static_cast<int>(composite->width), static_cast<int>(composite->height), QImage::Format_ARGB32_Premultiplied);
     if (image.isNull()) return {};
@@ -354,6 +404,78 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
         return false;
     }
     m_modifiedBeforeStroke = m_document->isModified();
+    if (brush->traditionalMedia()) {
+        if (!m_history->beginMaterialStroke(layer)) {
+            emit strokeError(QStringLiteral("Could not start material stroke history; no paint was applied."));
+            return false;
+        }
+        try {
+            auto presets = material::defaultBrushDefinitions();
+            const auto preset = std::find_if(presets.begin(), presets.end(), [](const auto& item) {
+                return item.id == "gouache-round";
+            });
+            if (preset == presets.end()) {
+                m_history->cancelStroke();
+                emit strokeError(QStringLiteral("The default gouache material brush is unavailable."));
+                return false;
+            }
+            material::BrushDefinition definition = *preset;
+            definition.size = brush->size();
+            definition.hardness = brush->hardness() / 100.0;
+            definition.spacingRatio = brush->spacing() / 100.0;
+            definition.releaseRate *= brush->flow() / 100.0;
+            definition.contactTransfer *= brush->opacity() / 100.0
+                * (brush->erase() ? brush->flow() / 100.0 : 1.0);
+            if (brush->textured()) {
+                definition.tip = material::TipGeometry::Bristle;
+                definition.bristleCount = 13;
+                definition.bristleSpread = 0.55;
+            }
+            m_materialReservoir = std::make_unique<material::BrushReservoir>(definition.reservoirCapacity);
+            if (!brush->erase()) {
+                const double alpha = color.alphaF();
+                definition.initialPaint = material::makeResidualPaint(
+                    color.rgba(), alpha, 0.3 * alpha, 0.2 * alpha, definition.mediumId);
+                if (!m_materialReservoir->load(definition.initialPaint, definition.initialPaint.totalMass())) {
+                    m_materialReservoir.reset();
+                    m_history->cancelStroke();
+                    emit strokeError(QStringLiteral("The selected colour could not be loaded into the material brush."));
+                    return false;
+                }
+            }
+            m_materialStroke = std::make_unique<material::MaterialStroke>(layer->materialTiles(),
+                std::move(definition), *m_materialReservoir, canvasMaterialEngine(),
+                material::gouacheProfile(), material::absorbentPaper(), brush->erase());
+            m_strokeLayer = layer;
+            const auto point = viewportToDocument(x, y);
+            m_stabilizer = StrokeStabilizer(brush->stabilization());
+            m_stabilizer.begin({point.x(), point.y(), pressure});
+            if (!m_materialStroke->begin({point.x(), point.y(), {pressure, 0.0, 0.0, 0.0}})) {
+                const auto reason = m_materialStroke->failureReason();
+                const bool rolledBack = m_history->cancelStroke();
+                m_materialStroke.reset();
+                m_materialReservoir.reset();
+                m_strokeLayer = nullptr;
+                reportStrokeFailure(reason, rolledBack, layer->materialTiles().allocatedBytes(), 0);
+                return false;
+            }
+            return true;
+        } catch (const std::bad_alloc&) {
+            m_materialStroke.reset();
+            m_materialReservoir.reset();
+            m_strokeLayer = nullptr;
+            const bool rolledBack = m_history->cancelStroke();
+            reportStrokeFailure(SparseTileStore::WriteResult::AllocationFailed, rolledBack, 0, 0);
+            return false;
+        } catch (const std::length_error&) {
+            m_materialStroke.reset();
+            m_materialReservoir.reset();
+            m_strokeLayer = nullptr;
+            const bool rolledBack = m_history->cancelStroke();
+            reportStrokeFailure(SparseTileStore::WriteResult::AllocationFailed, rolledBack, 0, 0);
+            return false;
+        }
+    }
     if (!m_history->beginStroke(layer)) {
         emit strokeError(QStringLiteral("Could not start stroke history; no paint was applied."));
         return false;
@@ -390,7 +512,7 @@ void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
              << "viewport=(" << x << "," << y << ")" << "pressure=" << pressure
              << "m_stroke=" << (bool)m_stroke;
 
-    if (!m_stroke || !m_strokeLayer || !m_document) { qDebug() << "[CanvasViewport] continueStroke: no stroke/layer/document"; cancelStroke(); return; }
+    if ((!m_stroke && !m_materialStroke) || !m_strokeLayer || !m_document) { qDebug() << "[CanvasViewport] continueStroke: no stroke/layer/document"; cancelStroke(); return; }
     if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
         m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) {
         qDebug() << "[CanvasViewport] continueStroke: layer changed or invalid";
@@ -401,10 +523,14 @@ void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
     // Stabilisation smooths the samples between pen-down and pen-up; endStroke()
     // then draws on to the real pen-up position.
     const InputSample sample = m_stabilizer.filter({point.x(), point.y(), pressure});
-    if (!m_stroke->extend(sample)) {
-        const auto reason = m_stroke->failureReason();
-        const auto tileBytes = m_strokeLayer->tiles().allocatedPixelBytes();
-        const auto tileBudget = m_strokeLayer->tiles().pixelBudget();
+    const bool extended = m_materialStroke
+        ? m_materialStroke->extend({sample.x, sample.y, {sample.pressure, 0.0, 0.0, 0.0}})
+        : m_stroke->extend(sample);
+    if (!extended) {
+        const auto reason = m_materialStroke ? m_materialStroke->failureReason() : m_stroke->failureReason();
+        const auto tileBytes = m_materialStroke ? m_strokeLayer->materialTiles().allocatedBytes()
+                                               : m_strokeLayer->tiles().allocatedPixelBytes();
+        const auto tileBudget = m_materialStroke ? 0 : m_strokeLayer->tiles().pixelBudget();
         const bool rolledBack = m_history && m_history->cancelStroke();
         reportStrokeFailure(reason, rolledBack, tileBytes, tileBudget);
     }
@@ -414,30 +540,43 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
     qDebug() << "[CanvasViewport] endStroke() called:"
              << "viewport=(" << x << "," << y << ")" << "pressure=" << pressure;
 
-    if (!m_stroke || !m_strokeLayer || !m_document) { qDebug() << "[CanvasViewport] endStroke: no stroke/layer/document"; cancelStroke(); return; }
+    if ((!m_stroke && !m_materialStroke) || !m_strokeLayer || !m_document) { qDebug() << "[CanvasViewport] endStroke: no stroke/layer/document"; cancelStroke(); return; }
     if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
         m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) {
         qDebug() << "[CanvasViewport] endStroke: layer changed or invalid";
         cancelStroke(); return; }
     auto point = viewportToDocument(x, y);
-    const bool ok = m_stroke->end({point.x(), point.y(), pressure});
-    const auto reason = m_stroke->failureReason();
-    const auto tileBytes = m_strokeLayer->tiles().allocatedPixelBytes();
-    const auto tileBudget = m_strokeLayer->tiles().pixelBudget();
+    const bool materialStroke = bool(m_materialStroke);
+    const bool ok = materialStroke
+        ? m_materialStroke->end({point.x(), point.y(), {pressure, 0.0, 0.0, 0.0}})
+        : m_stroke->end({point.x(), point.y(), pressure});
+    const auto reason = materialStroke ? m_materialStroke->failureReason() : m_stroke->failureReason();
+    const auto tileBytes = materialStroke ? m_strokeLayer->materialTiles().allocatedBytes()
+                                         : m_strokeLayer->tiles().allocatedPixelBytes();
+    const auto tileBudget = materialStroke ? 0 : m_strokeLayer->tiles().pixelBudget();
     if (!ok) {
         const bool rolledBack = m_history && m_history->cancelStroke();
         reportStrokeFailure(reason, rolledBack, tileBytes, tileBudget);
         return;
     }
-    m_stroke.reset(); m_strokeLayer = nullptr;
-    if (m_history && !m_history->commitStroke())
+    m_stroke.reset();
+    m_materialStroke.reset();
+    m_materialReservoir.reset();
+    if (m_history && !m_history->commitStroke()) {
+        if (m_history->strokeActive()) m_history->cancelStroke();
+        if (m_strokeLayer && m_document) m_document->setModified(m_modifiedBeforeStroke);
+        m_strokeLayer = nullptr;
         emit strokeError(QStringLiteral("Could not commit stroke history."));
+    } else m_strokeLayer = nullptr;
     qDebug() << "[CanvasViewport] endStroke: stroke ended, ok=" << ok;
 }
 void CanvasViewport::cancelStroke() {
     qDebug() << "[CanvasViewport] cancelStroke() called";
     if (m_history && m_history->strokeActive()) m_history->cancelStroke();
-    m_stroke.reset(); m_strokeLayer = nullptr;
+    m_stroke.reset();
+    m_materialStroke.reset();
+    m_materialReservoir.reset();
+    m_strokeLayer = nullptr;
 }
 
 QVariant CanvasViewport::colorAt(qreal x, qreal y) const
@@ -455,7 +594,10 @@ QVariant CanvasViewport::colorAt(qreal x, qreal y) const
     // Composed directly, without the viewport cache: sampling must not disturb
     // the cache or the invalidation bookkeeping of the display.
     const auto background = m_document->hasTransparentBackground() ? 0U : m_document->backgroundColor().rgba();
-    const auto tile = CpuTileCompositor::compose(geometry, address->tile, list, background);
+    auto renderedLayers = list;
+    std::vector<std::unique_ptr<SparseTileStore>> materialStores;
+    if (!prepareMaterialRenderLayers(renderedLayers, address->tile, materialStores)) return {};
+    const auto tile = CpuTileCompositor::compose(geometry, address->tile, renderedLayers, background);
     if (!tile) return {};
     const auto index = static_cast<std::size_t>(address->local.y) * static_cast<std::size_t>(tile->width)
                      + static_cast<std::size_t>(address->local.x);

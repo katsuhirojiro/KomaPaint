@@ -227,7 +227,7 @@ void collectWarnings(QtMsgType type, const QMessageLogContext& context, const QS
         QStringLiteral("PropertySlider.qml"), QStringLiteral("SegmentedChoice.qml"), QStringLiteral("SubToolPanel.qml"),
         QStringLiteral("ToolPropertyPanel.qml"), QStringLiteral("BrushSizePanel.qml"), QStringLiteral("LayersPanel.qml"),
         QStringLiteral("NewProjectDialog.qml"), QStringLiteral("CanvasWorkspace.qml"), QStringLiteral("MainToolbar.qml"),
-        QStringLiteral("PreferencesDialog.qml"), QStringLiteral("KomaTheme.qml"),
+        QStringLiteral("PreferencesDialog.qml"), QStringLiteral("KomaSettingsDialog.qml"), QStringLiteral("KomaTheme.qml"),
         QStringLiteral("qrc:/icons/")};
     if (g_warnings && type == QtWarningMsg) {
         bool relevant = message.contains(QStringLiteral("ReferenceError")) || message.contains(QStringLiteral("TypeError"));
@@ -260,6 +260,7 @@ private slots:
     void newProjectDialogShowsTheProjectTypeIcons();
     void iconsFollowTheTheme();
     void preferencesDialogStoresThemeAndIconColours();
+    void komaSettingsApplyAndCancelPersistGlobalValues();
     void brushPanelsCanBeClosedAndComeBack();
 private:
     bool start(Running& app, const QString& name);
@@ -381,6 +382,7 @@ void TestBrushUi::subToolLibraryLoadsRemembersAndResets()
     BrushSettings brush;
     const int defaultSize = brush.size(), defaultSpacing = brush.spacing();
     SubToolLibrary library(&brush);
+    QVERIFY2(library.loadError().isEmpty(), qPrintable(library.loadError()));
     QVERIFY(!library.isPaintTool());
 
     // The first brush is the engine's default brush: nothing changes for a
@@ -393,6 +395,17 @@ void TestBrushUi::subToolLibraryLoadsRemembersAndResets()
     QCOMPARE(brush.opacity(), 100); QCOMPARE(brush.flow(), 100); QCOMPARE(brush.hardness(), 100);
     QCOMPARE(brush.stabilization(), 0); QVERIFY(!brush.textured()); QVERIFY(!brush.erase());
     QVERIFY(!library.isModified());
+    QVERIFY(library.categories().contains(QStringLiteral("Paint")));
+    library.setSearchText(QStringLiteral("soft"));
+    QCOMPARE(library.subTools().size(), 1);
+    QCOMPARE(library.subTools().first().toMap().value(QStringLiteral("index")).toInt(), 1);
+    library.select(library.subTools().first().toMap().value(QStringLiteral("index")).toInt());
+    QCOMPARE(brush.size(), 40); // filtering still selects the real brush configuration
+    library.setSearchText(QString());
+    library.setCategoryFilter(QStringLiteral("Paint"));
+    QCOMPARE(library.subTools().size(), 3);
+    library.setCategoryFilter(QString());
+    library.select(0);
 
     // Every shipped value is inside the range the engine accepts, so loading
     // a sub tool never gets clamped into something else.
@@ -580,6 +593,17 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
     QCOMPARE(brush->size(), int(BrushSettings::MinSize));
     QVERIFY(setSlider(app, QStringLiteral("brushSizeSlider"), 0.5));
     QVERIFY(brush->size() > 40 && brush->size() < 90);                // the bar gives small sizes more room
+
+    // The medium choice changes the setting consumed by CanvasViewport.
+    auto* medium = item(app, QStringLiteral("paintingMediumChoice"));
+    QVERIFY(medium && medium->isVisible());
+    QVERIFY(!brush->traditionalMedia());
+    QPoint mediumPoint = medium->mapToScene(QPointF(medium->width() * 0.75, medium->height() / 2)).toPoint();
+    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, mediumPoint);
+    QTRY_VERIFY(brush->traditionalMedia());
+    mediumPoint = medium->mapToScene(QPointF(medium->width() * 0.25, medium->height() / 2)).toPoint();
+    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, mediumPoint);
+    QTRY_VERIFY(!brush->traditionalMedia());
 
     // Tip shape.
     auto* tip = item(app, QStringLiteral("brushTipChoice"));
@@ -925,7 +949,7 @@ void TestBrushUi::colorSelectorShapeDefaultsFollowTheme()
     QTRY_VERIFY(!wheel->property("triangle").toBool());
     theme->setProperty("mode", QStringLiteral("dark"));
     QTRY_VERIFY(wheel->property("triangle").toBool());
-    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\\n'))));
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 
 // The spectral mixer is deterministic and retains exact endpoints.
@@ -1201,6 +1225,57 @@ void TestBrushUi::preferencesDialogStoresThemeAndIconColours()
         restored->setProperty("mode", QStringLiteral("dark"));
         second.settings->setValue(QStringLiteral("ui/theme"), QStringLiteral("dark"));
     }
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+}
+
+void TestBrushUi::komaSettingsApplyAndCancelPersistGlobalValues()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiKomaSettings")));
+    auto* dialog = app.root->findChild<QObject*>(QStringLiteral("komaSettingsDialog"));
+    QVERIFY(dialog);
+    dialog->setProperty("visible", true);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+
+    for (const QString& category : {QStringLiteral("general"), QStringLiteral("interface"),
+                                     QStringLiteral("canvas"), QStringLiteral("tools"),
+                                     QStringLiteral("brushEngine"), QStringLiteral("performance"),
+                                     QStringLiteral("inputTablet"), QStringLiteral("filesRecovery")}) {
+        QVERIFY2(app.root->findChild<QObject*>(QStringLiteral("komaSettingsPage_") + category),
+                 qPrintable(category));
+    }
+    auto draft = dialog->property("draft").toMap();
+    draft.insert(QStringLiteral("theme"), QStringLiteral("light"));
+    draft.insert(QStringLiteral("defaultTool"), QStringLiteral("pen"));
+    draft.insert(QStringLiteral("recoveryInterval"), 15);
+    dialog->setProperty("draft", draft);
+    auto* apply = item(app, QStringLiteral("komaSettingsApply"));
+    QVERIFY(apply && apply->isVisible() && apply->isEnabled());
+    click(app, apply);
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+    QCOMPARE(app.settings->value(QStringLiteral("ui/theme")).toString(), QStringLiteral("light"));
+    QCOMPARE(app.settings->value(QStringLiteral("tools/defaultTool")).toString(), QStringLiteral("pen"));
+    QCOMPARE(app.settings->value(QStringLiteral("recovery/intervalMinutes")).toInt(), 15);
+    QCOMPARE(app.workspace.defaultTool(), QStringLiteral("pen"));
+    // The active document's tool is project-specific and is not overwritten.
+    QCOMPARE(app.workspace.activeTool(), QStringLiteral("brush"));
+    QCOMPARE(themeOf(app)->property("mode").toString(), QStringLiteral("light"));
+    QVERIFY(app.workspace.newProject(QStringLiteral("Default tool check"), 64, 64, true,
+                                    QStringLiteral("white"), 72));
+    QCOMPARE(app.workspace.activeTool(), QStringLiteral("pen"));
+
+    dialog->setProperty("visible", true);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    draft = dialog->property("draft").toMap();
+    draft.insert(QStringLiteral("theme"), QStringLiteral("dark"));
+    dialog->setProperty("draft", draft);
+    auto* cancel = item(app, QStringLiteral("komaSettingsCancel"));
+    QVERIFY(cancel && cancel->isVisible());
+    click(app, cancel);
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+    QCOMPARE(app.settings->value(QStringLiteral("ui/theme")).toString(), QStringLiteral("light"));
+    QCOMPARE(themeOf(app)->property("mode").toString(), QStringLiteral("light"));
+
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 

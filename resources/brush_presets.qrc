@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/brushes">
+        <file alias="presets.json">brush-presets.json</file>
+    </qresource>
+</RCC>
