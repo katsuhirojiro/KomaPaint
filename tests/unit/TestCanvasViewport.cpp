@@ -335,6 +335,7 @@ void TestCanvasViewport::qmlMouseStroke()
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
     WorkspaceState workspace;
+    QVERIFY(workspace.newDocument(256, 256, false, QColor(Qt::white)));
     QQmlEngine engine;
     engine.addImportPath(QStringLiteral("qrc:/"));
     engine.rootContext()->setContextProperty(QStringLiteral("Workspace"), &workspace);

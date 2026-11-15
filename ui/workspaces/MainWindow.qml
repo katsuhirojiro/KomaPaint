@@ -1138,7 +1138,7 @@ ApplicationWindow {
         body: [
             Text {
                 Layout.fillWidth: true
-                text: qsTr("Save changes to %1?").arg(Workspace.document.title)
+                text: qsTr("Save changes to %1?").arg(Workspace.document ? Workspace.document.title : qsTr("Untitled"))
                 color: KP.text
                 font.pixelSize: KP.fontS
                 wrapMode: Text.WordWrap
