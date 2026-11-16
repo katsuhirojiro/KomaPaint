@@ -63,6 +63,8 @@ class WorkspaceState : public QObject
     Q_PROPERTY(QString         currentFile READ currentFile NOTIFY currentFileChanged)
     Q_PROPERTY(QString         activeTool READ activeTool WRITE setActiveTool NOTIFY activeToolChanged)
     Q_PROPERTY(QString         defaultTool READ defaultTool WRITE setDefaultTool NOTIFY defaultToolChanged)
+    Q_PROPERTY(QString         brushEngine READ brushEngine WRITE setBrushEngine NOTIFY brushEngineChanged)
+    Q_PROPERTY(bool            realisticEngine READ isRealisticEngine NOTIFY brushEngineChanged)
     Q_PROPERTY(qreal           zoom      READ zoom      WRITE setZoom      NOTIFY zoomChanged)
 
 public:
@@ -79,6 +81,9 @@ public:
 
     QString activeTool() const { return m_activeTool; }
     QString defaultTool() const { return m_defaultTool; }
+    QString brushEngine() const { return m_brushEngine; }
+    bool isRealisticEngine() const { return m_brushEngine == QStringLiteral("realistic"); }
+    Q_INVOKABLE void openBrushEngineSettings();
     qreal   zoom()       const { return m_zoom; }
     QString currentFile() const { return m_currentFile; }
     QVariantList projectTabs() const;
@@ -194,12 +199,15 @@ public:
 public slots:
     void setActiveTool(const QString& tool);
     void setDefaultTool(const QString& tool);
+    void setBrushEngine(const QString& engine);
     void setZoom(qreal z);
 
 signals:
     void documentChanged();
     void activeToolChanged(const QString& tool);
     void defaultToolChanged(const QString& tool);
+    void brushEngineChanged(const QString& engine);
+    void openBrushEngineSettingsRequested();
     void zoomChanged(qreal zoom);
     void fitRequested();
     void currentFileChanged();
@@ -283,6 +291,7 @@ private:
     ProjectCreationService* m_creationService;
     QString         m_activeTool = QStringLiteral("brush");
     QString         m_defaultTool = QStringLiteral("brush");
+    QString         m_brushEngine = QStringLiteral("digital");
     QString         m_currentFile;
     QString         m_creationError;
     qreal           m_zoom       = 100.0;

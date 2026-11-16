@@ -98,7 +98,17 @@ void TestPaintMixerApp::brushReservoirReloadAndNonContamination()
 
     mixer.setActiveMediumId(QStringLiteral("watercolour"));
     QVERIFY(mixer.addPigmentToActive(QStringLiteral("PR122"), 1.0));
+    // Loading into brush while Digital engine is active must NOT switch the engine.
+    QCOMPARE(brush.brushEngine(), QStringLiteral("digital"));
     QVERIFY(mixer.loadActiveIntoBrush());
+    QCOMPARE(brush.brushEngine(), QStringLiteral("digital"));
+    QVERIFY(!brush.traditionalMedia());
+    QVERIFY(!brush.materialMixture().isEmpty());
+
+    // Switching to Realistic engine enables material strokes with the loaded mixture.
+    brush.setBrushEngine(QStringLiteral("realistic"));
+    QVERIFY(mixer.loadActiveIntoBrush());
+    QVERIFY(brush.isRealisticEngine());
     QVERIFY(brush.traditionalMedia());
     QCOMPARE(brush.mediumId(), QStringLiteral("watercolour"));
     QVERIFY(!brush.persistentReservoir()); // auto-reload ON by default
@@ -209,6 +219,7 @@ void TestPaintMixerApp::komaCompatibilityWithMixerPaintedStrokes()
     view.refreshNow();
 
     BrushSettings brush;
+    brush.setBrushEngine(QStringLiteral("realistic"));
     ColorPalette colors;
     PaintMixerController mixer(&brush, &colors);
     mixer.setActiveMediumId(QStringLiteral("gouache"));

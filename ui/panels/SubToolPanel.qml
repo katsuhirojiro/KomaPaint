@@ -17,6 +17,8 @@ Rectangle {
     color: KP.paneBg
 
     readonly property var library: Workspace.subTools
+    readonly property var brush: Workspace.brush
+    readonly property bool realisticEngine: Workspace.realisticEngine
     // Label of the active tool, taken from the tool palette's own list.
     property string toolLabel: Workspace.activeTool
     readonly property bool painting: library.paintTool
@@ -81,6 +83,84 @@ Rectangle {
                 anchors.bottom: parent.bottom
                 height: 1
                 color: KP.hairline
+            }
+        }
+
+        // ---- Brush engine status & Realistic-only preset guard
+        Rectangle {
+            objectName: "subToolEngineBar"
+            Layout.fillWidth: true
+            implicitHeight: engineBarRow.implicitHeight + 2 * KP.gapXS
+            visible: panel.painting
+            color: KP.paneBgAlt
+
+            RowLayout {
+                id: engineBarRow
+                anchors.fill: parent
+                anchors.leftMargin: KP.panelInset
+                anchors.rightMargin: KP.gapS
+                anchors.topMargin: KP.gapXS
+                anchors.bottomMargin: KP.gapXS
+                spacing: KP.gapS
+
+                Text {
+                    objectName: "subToolEngineLabel"
+                    Layout.fillWidth: true
+                    text: panel.realisticEngine ? qsTr("Engine: Realistic") : qsTr("Engine: Digital")
+                    color: panel.realisticEngine ? KP.textAccent : KP.textMuted
+                    font.pixelSize: KP.fontXS
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                }
+                KpButton {
+                    objectName: "subToolEngineSettingsButton"
+                    small: true
+                    label: qsTr("Engine…")
+                    tip: qsTr("Open Settings → Brush Engine")
+                    onClicked: Workspace.openBrushEngineSettings()
+                }
+            }
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 1
+                color: KP.hairline
+            }
+        }
+
+        Rectangle {
+            objectName: "subToolRealisticWarning"
+            Layout.fillWidth: true
+            Layout.leftMargin: KP.panelInset
+            Layout.rightMargin: KP.gapS
+            Layout.topMargin: KP.gapXS
+            visible: panel.painting && !panel.realisticEngine && panel.brush.blockedByDigitalEngine
+            implicitHeight: visible ? warningCol.implicitHeight + 2 * KP.gapS : 0
+            radius: KP.radiusS
+            color: KP.rowSelected
+            border.width: 1
+            border.color: KP.ember
+
+            ColumnLayout {
+                id: warningCol
+                anchors.fill: parent
+                anchors.margins: KP.gapS
+                spacing: KP.gapXS
+                Text {
+                    Layout.fillWidth: true
+                    text: qsTr("\"%1\" requires the Realistic brush engine. Select Realistic in Settings → Brush Engine to paint with it.")
+                        .arg(panel.library.currentName)
+                    color: KP.text
+                    font.pixelSize: KP.fontXS
+                    wrapMode: Text.WordWrap
+                }
+                KpButton {
+                    objectName: "subToolSwitchEngineButton"
+                    small: true
+                    label: qsTr("Open Brush Engine Settings…")
+                    onClicked: Workspace.openBrushEngineSettings()
+                }
             }
         }
 
@@ -192,6 +272,7 @@ Rectangle {
 
                 contentItem: Item {
                     id: contentBox
+                    opacity: (!panel.realisticEngine && row.modelData.realisticOnly) ? 0.65 : 1.0
 
                     RowLayout {
                         anchors.left: parent.left
@@ -262,6 +343,13 @@ Rectangle {
                                     text: row.modelData.textured ? qsTr("textured") : qsTr("round")
                                     color: KP.textSubtle
                                     font.pixelSize: KP.fontMicro
+                                }
+                                Text {
+                                    visible: Boolean(row.modelData.realisticOnly)
+                                    text: qsTr("Realistic")
+                                    color: panel.realisticEngine ? KP.textAccent : KP.ember
+                                    font.pixelSize: KP.fontMicro
+                                    font.weight: Font.Medium
                                 }
                             }
                         }

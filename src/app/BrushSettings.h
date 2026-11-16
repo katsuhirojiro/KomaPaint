@@ -19,7 +19,11 @@ class BrushSettings : public QObject {
     Q_PROPERTY(int stabilization READ stabilization WRITE setStabilization NOTIFY changed)
     // True while an eraser is selected: strokes remove paint from the layer.
     Q_PROPERTY(bool erase READ erase WRITE setErase NOTIFY changed)
+    Q_PROPERTY(QString brushEngine READ brushEngine WRITE setBrushEngine NOTIFY brushEngineChanged)
+    Q_PROPERTY(bool realisticEngine READ isRealisticEngine NOTIFY brushEngineChanged)
     Q_PROPERTY(bool traditionalMedia READ traditionalMedia WRITE setTraditionalMedia NOTIFY changed)
+    Q_PROPERTY(bool presetRequiresRealistic READ presetRequiresRealistic NOTIFY presetAvailabilityChanged)
+    Q_PROPERTY(bool blockedByDigitalEngine READ isBlockedByDigitalEngine NOTIFY presetAvailabilityChanged)
     // False by default: every new stroke starts with a clean, full reservoir
     // of the configured colour/mixture. True keeps remaining paint across
     // strokes as an optional advanced workflow.
@@ -51,6 +55,12 @@ class BrushSettings : public QObject {
     Q_PROPERTY(int minimumSpacing READ minimumSpacing CONSTANT)
     Q_PROPERTY(int maximumSpacing READ maximumSpacing CONSTANT)
 public:
+    enum class BrushEngineMode { Digital, Realistic };
+    Q_ENUM(BrushEngineMode)
+    static QString normalizeBrushEngine(const QString& engine) {
+        return engine.trimmed().compare(QStringLiteral("realistic"), Qt::CaseInsensitive) == 0
+            ? QStringLiteral("realistic") : QStringLiteral("digital");
+    }
     using QObject::QObject;
     // Limits of the brush engine (see BrushRasterizer::dab and BrushStroke).
     static constexpr int MinSize = 1, MaxSize = 256, MinSpacing = 5, MaxSpacing = 50;
@@ -62,7 +72,14 @@ public:
     int hardness() const { return m_hardness; }
     int stabilization() const { return m_stabilization; }
     bool erase() const { return m_erase; }
+    QString brushEngine() const { return m_brushEngine; }
+    bool isRealisticEngine() const { return m_brushEngine == QStringLiteral("realistic"); }
+    BrushEngineMode engineMode() const {
+        return isRealisticEngine() ? BrushEngineMode::Realistic : BrushEngineMode::Digital;
+    }
     bool traditionalMedia() const { return m_traditionalMedia; }
+    bool presetRequiresRealistic() const { return m_traditionalMedia; }
+    bool isBlockedByDigitalEngine() const { return !isRealisticEngine() && m_traditionalMedia; }
     bool persistentReservoir() const { return m_persistentReservoir; }
     QString mediumId() const { return m_mediumId; }
     QString materialPresetId() const { return m_materialPresetId; }
@@ -95,7 +112,20 @@ public:
     void setHardness(int v) { v = qBound(0, v, 100); if (m_hardness != v) { m_hardness = v; emit changed(); } }
     void setStabilization(int v) { v = qBound(0, v, 100); if (m_stabilization != v) { m_stabilization = v; emit changed(); } }
     void setErase(bool v) { if (m_erase != v) { m_erase = v; emit changed(); } }
-    void setTraditionalMedia(bool v) { if (m_traditionalMedia != v) { m_traditionalMedia = v; emit changed(); } }
+    void setBrushEngine(const QString& engine) {
+        const QString normalized = normalizeBrushEngine(engine);
+        if (m_brushEngine == normalized) return;
+        m_brushEngine = normalized;
+        emit brushEngineChanged();
+        emit presetAvailabilityChanged();
+    }
+    void setTraditionalMedia(bool v) {
+        if (m_traditionalMedia != v) {
+            m_traditionalMedia = v;
+            emit changed();
+            emit presetAvailabilityChanged();
+        }
+    }
     void setPersistentReservoir(bool v) { if (m_persistentReservoir != v) { m_persistentReservoir = v; emit changed(); } }
     void setMediumId(const QString& v) {
         const QString normalized = v.trimmed() == QStringLiteral("watercolour")
@@ -151,12 +181,15 @@ public:
     quint64 mixtureRevision() const { return m_mixtureRevision; }
 signals:
     void changed();
+    void brushEngineChanged();
+    void presetAvailabilityChanged();
     void materialMixtureChanged();
 private:
     int m_size = 16, m_opacity = 100, m_flow = 100, m_spacing = 15;
     int m_hardness = 100, m_stabilization = 0;
     bool m_textured = false;
     bool m_erase = false;
+    QString m_brushEngine = QStringLiteral("digital");
     bool m_traditionalMedia = false;
     bool m_persistentReservoir = false;
     QString m_mediumId = QStringLiteral("gouache");

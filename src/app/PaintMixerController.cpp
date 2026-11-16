@@ -536,25 +536,32 @@ bool PaintMixerController::loadBatchIntoBrush(const material::PaintBatch& batch,
     const QVariantMap map = batchToBrushMap(batch);
     if (!m_brush->loadMaterialMixture(map)) return false;
 
-    m_brush->setErase(false);
-    m_brush->setTraditionalMedia(true);
-    m_brush->setMediumId(targetMedium);
-    // If current preset is a pigment-free water/lifting tool, switch to a
-    // paint-bearing round brush in the target medium while keeping user tip
-    // choices like Dry Gouache or Watercolour Mop intact when compatible.
-    const QString preset = m_brush->materialPresetId();
-    if (preset == QStringLiteral("clean-water") || preset == QStringLiteral("paint-lifting")) {
-        m_brush->setMaterialPresetId(targetMedium == QStringLiteral("watercolour")
-            ? QStringLiteral("watercolour-round") : QStringLiteral("gouache-round"));
-    }
+    if (m_brush->isRealisticEngine()) {
+        m_brush->setErase(false);
+        m_brush->setTraditionalMedia(true);
+        m_brush->setMediumId(targetMedium);
+        // If current preset is a pigment-free water/lifting tool, switch to a
+        // paint-bearing round brush in the target medium while keeping user tip
+        // choices like Dry Gouache or Watercolour Mop intact when compatible.
+        const QString preset = m_brush->materialPresetId();
+        if (preset == QStringLiteral("clean-water") || preset == QStringLiteral("paint-lifting")) {
+            m_brush->setMaterialPresetId(targetMedium == QStringLiteral("watercolour")
+                ? QStringLiteral("watercolour-round") : QStringLiteral("gouache-round"));
+        }
 
-    const QString reloadMode = m_brush->persistentReservoir()
-        ? QStringLiteral("Persistent reservoir ON")
-        : QStringLiteral("Auto-reload ON");
-    setNotice(QStringLiteral("Loaded \"%1\" into brush (%2 · %3).")
-        .arg(label, targetMedium == QStringLiteral("watercolour")
-             ? QStringLiteral("Watercolour") : QStringLiteral("Gouache"),
-             reloadMode));
+        const QString reloadMode = m_brush->persistentReservoir()
+            ? QStringLiteral("Persistent reservoir ON")
+            : QStringLiteral("Auto-reload ON");
+        setNotice(QStringLiteral("Loaded \"%1\" into brush (%2 · %3).")
+            .arg(label, targetMedium == QStringLiteral("watercolour")
+                 ? QStringLiteral("Watercolour") : QStringLiteral("Gouache"),
+                 reloadMode));
+    } else {
+        // Loading a mixture in Digital mode preserves the mixture on BrushSettings
+        // without silently switching the user's Brush Engine or altering presets.
+        setNotice(QStringLiteral("Loaded \"%1\" mixture into brush. Digital engine stays active; switch to Realistic in Settings → Brush Engine to paint physically.")
+            .arg(label));
+    }
     emit brushStateChanged();
     return true;
 }

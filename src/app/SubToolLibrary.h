@@ -33,6 +33,7 @@ class SubToolLibrary : public QObject {
     Q_PROPERTY(QString loadError READ loadError CONSTANT)
     Q_PROPERTY(int currentIndex READ currentIndex NOTIFY currentChanged)
     Q_PROPERTY(QString currentName READ currentName NOTIFY currentChanged)
+    Q_PROPERTY(bool currentRequiresRealistic READ currentRequiresRealistic NOTIFY currentChanged)
     // True when the current sub tool differs from the values it shipped with.
     Q_PROPERTY(bool modified READ isModified NOTIFY subToolsChanged)
 public:
@@ -61,6 +62,7 @@ public:
     QString loadError() const { return m_loadError; }
     int currentIndex() const;
     QString currentName() const;
+    bool currentRequiresRealistic() const;
     bool isModified() const;
 
     Q_INVOKABLE bool paints(const QString& tool) const;

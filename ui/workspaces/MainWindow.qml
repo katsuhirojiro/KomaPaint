@@ -1221,6 +1221,12 @@ ApplicationWindow {
     KomaSettingsDialog {
         id: komaSettingsDialog
     }
+    Connections {
+        target: Workspace
+        function onOpenBrushEngineSettingsRequested() {
+            komaSettingsDialog.openCategory("brushEngine")
+        }
+    }
 
     PreferencesDialog {
         id: preferencesDialog

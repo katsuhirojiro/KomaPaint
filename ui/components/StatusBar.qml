@@ -104,6 +104,16 @@ Rectangle {
                 verticalAlignment: Text.AlignVCenter
             }
             Divider { Layout.alignment: Qt.AlignVCenter }
+            Caption { Layout.alignment: Qt.AlignVCenter; text: qsTr("ENGINE") }
+            Text {
+                objectName: "statusBarBrushEngine"
+                Layout.alignment: Qt.AlignVCenter
+                text: Workspace.realisticEngine ? qsTr("Realistic") : qsTr("Digital")
+                color: Workspace.realisticEngine ? KP.textAccent : KP.textMuted
+                font.pixelSize: KP.fontXS + 1
+                verticalAlignment: Text.AlignVCenter
+            }
+            Divider { Layout.alignment: Qt.AlignVCenter }
             Caption { Layout.alignment: Qt.AlignVCenter; text: qsTr("SIZE") }
             Fact { Layout.alignment: Qt.AlignVCenter; text: Workspace.brush.size + " px" }
             Caption { Layout.alignment: Qt.AlignVCenter; text: qsTr("OPACITY") }

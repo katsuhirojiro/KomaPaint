@@ -30,6 +30,8 @@ KomaPaintApp::KomaPaintApp(const QString& fileToOpen, QObject* parent)
 {
     m_workspace.setDefaultTool(m_settings.value(QStringLiteral("tools/defaultTool"),
                                                 QStringLiteral("brush")).toString());
+    m_workspace.setBrushEngine(m_settings.value(QStringLiteral("tools/brushEngine"),
+                                                QStringLiteral("digital")).toString());
     const int recoveryInterval = m_settings.value(QStringLiteral("recovery/intervalMinutes"), 10).toInt();
     m_workspace.setRecoveryInterval(recoveryInterval);
 }
@@ -125,6 +127,8 @@ int KomaPaintApp::run()
     app->setOrganizationDomain(QStringLiteral(KOMAPAINT_DOMAIN));
     m_workspace.setDefaultTool(m_settings.value(QStringLiteral("tools/defaultTool"),
                                                QStringLiteral("brush")).toString());
+    m_workspace.setBrushEngine(m_settings.value(QStringLiteral("tools/brushEngine"),
+                                                QStringLiteral("digital")).toString());
 
     const QStringList preferredFonts = {
         QStringLiteral("Segoe UI"),

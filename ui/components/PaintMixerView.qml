@@ -73,6 +73,38 @@ Rectangle {
             width: scroller.width - 2 * KP.panelInset
             spacing: KP.gapS
 
+            // ---- Engine context note when Digital engine is active
+            Rectangle {
+                objectName: "mixerEngineNotice"
+                Layout.fillWidth: true
+                visible: !Workspace.realisticEngine
+                implicitHeight: visible ? mixerEngineRow.implicitHeight + 2 * KP.gapXS : 0
+                radius: KP.radiusS
+                color: KP.paneBgAlt
+                border.width: 1
+                border.color: KP.hairline
+
+                RowLayout {
+                    id: mixerEngineRow
+                    anchors.fill: parent
+                    anchors.margins: KP.gapXS
+                    spacing: KP.gapXS
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Digital engine active · mix & load anytime; enable Realistic in Settings to paint physically.")
+                        color: KP.textMuted
+                        font.pixelSize: KP.fontMicro
+                        wrapMode: Text.WordWrap
+                    }
+                    KpButton {
+                        objectName: "mixerEngineSettingsButton"
+                        small: true
+                        label: qsTr("Engine…")
+                        onClicked: Workspace.openBrushEngineSettings()
+                    }
+                }
+            }
+
             // ---- Medium selector + Mixer Undo / Redo (decoupled from canvas)
             RowLayout {
                 Layout.fillWidth: true

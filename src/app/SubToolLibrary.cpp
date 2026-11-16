@@ -324,6 +324,9 @@ QVariantList SubToolLibrary::subTools() const
         item.insert(QStringLiteral("textured"), entry.current.textured);
         item.insert(QStringLiteral("hardness"), entry.current.hardness);
         item.insert(QStringLiteral("stabilization"), entry.current.stabilization);
+        item.insert(QStringLiteral("traditionalMedia"), entry.current.traditionalMedia);
+        item.insert(QStringLiteral("realisticOnly"), entry.defaults.traditionalMedia);
+        item.insert(QStringLiteral("mediumId"), entry.current.mediumId);
         item.insert(QStringLiteral("modified"), !(entry.current == entry.defaults));
         list.push_back(item);
     }
@@ -340,6 +343,13 @@ QString SubToolLibrary::currentName() const
     if (m_group < 0) return {};
     const auto& group = m_groups[static_cast<std::size_t>(m_group)];
     return group.entries[static_cast<std::size_t>(group.current)].name;
+}
+
+bool SubToolLibrary::currentRequiresRealistic() const
+{
+    if (m_group < 0) return false;
+    const auto& group = m_groups[static_cast<std::size_t>(m_group)];
+    return group.entries[static_cast<std::size_t>(group.current)].defaults.traditionalMedia;
 }
 
 bool SubToolLibrary::isModified() const

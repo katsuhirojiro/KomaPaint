@@ -20,6 +20,7 @@ Rectangle {
     readonly property var library: Workspace.subTools
     readonly property var doc: Workspace.document
     readonly property bool painting: library.paintTool
+    readonly property bool realisticEngine: Workspace.realisticEngine
     function hint(tool) {
         if (tool === "zoom") return qsTr("Click to zoom in. Alt-click or right-click to zoom out.")
         if (tool === "hand") return qsTr("Drag to move the view.")
@@ -108,17 +109,104 @@ Rectangle {
                 width: scroll.width - 2 * KP.panelInset
                 spacing: 0
 
+                Rectangle {
+                    objectName: "brushEngineHeader"
+                    width: parent.width
+                    height: engineHeaderRow.implicitHeight + 2 * KP.gapXS
+                    radius: KP.radiusS
+                    color: KP.paneBgAlt
+                    border.width: 1
+                    border.color: KP.hairline
+
+                    RowLayout {
+                        id: engineHeaderRow
+                        anchors.fill: parent
+                        anchors.margins: KP.gapXS
+                        spacing: KP.gapS
+                        Text {
+                            Layout.fillWidth: true
+                            objectName: "brushEngineStatusText"
+                            text: panel.realisticEngine
+                                ? qsTr("Engine: Realistic")
+                                : qsTr("Engine: Digital")
+                            color: panel.realisticEngine ? KP.textAccent : KP.text
+                            font.pixelSize: KP.fontXS
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                        }
+                        KpButton {
+                            objectName: "brushEngineSettingsButton"
+                            small: true
+                            label: qsTr("Settings…")
+                            tip: qsTr("Open Settings → Brush Engine")
+                            onClicked: Workspace.openBrushEngineSettings()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    objectName: "realisticPresetNotice"
+                    width: parent.width
+                    visible: !panel.realisticEngine && panel.brush.blockedByDigitalEngine
+                    height: visible ? realisticNoticeCol.implicitHeight + 2 * KP.gapS : 0
+                    radius: KP.radiusS
+                    color: KP.rowSelected
+                    border.width: 1
+                    border.color: KP.ember
+
+                    ColumnLayout {
+                        id: realisticNoticeCol
+                        anchors.fill: parent
+                        anchors.margins: KP.gapS
+                        spacing: KP.gapXS
+                        Text {
+                            Layout.fillWidth: true
+                            text: qsTr("\"%1\" is a Realistic-only brush. Select Realistic in Settings → Brush Engine, or pick a Digital preset.")
+                                .arg(panel.library.currentName)
+                            color: KP.text
+                            font.pixelSize: KP.fontXS
+                            wrapMode: Text.WordWrap
+                        }
+                        KpButton {
+                            objectName: "switchToRealisticButton"
+                            small: true
+                            label: qsTr("Brush Engine Settings…")
+                            onClicked: Workspace.openBrushEngineSettings()
+                        }
+                    }
+                }
+
+                RowLayout {
+                    objectName: "digitalStoredMixtureNotice"
+                    width: parent.width
+                    visible: !panel.realisticEngine && panel.brush.hasMaterialMixture
+                    spacing: KP.gapXS
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Mixer mixture stored (used in Realistic mode)")
+                        color: KP.textMuted
+                        font.pixelSize: KP.fontMicro
+                        elide: Text.ElideRight
+                    }
+                    KpButton {
+                        objectName: "clearDigitalStoredMixtureButton"
+                        small: true
+                        label: qsTr("Clear")
+                        tip: qsTr("Clear stored Paint Mixer mixture")
+                        onClicked: panel.brush.clearMaterialMixture()
+                    }
+                }
+
                 PanelSection {
                     objectName: "paintingMediumSection"
                     width: parent.width
                     title: qsTr("Painting medium")
-                    hint: !panel.brush.traditionalMedia
-                        ? qsTr("digital · raster")
-                        : (panel.brush.erase
-                            ? qsTr("lift material")
-                            : (panel.brush.mediumId === "watercolour"
-                                ? qsTr("watercolour · transparent fluid")
-                                : qsTr("gouache · opaque matte")))
+                    visible: panel.realisticEngine
+                    hint: panel.brush.erase
+                        ? qsTr("lift material")
+                        : (panel.brush.mediumId === "watercolour"
+                            ? qsTr("watercolour · transparent fluid")
+                            : qsTr("gouache · opaque matte"))
                     contentTopMargin: KP.gapS
                     contentBottomMargin: KP.gapS
                     Item {
@@ -132,24 +220,16 @@ Rectangle {
                                 id: mediumChoice
                                 objectName: "paintingMediumChoice"
                                 width: parent.width
-                                options: [qsTr("Digital"), qsTr("Gouache"), qsTr("Watercolour")]
-                                currentIndex: !panel.brush.traditionalMedia ? 0
-                                    : (panel.brush.mediumId === "watercolour" ? 2 : 1)
+                                visible: !panel.brush.erase
+                                options: [qsTr("Gouache"), qsTr("Watercolour")]
+                                currentIndex: panel.brush.mediumId === "watercolour" ? 1 : 0
                                 onChosen: function(index) {
-                                    if (index === 0) {
-                                        panel.brush.traditionalMedia = false
-                                    } else if (index === 1) {
-                                        panel.brush.mediumId = "gouache"
-                                        panel.brush.traditionalMedia = true
-                                    } else {
-                                        panel.brush.mediumId = "watercolour"
-                                        panel.brush.traditionalMedia = true
-                                    }
+                                    panel.brush.mediumId = index === 1 ? "watercolour" : "gouache"
                                 }
                             }
                             RowLayout {
                                 width: parent.width
-                                visible: panel.brush.traditionalMedia
+                                visible: panel.realisticEngine
                                          && panel.brush.hasMaterialMixture
                                 spacing: KP.gapXS
                                 Text {
@@ -178,7 +258,7 @@ Rectangle {
                     width: parent.width
                     title: qsTr("Paper & surface")
                     hint: panel.doc ? panel.doc.surfaceName : qsTr("Cold Press")
-                    visible: panel.brush.traditionalMedia && panel.doc !== null
+                    visible: panel.realisticEngine && panel.doc !== null
                     contentTopMargin: KP.gapS
                     contentBottomMargin: KP.gapS
 
@@ -335,10 +415,11 @@ Rectangle {
                 }
 
                 PanelSection {
+                    objectName: "materialPaintSection"
                     width: parent.width
                     title: qsTr("Material paint")
                     hint: qsTr("load · pigment · water · body")
-                    visible: panel.brush.traditionalMedia && !panel.brush.erase
+                    visible: panel.realisticEngine && !panel.brush.erase
                     contentTopMargin: KP.gapS
                     contentBottomMargin: KP.gapS
 
@@ -404,10 +485,11 @@ Rectangle {
                 }
 
                 PanelSection {
+                    objectName: "advancedMaterialSection"
                     width: parent.width
                     title: qsTr("Advanced material")
                     hint: panel.brush.persistentReservoir ? qsTr("persistent") : qsTr("auto-reload")
-                    visible: panel.brush.traditionalMedia
+                    visible: panel.realisticEngine
                     collapsible: true
                     expanded: false
                     contentTopMargin: KP.gapS
@@ -553,7 +635,7 @@ Rectangle {
                     width: parent.width
                     title: qsTr("Advanced paper physics")
                     hint: panel.doc ? panel.doc.surfaceId : ""
-                    visible: panel.brush.traditionalMedia && panel.doc !== null
+                    visible: panel.realisticEngine && panel.doc !== null
                     collapsible: true
                     expanded: false
                     contentTopMargin: KP.gapS

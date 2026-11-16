@@ -153,6 +153,7 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
         emit fileErrorOccurred(error);
     });
     m_brush = new BrushSettings(this);
+    m_brush->setBrushEngine(m_brushEngine);
     // The sub tool library follows the active tool wherever it changes (tool
     // palette, tab switch, session restore) and loads that tool's settings.
     m_subTools = new SubToolLibrary(m_brush, this);
@@ -517,6 +518,20 @@ void WorkspaceState::setDefaultTool(const QString& tool)
     m_defaultTool = tool;
     if (m_tabs.empty()) setActiveTool(tool);
     emit defaultToolChanged(m_defaultTool);
+}
+
+void WorkspaceState::setBrushEngine(const QString& engine)
+{
+    const QString normalized = BrushSettings::normalizeBrushEngine(engine);
+    if (m_brushEngine == normalized && m_brush->brushEngine() == normalized) return;
+    m_brushEngine = normalized;
+    m_brush->setBrushEngine(normalized);
+    emit brushEngineChanged(m_brushEngine);
+}
+
+void WorkspaceState::openBrushEngineSettings()
+{
+    emit openBrushEngineSettingsRequested();
 }
 
 void WorkspaceState::setZoom(qreal z)

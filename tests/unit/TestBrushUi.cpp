@@ -280,6 +280,7 @@ private slots:
     void iconsFollowTheTheme();
     void preferencesDialogStoresThemeAndIconColours();
     void komaSettingsApplyAndCancelPersistGlobalValues();
+    void brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive();
     void brushPanelsCanBeClosedAndComeBack();
 private:
     bool start(Running& app, const QString& name);
@@ -629,11 +630,25 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
     QVERIFY(setSlider(app, QStringLiteral("brushSizeSlider"), 0.5));
     QVERIFY(brush->size() > 40 && brush->size() < 90);                // the bar gives small sizes more room
 
-    // The medium choice changes the setting consumed by CanvasViewport.
+    // Digital is the default Brush Engine, so physical material controls stay hidden.
+    QCOMPARE(app.workspace.brushEngine(), QStringLiteral("digital"));
+    QVERIFY(!app.workspace.isRealisticEngine());
+    auto* engineStatus = item(app, QStringLiteral("brushEngineStatusText"));
+    QVERIFY(engineStatus && engineStatus->property("text").toString().contains(QStringLiteral("Digital")));
     auto* medium = item(app, QStringLiteral("paintingMediumChoice"));
-    QVERIFY(medium && medium->isVisible());
+    QVERIFY(medium && !medium->isVisible());
+    auto* paperSection = item(app, QStringLiteral("paperSurfaceSection"));
+    QVERIFY(paperSection && !paperSection->isVisible());
+    auto* materialSection = item(app, QStringLiteral("materialPaintSection"));
+    QVERIFY(materialSection && !materialSection->isVisible());
+
+    // Switching to Realistic reveals physical material controls and medium choice.
+    app.workspace.setBrushEngine(QStringLiteral("realistic"));
+    QTRY_VERIFY(medium->isVisible());
+    QTRY_VERIFY(paperSection->isVisible());
+    QTRY_VERIFY(materialSection->isVisible());
+    QTest::qWait(180);
     scrollIntoView(medium);
-    QVERIFY(!brush->traditionalMedia());
     auto clickSegment = [&](QQuickItem* segmented, int index) {
         scrollIntoView(segmented);
         QCoreApplication::processEvents();
@@ -648,13 +663,16 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
         scrollIntoView(buttons[index]);
         click(app, buttons[index]);
     };
-    clickSegment(medium, 2); // Watercolour
-    QTRY_VERIFY(brush->traditionalMedia());
-    QCOMPARE(brush->mediumId(), QStringLiteral("watercolour"));
-    // Let ToolPropertyPanel's PanelSection height animations (140 ms) settle before clicking again.
+    clickSegment(medium, 1); // Watercolour
+    QTRY_COMPARE(brush->mediumId(), QStringLiteral("watercolour"));
     QTest::qWait(180);
-    clickSegment(medium, 0); // Digital
-    QTRY_VERIFY(!brush->traditionalMedia());
+    clickSegment(medium, 0); // Gouache
+    QTRY_COMPARE(brush->mediumId(), QStringLiteral("gouache"));
+    // Switching back to Digital hides incompatible material controls again.
+    app.workspace.setBrushEngine(QStringLiteral("digital"));
+    QTRY_VERIFY(!medium->isVisible());
+    QTRY_VERIFY(!paperSection->isVisible());
+    QTest::qWait(180);
 
     // Tip shape.
     auto* tip = item(app, QStringLiteral("brushTipChoice"));
@@ -806,13 +824,37 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QVERIFY(softRow);
     QTRY_VERIFY(softRow->isVisible() && softRow->width() > 0 && softRow->height() > 0);
 
+    // Selecting a Realistic-only preset while Digital is active explains that
+    // Realistic engine must be selected and blocks physical strokes.
     QVERIFY(clickNamed(app, QStringLiteral("subTool3")));  // Gouache Round
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Gouache Round"));
     QVERIFY(brush->traditionalMedia());
     QCOMPARE(brush->mediumId(), QStringLiteral("gouache"));
     QVERIFY(!brush->persistentReservoir());
+    auto* subToolWarning = item(app, QStringLiteral("subToolRealisticWarning"));
+    QVERIFY(subToolWarning && subToolWarning->isVisible());
+    auto* propertyWarning = item(app, QStringLiteral("realisticPresetNotice"));
+    QVERIFY(propertyWarning && propertyWarning->isVisible());
     auto* loadSlider = item(app, QStringLiteral("brushPaintLoadSlider"));
-    QVERIFY(loadSlider && loadSlider->isVisible());
+    QVERIFY(loadSlider && !loadSlider->isVisible());
+
+    // Attempting to paint with the Realistic-only preset in Digital mode shows
+    // an explanatory dialog without allocating material tiles.
+    drag(app, {onCanvas(app, 200, 200), onCanvas(app, 230, 200)});
+    auto* errorDlg = app.root->findChild<QObject*>(QStringLiteral("brushErrorDialog"));
+    QVERIFY(errorDlg);
+    QTRY_VERIFY(errorDlg->property("opened").toBool());
+    auto* errorLabel = app.root->findChild<QObject*>(QStringLiteral("brushErrorLabel"));
+    QVERIFY(errorLabel && errorLabel->property("text").toString().contains(QStringLiteral("Realistic")));
+    QCOMPARE(ws.layers()->layerAt(0)->materialTiles().allocatedTiles(), std::size_t(0));
+    QMetaObject::invokeMethod(errorDlg, "accept");
+    QTRY_VERIFY(!errorDlg->property("opened").toBool());
+
+    // Enable Realistic engine: warnings disappear and material controls become active.
+    ws.setBrushEngine(QStringLiteral("realistic"));
+    QTRY_VERIFY(!subToolWarning->isVisible());
+    QTRY_VERIFY(!propertyWarning->isVisible());
+    QTRY_VERIFY(loadSlider->isVisible());
 
     ws.subTools()->select(4); // Watercolour Round
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Watercolour Round"));
@@ -846,6 +888,7 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Paint Lifting"));
     QCOMPARE(brush->materialPresetId(), QStringLiteral("paint-lifting"));
 
+    ws.setBrushEngine(QStringLiteral("digital"));
     QVERIFY(clickNamed(app, QStringLiteral("subTool1")));  // Soft brush
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Soft brush"));
     QCOMPARE(brush->size(), 40); QCOMPARE(brush->hardness(), 30); QCOMPARE(brush->flow(), 35);
@@ -1128,8 +1171,10 @@ void TestBrushUi::colorPanelTabsPreserveWheelAndMixerState()
     click(app, addPy3);
     QTRY_COMPARE(mixer->activeDeposit().value(QStringLiteral("components")).toList().size(), 2);
     QVERIFY(clickNamed(app, QStringLiteral("mixerLoadBrushButton")));
-    QTRY_VERIFY(app.workspace.brush()->traditionalMedia());
-    QVERIFY(!app.workspace.brush()->materialMixture().isEmpty());
+    QTRY_VERIFY(!app.workspace.brush()->materialMixture().isEmpty());
+    // Loading a physical mixture must not silently switch the user's Brush Engine.
+    QCOMPARE(app.workspace.brushEngine(), QStringLiteral("digital"));
+    QVERIFY(!app.workspace.isRealisticEngine());
 
     // Switch back to Color Wheel tab -> wheel colour & state preserved; mixer state preserved.
     QVERIFY(clickNamed(app, QStringLiteral("colorPanelTab_wheel")));
@@ -1428,8 +1473,10 @@ void TestBrushUi::komaSettingsApplyAndCancelPersistGlobalValues()
                  qPrintable(category));
     }
     auto draft = dialog->property("draft").toMap();
+    QCOMPARE(draft.value(QStringLiteral("brushEngine")).toString(), QStringLiteral("digital"));
     draft.insert(QStringLiteral("theme"), QStringLiteral("light"));
     draft.insert(QStringLiteral("defaultTool"), QStringLiteral("pen"));
+    draft.insert(QStringLiteral("brushEngine"), QStringLiteral("realistic"));
     draft.insert(QStringLiteral("recoveryInterval"), 15);
     dialog->setProperty("draft", draft);
     auto* apply = item(app, QStringLiteral("komaSettingsApply"));
@@ -1438,8 +1485,10 @@ void TestBrushUi::komaSettingsApplyAndCancelPersistGlobalValues()
     QTRY_VERIFY(!dialog->property("opened").toBool());
     QCOMPARE(app.settings->value(QStringLiteral("ui/theme")).toString(), QStringLiteral("light"));
     QCOMPARE(app.settings->value(QStringLiteral("tools/defaultTool")).toString(), QStringLiteral("pen"));
+    QCOMPARE(app.settings->value(QStringLiteral("tools/brushEngine")).toString(), QStringLiteral("realistic"));
     QCOMPARE(app.settings->value(QStringLiteral("recovery/intervalMinutes")).toInt(), 15);
     QCOMPARE(app.workspace.defaultTool(), QStringLiteral("pen"));
+    QCOMPARE(app.workspace.brushEngine(), QStringLiteral("realistic"));
     // The active document's tool is project-specific and is not overwritten.
     QCOMPARE(app.workspace.activeTool(), QStringLiteral("brush"));
     QCOMPARE(themeOf(app)->property("mode").toString(), QStringLiteral("light"));
@@ -1451,15 +1500,104 @@ void TestBrushUi::komaSettingsApplyAndCancelPersistGlobalValues()
     QTRY_VERIFY(dialog->property("opened").toBool());
     draft = dialog->property("draft").toMap();
     draft.insert(QStringLiteral("theme"), QStringLiteral("dark"));
+    draft.insert(QStringLiteral("brushEngine"), QStringLiteral("digital"));
     dialog->setProperty("draft", draft);
     auto* cancel = item(app, QStringLiteral("komaSettingsCancel"));
     QVERIFY(cancel && cancel->isVisible());
     click(app, cancel);
     QTRY_VERIFY(!dialog->property("opened").toBool());
     QCOMPARE(app.settings->value(QStringLiteral("ui/theme")).toString(), QStringLiteral("light"));
+    QCOMPARE(app.settings->value(QStringLiteral("tools/brushEngine")).toString(), QStringLiteral("realistic"));
+    QCOMPARE(app.workspace.brushEngine(), QStringLiteral("realistic"));
     QCOMPARE(themeOf(app)->property("mode").toString(), QStringLiteral("light"));
+    app.settings->setValue(QStringLiteral("tools/brushEngine"), QStringLiteral("digital"));
 
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+}
+
+void TestBrushUi::brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive()
+{
+    {
+        Settings fresh(QStringLiteral("KomaPaintTests"), QStringLiteral("BrushUiEngineRestart"));
+        fresh.setValue(QStringLiteral("tools/brushEngine"), QStringLiteral("digital"));
+        fresh.sync();
+    }
+    {
+        Running app;
+        QVERIFY(start(app, QStringLiteral("BrushUiEngineRestart")));
+        app.workspace.setBrushEngine(app.settings->value(QStringLiteral("tools/brushEngine"),
+                                                          QStringLiteral("digital")).toString());
+        QCOMPARE(app.workspace.brushEngine(), QStringLiteral("digital"));
+        auto* statusEngine = item(app, QStringLiteral("statusBarBrushEngine"));
+        QVERIFY(statusEngine);
+        QCOMPARE(statusEngine->property("text").toString(), QStringLiteral("Digital"));
+
+        // Color Wheel and Paint Mixer remain available in Digital mode.
+        auto* colorPanelTabMixer = item(app, QStringLiteral("colorPanelTab_mixer"));
+        QVERIFY(colorPanelTabMixer && colorPanelTabMixer->isVisible());
+        click(app, colorPanelTabMixer);
+        auto* mixerNotice = item(app, QStringLiteral("mixerEngineNotice"));
+        QVERIFY(mixerNotice && mixerNotice->isVisible());
+
+        // Clicking Settings in ToolPropertyPanel opens Koma Settings on the Brush Engine page.
+        auto* openBtn = item(app, QStringLiteral("brushEngineSettingsButton"));
+        QVERIFY(openBtn && openBtn->isVisible());
+        scrollIntoView(openBtn);
+        click(app, openBtn);
+
+        auto* dialog = app.root->findChild<QObject*>(QStringLiteral("komaSettingsDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        auto* realisticOpt = item(app, QStringLiteral("brushEngineOption_realistic"));
+        QVERIFY(realisticOpt && realisticOpt->isVisible());
+        click(app, realisticOpt);
+        auto* apply = item(app, QStringLiteral("komaSettingsApply"));
+        QVERIFY(apply);
+        click(app, apply);
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+
+        QCOMPARE(app.workspace.brushEngine(), QStringLiteral("realistic"));
+        QCOMPARE(statusEngine->property("text").toString(), QStringLiteral("Realistic"));
+        QCOMPARE(app.settings->value(QStringLiteral("tools/brushEngine")).toString(), QStringLiteral("realistic"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+        app.root.reset();
+        app.window = nullptr;
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents();
+    }
+
+    // Simulate application restart reading persisted Settings.
+    {
+        Running restarted;
+        QVERIFY(start(restarted, QStringLiteral("BrushUiEngineRestart")));
+        restarted.workspace.setBrushEngine(restarted.settings->value(QStringLiteral("tools/brushEngine"),
+                                                                     QStringLiteral("digital")).toString());
+        QCOMPARE(restarted.workspace.brushEngine(), QStringLiteral("realistic"));
+        auto* statusEngine = item(restarted, QStringLiteral("statusBarBrushEngine"));
+        QVERIFY(statusEngine);
+        QCOMPARE(statusEngine->property("text").toString(), QStringLiteral("Realistic"));
+        auto* paperSection = item(restarted, QStringLiteral("paperSurfaceSection"));
+        QVERIFY(paperSection && paperSection->isVisible());
+
+        // Restore Defaults resets draft brushEngine back to Digital.
+        auto* openBtn = item(restarted, QStringLiteral("brushEngineSettingsButton"));
+        QVERIFY(openBtn);
+        scrollIntoView(openBtn);
+        click(restarted, openBtn);
+        auto* dialog = restarted.root->findChild<QObject*>(QStringLiteral("komaSettingsDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        auto* defaultsBtn = item(restarted, QStringLiteral("komaSettingsDefaults"));
+        QVERIFY(defaultsBtn);
+        click(restarted, defaultsBtn);
+        auto* apply = item(restarted, QStringLiteral("komaSettingsApply"));
+        QVERIFY(apply);
+        click(restarted, apply);
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QCOMPARE(restarted.workspace.brushEngine(), QStringLiteral("digital"));
+        QCOMPARE(restarted.settings->value(QStringLiteral("tools/brushEngine")).toString(), QStringLiteral("digital"));
+        QVERIFY2(restarted.warnings.isEmpty(), qPrintable(restarted.warnings.join(QLatin1Char('\n'))));
+    }
 }
 
 // ---------------------------------------------------------------- panel dock

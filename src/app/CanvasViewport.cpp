@@ -507,8 +507,13 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
         emit strokeError(QStringLiteral("Select a visible, unlocked layer to paint."));
         return false;
     }
+    if (!brush->isRealisticEngine() && brush->traditionalMedia()) {
+        emit strokeError(QStringLiteral("This brush uses physical materials and requires the Realistic brush engine. "
+                                        "Switch to Realistic in Settings → Brush Engine, or select a Digital brush preset."));
+        return false;
+    }
     m_modifiedBeforeStroke = m_document->isModified();
-    if (brush->traditionalMedia()) {
+    if (brush->isRealisticEngine()) {
         if (!m_history->beginMaterialStroke(layer)) {
             emit strokeError(QStringLiteral("Could not start material stroke history; no paint was applied."));
             return false;

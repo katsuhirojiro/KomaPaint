@@ -28,19 +28,32 @@ KpDialog {
                                            qsTr("Every 15 minutes"), qsTr("Every 30 minutes"),
                                            qsTr("Every 60 minutes"), qsTr("Never")]
     property int categoryIndex: 0
-    property var draft: ({ theme: "dark", defaultTool: "brush", recoveryInterval: 10 })
+    property int pendingCategoryIndex: -1
+    property var draft: ({ theme: "dark", defaultTool: "brush", brushEngine: "digital", recoveryInterval: 10 })
     property string validationMessage: ""
+
+    function openCategory(categoryId) {
+        let target = -1
+        for (let i = 0; i < categories.length; ++i) {
+            if (categories[i].id === categoryId) { target = i; break }
+        }
+        pendingCategoryIndex = target
+        open()
+    }
 
     function loadDraft() {
         const savedTheme = String(Settings.value("ui/theme", "dark"))
         const savedTool = String(Settings.value("tools/defaultTool", "brush"))
+        const savedEngine = String(Settings.value("tools/brushEngine", "digital")).toLowerCase()
         const savedInterval = Number(Settings.value("recovery/intervalMinutes", 10))
         draft = {
             theme: savedTheme === "light" ? "light" : "dark",
             defaultTool: toolIds.indexOf(savedTool) >= 0 ? savedTool : "brush",
+            brushEngine: savedEngine === "realistic" ? "realistic" : "digital",
             recoveryInterval: recoveryIntervals.indexOf(savedInterval) >= 0 ? savedInterval : 10
         }
-        categoryIndex = 0
+        categoryIndex = pendingCategoryIndex >= 0 ? pendingCategoryIndex : 0
+        pendingCategoryIndex = -1
         validationMessage = ""
     }
     function setDraft(key, value) {
@@ -50,11 +63,12 @@ KpDialog {
         validationMessage = ""
     }
     function restoreDraftDefaults() {
-        draft = { theme: "dark", defaultTool: "brush", recoveryInterval: 10 }
+        draft = { theme: "dark", defaultTool: "brush", brushEngine: "digital", recoveryInterval: 10 }
         validationMessage = ""
     }
     function applyDraft() {
         if (toolIds.indexOf(draft.defaultTool) < 0
+            || (draft.brushEngine !== "digital" && draft.brushEngine !== "realistic")
             || recoveryIntervals.indexOf(Number(draft.recoveryInterval)) < 0
             || (draft.theme !== "dark" && draft.theme !== "light")) {
             validationMessage = qsTr("One or more settings are invalid. Review the selected values and try again.")
@@ -62,15 +76,18 @@ KpDialog {
         }
         const oldTheme = Settings.value("ui/theme", "dark")
         const oldTool = Settings.value("tools/defaultTool", "brush")
+        const oldEngine = Settings.value("tools/brushEngine", "digital")
         const oldInterval = Settings.value("recovery/intervalMinutes", 10)
         const oldConfigured = Settings.value("recovery/configured", false)
         Settings.setValue("ui/theme", draft.theme)
         Settings.setValue("tools/defaultTool", draft.defaultTool)
+        Settings.setValue("tools/brushEngine", draft.brushEngine)
         Settings.setValue("recovery/intervalMinutes", Number(draft.recoveryInterval))
         Settings.setValue("recovery/configured", true)
         if (!Settings.sync()) {
             Settings.setValue("ui/theme", oldTheme)
             Settings.setValue("tools/defaultTool", oldTool)
+            Settings.setValue("tools/brushEngine", oldEngine)
             Settings.setValue("recovery/intervalMinutes", oldInterval)
             Settings.setValue("recovery/configured", oldConfigured)
             Settings.sync()
@@ -78,6 +95,7 @@ KpDialog {
             return false
         }
         Workspace.defaultTool = draft.defaultTool
+        Workspace.brushEngine = draft.brushEngine
         Workspace.setRecoveryInterval(Number(draft.recoveryInterval))
         KP.mode = draft.theme
         return true
@@ -238,8 +256,80 @@ KpDialog {
                     Text { text: qsTr("Brush Engine"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
                     Text {
                         Layout.fillWidth: true
-                        text: qsTr("Digital and traditional material modes are not exposed as a setting until both have real, tested stroke-processing behavior. Existing digital painting remains unchanged.")
+                        text: qsTr("Choose how new painting strokes behave across the workspace. Digital is the default engine.")
                         color: KP.textMuted; font.pixelSize: KP.fontS; wrapMode: Text.WordWrap
+                    }
+
+                    Repeater {
+                        model: [
+                            {
+                                id: "digital",
+                                title: qsTr("Digital (Default)"),
+                                summary: qsTr("Normal digital raster painting with conventional RGB colour blending, lightweight strokes, and no physical pigment simulation.")
+                            },
+                            {
+                                id: "realistic",
+                                title: qsTr("Realistic"),
+                                summary: qsTr("Physical material painting with pigment-aware compositions, gouache and watercolour media, paper wetness, brush reservoirs, depletion, and Paint Mixer mixtures.")
+                            }
+                        ]
+                        delegate: AbstractButton {
+                            id: engineOption
+                            required property var modelData
+                            readonly property bool selected: dialog.draft.brushEngine === modelData.id
+                            objectName: "brushEngineOption_" + modelData.id
+                            Layout.fillWidth: true
+                            padding: KP.gapM
+                            implicitHeight: engineColumn.implicitHeight + 2 * KP.gapM
+                            hoverEnabled: true
+                            Accessible.name: modelData.title
+                            onClicked: dialog.setDraft("brushEngine", modelData.id)
+
+                            background: Rectangle {
+                                radius: KP.radiusS
+                                color: engineOption.selected ? KP.rowSelected
+                                     : engineOption.hovered ? KP.hoverOverlay : KP.paneBgAlt
+                                border.width: 1
+                                border.color: engineOption.selected ? KP.ember : KP.hairline
+                            }
+                            contentItem: ColumnLayout {
+                                id: engineColumn
+                                spacing: KP.gapXS
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: KP.gapS
+                                    Rectangle {
+                                        Layout.preferredWidth: 14
+                                        Layout.preferredHeight: 14
+                                        radius: 7
+                                        color: "transparent"
+                                        border.width: engineOption.selected ? 4 : 1.5
+                                        border.color: engineOption.selected ? KP.ember : KP.border
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: engineOption.modelData.title
+                                        color: engineOption.selected ? KP.textAccent : KP.text
+                                        font.pixelSize: KP.fontS + 1
+                                        font.weight: Font.DemiBold
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: 22
+                                    text: engineOption.modelData.summary
+                                    color: KP.textMuted
+                                    font.pixelSize: KP.fontXS
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Switching engines never converts or destroys existing artwork, material layers, undo history, paper surfaces, presets, or Paint Mixer mixtures.")
+                        color: KP.textSubtle; font.pixelSize: KP.fontXS; wrapMode: Text.WordWrap
                     }
                     Item { Layout.fillHeight: true }
                 }

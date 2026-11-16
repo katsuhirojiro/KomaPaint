@@ -14,7 +14,9 @@
 #include <QSGRendererInterface>
 #include <algorithm>
 #include "canvas/CanvasDocument.h"
+#include "files/DocumentFile.h"
 #include "layers/Layer.h"
+#include <QTemporaryDir>
 #include <cmath>
 
 using namespace komapaint;
@@ -41,6 +43,7 @@ private slots:
     void blendModeChangesInvalidateComposite();
     void brushInputAndLayerRules();
     void traditionalMediaStrokeRendersAndUsesMaterialHistory();
+    void brushEngineBoundaryAndNonDestructiveSwitching();
     void watercolourCleanWaterAndPaintLiftingInViewport();
     void strokeFailureDiagnostics();
     void compositeCacheAccounting();
@@ -202,6 +205,7 @@ void TestCanvasViewport::traditionalMediaStrokeRendersAndUsesMaterialHistory()
     view.refreshNow();
 
     BrushSettings brush;
+    brush.setBrushEngine(QStringLiteral("realistic"));
     brush.setTraditionalMedia(true);
     brush.setSize(18);
     const QPointF point = view.documentToViewport(100, 100);
@@ -245,6 +249,7 @@ void TestCanvasViewport::traditionalMediaStrokeRendersAndUsesMaterialHistory()
     QVERIFY(std::abs(materialAfterUndo->pigmentMass() - materialBeforeErase->pigmentMass()) < 1e-6);
 
     BrushSettings mixerBrush;
+    mixerBrush.setBrushEngine(QStringLiteral("realistic"));
     mixerBrush.setTraditionalMedia(true);
     QVariantList components;
     components.push_back(QVariantMap{{QStringLiteral("pigmentId"), QStringLiteral("PY3")},
@@ -300,6 +305,7 @@ void TestCanvasViewport::traditionalMediaStrokeRendersAndUsesMaterialHistory()
     // Gouache Round settings (concentration, water, paint body, filler) control
     // actual stored PaintBatch composition and cover opaquely without touching Digital tiles.
     BrushSettings gouacheSettings;
+    gouacheSettings.setBrushEngine(QStringLiteral("realistic"));
     gouacheSettings.setTraditionalMedia(true);
     gouacheSettings.setSize(18);
     gouacheSettings.setHardness(72);
@@ -502,6 +508,117 @@ void TestCanvasViewport::actualWindowShortcuts()
     delete object;
 }
 
+void TestCanvasViewport::brushEngineBoundaryAndNonDestructiveSwitching()
+{
+    CanvasDocument doc;
+    doc.setSize(QSize(256, 256));
+    doc.setSurfaceId(QStringLiteral("cold-press"));
+    UndoStack history;
+    CanvasViewport view;
+    view.setWidth(256);
+    view.setHeight(256);
+    view.setHistory(&history);
+    view.setDocument(&doc);
+    view.refreshNow();
+
+    BrushSettings brush;
+    // Digital is the default Brush Engine.
+    QCOMPARE(brush.brushEngine(), QStringLiteral("digital"));
+    QVERIFY(!brush.isRealisticEngine());
+
+    // Digital stroke uses digital tiles and allocates zero material tiles,
+    // even when a Paint Mixer mixture is loaded on BrushSettings.
+    QVariantList components;
+    components.push_back(QVariantMap{{QStringLiteral("pigmentId"), QStringLiteral("PY3")},
+                                     {QStringLiteral("mass"), 0.5}});
+    components.push_back(QVariantMap{{QStringLiteral("pigmentId"), QStringLiteral("PB15")},
+                                     {QStringLiteral("mass"), 0.5}});
+    const QVariantMap mixture{{QStringLiteral("mediumId"), QStringLiteral("gouache")},
+                              {QStringLiteral("pigments"), components},
+                              {QStringLiteral("water"), 0.4},
+                              {QStringLiteral("binder"), 0.2},
+                              {QStringLiteral("filler"), 0.1},
+                              {QStringLiteral("drying"), 0.0},
+                              {QStringLiteral("settling"), 0.0}};
+    QVERIFY(brush.loadMaterialMixture(mixture));
+    QCOMPARE(brush.brushEngine(), QStringLiteral("digital"));
+
+    brush.setSize(18);
+    const QPointF digitalPt = view.documentToViewport(50, 50);
+    QVERIFY(view.beginStroke(digitalPt.x(), digitalPt.y(), 1.0, &brush, QColor(30, 80, 210)));
+    view.endStroke(digitalPt.x(), digitalPt.y(), 1.0);
+
+    Layer* layer = doc.layers()->layerAt(0);
+    QVERIFY(layer);
+    QVERIFY(layer->tiles().allocatedTiles() > 0);
+    QCOMPARE(layer->materialTiles().allocatedTiles(), std::size_t(0));
+    QVERIFY(!brush.materialMixture().isEmpty());
+
+    // Attempting a Realistic-only brush preset in Digital mode fails cleanly with explanation.
+    QSignalSpy errors(&view, &CanvasViewport::strokeError);
+    brush.setTraditionalMedia(true);
+    QVERIFY(brush.isBlockedByDigitalEngine());
+    const QPointF blockedPt = view.documentToViewport(120, 120);
+    QVERIFY(!view.beginStroke(blockedPt.x(), blockedPt.y(), 1.0, &brush, Qt::red));
+    QCOMPARE(errors.size(), 1);
+    QVERIFY(errors.takeFirst().at(0).toString().contains(QStringLiteral("Realistic")));
+    QCOMPARE(layer->materialTiles().allocatedTiles(), std::size_t(0));
+
+    // Switch to Realistic engine: existing digital artwork stays intact, and
+    // new strokes use the material engine and preserved Paint Mixer mixture.
+    brush.setBrushEngine(QStringLiteral("realistic"));
+    QVERIFY(brush.isRealisticEngine());
+    QVERIFY(!brush.isBlockedByDigitalEngine());
+    const QPointF realisticPt = view.documentToViewport(160, 160);
+    QVERIFY(view.beginStroke(realisticPt.x(), realisticPt.y(), 1.0, &brush, Qt::black));
+    view.endStroke(realisticPt.x(), realisticPt.y(), 1.0);
+    QVERIFY(layer->materialTiles().allocatedTiles() > 0);
+    const auto matBatch = layer->materialTiles().batchAt({160, 160});
+    QVERIFY(matBatch && matBatch->pigments.size() == 2);
+    QVERIFY((layer->tiles().pixel({50, 50}).value() >> 24) > 0);
+
+    // Switch back to Digital engine: material layers remain uncorrupted, keep
+    // pigment identities, render accurately in Digital mode, and preserve undo/substrate.
+    brush.setBrushEngine(QStringLiteral("digital"));
+    brush.setTraditionalMedia(false);
+    QCOMPARE(doc.surfaceId(), QStringLiteral("cold-press"));
+    QVERIFY(!brush.materialMixture().isEmpty());
+    const auto afterSwitchBatch = layer->materialTiles().batchAt({160, 160});
+    QVERIFY(afterSwitchBatch && afterSwitchBatch->pigments.size() == 2);
+    view.refreshNow();
+    const QVariant renderedMat = view.colorAt(realisticPt.x(), realisticPt.y());
+    QVERIFY(renderedMat.isValid());
+    const QColor matColor = renderedMat.value<QColor>();
+    QVERIFY(matColor.green() > matColor.red());
+
+    // A new Digital stroke on a second region does not disturb material artwork or history.
+    const QPointF secondDigitalPt = view.documentToViewport(210, 60);
+    QVERIFY(view.beginStroke(secondDigitalPt.x(), secondDigitalPt.y(), 1.0, &brush, QColor(200, 40, 40)));
+    view.endStroke(secondDigitalPt.x(), secondDigitalPt.y(), 1.0);
+    QVERIFY((layer->tiles().pixel({210, 60}).value() >> 24) > 0);
+    QVERIFY(layer->materialTiles().batchAt({160, 160}).has_value());
+
+    // Undo in Digital mode cleanly undoes the Digital stroke without touching material artwork.
+    QVERIFY(history.canUndo());
+    history.undo();
+    QCOMPARE(layer->tiles().pixel({210, 60}).value(), 0U);
+    QVERIFY(layer->materialTiles().batchAt({160, 160}).has_value());
+
+    // .koma save/open preserves both Digital and Realistic strokes on the layer.
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString komaPath = dir.filePath(QStringLiteral("mixed_engines.koma"));
+    QString err;
+    QVERIFY2(DocumentFile::save(doc, komaPath, &err), qPrintable(err));
+    auto reopened = std::unique_ptr<CanvasDocument>(DocumentFile::open(komaPath, &err));
+    QVERIFY2(reopened != nullptr, qPrintable(err));
+    Layer* reopenedLayer = reopened->layers()->layerAt(0);
+    QVERIFY(reopenedLayer);
+    QVERIFY((reopenedLayer->tiles().pixel({50, 50}).value() >> 24) > 0);
+    const auto reopenedMat = reopenedLayer->materialTiles().batchAt({160, 160});
+    QVERIFY(reopenedMat && reopenedMat->pigments.size() == 2);
+}
+
 void TestCanvasViewport::watercolourCleanWaterAndPaintLiftingInViewport()
 {
     CanvasDocument doc;
@@ -509,6 +626,7 @@ void TestCanvasViewport::watercolourCleanWaterAndPaintLiftingInViewport()
     doc.setSurfaceId(QStringLiteral("cold-press"));
     UndoStack history;
     BrushSettings brush;
+    brush.setBrushEngine(QStringLiteral("realistic"));
     brush.setTraditionalMedia(true);
     brush.setMediumId(QStringLiteral("watercolour"));
     brush.setMaterialPresetId(QStringLiteral("watercolour-round"));
