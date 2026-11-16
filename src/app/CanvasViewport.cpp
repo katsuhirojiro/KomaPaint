@@ -579,7 +579,7 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                 definition.textureStrength = std::max(definition.textureStrength, 0.45);
             }
             if (!brush->erase() && !mixerPaintLoaded) {
-                const double alpha = std::max(0.05, color.alphaF());
+                const double alpha = std::max(0.05, double(color.alphaF()));
                 const double concentration = brush->pigmentConcentration() / 100.0;
                 const double waterRatio = brush->waterAmount() / 100.0;
                 const double bodyRatio = brush->paintBody() / 100.0;
