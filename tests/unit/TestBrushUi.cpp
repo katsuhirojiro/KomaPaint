@@ -779,12 +779,19 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QVERIFY(clickNamed(app, QStringLiteral("tool_brush")));  // the list is the brush's
     auto* list = item(app, QStringLiteral("subToolList"));
     QVERIFY(list && list->isVisible());
-    QTRY_COMPARE(list->property("count").toInt(), 3);       // Round, Soft, Dry
+    QTRY_COMPARE(list->property("count").toInt(), 4);       // Round, Soft, Dry, Gouache Round
     // Preset rows are list delegates: they take their geometry together with the
     // model, so wait for the row itself rather than assuming a settled layout.
     auto* softRow = item(app, QStringLiteral("subTool1"));
     QVERIFY(softRow);
     QTRY_VERIFY(softRow->isVisible() && softRow->width() > 0 && softRow->height() > 0);
+
+    QVERIFY(clickNamed(app, QStringLiteral("subTool3")));  // Gouache Round
+    QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Gouache Round"));
+    QVERIFY(brush->traditionalMedia());
+    QVERIFY(!brush->persistentReservoir());
+    auto* loadSlider = item(app, QStringLiteral("brushPaintLoadSlider"));
+    QVERIFY(loadSlider && loadSlider->isVisible());
 
     QVERIFY(clickNamed(app, QStringLiteral("subTool1")));  // Soft brush
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Soft brush"));
