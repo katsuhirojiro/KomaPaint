@@ -45,6 +45,7 @@ class BrushSettings : public QObject {
     // Full material batch supplied by the mixer. The component masses and
     // residual identities are kept verbatim until a material stroke loads it.
     Q_PROPERTY(QVariantMap materialMixture READ materialMixture NOTIFY materialMixtureChanged)
+    Q_PROPERTY(bool hasMaterialMixture READ hasMaterialMixture NOTIFY materialMixtureChanged)
     Q_PROPERTY(int minimumSize READ minimumSize CONSTANT)
     Q_PROPERTY(int maximumSize READ maximumSize CONSTANT)
     Q_PROPERTY(int minimumSpacing READ minimumSpacing CONSTANT)
@@ -81,6 +82,7 @@ public:
     int pressureToAmount() const { return m_pressureToAmount; }
     int pressureToContact() const { return m_pressureToContact; }
     QVariantMap materialMixture() const { return m_materialMixture; }
+    bool hasMaterialMixture() const { return !m_materialMixture.isEmpty(); }
     int minimumSize() const { return MinSize; }
     int maximumSize() const { return MaxSize; }
     int minimumSpacing() const { return MinSpacing; }

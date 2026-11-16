@@ -651,6 +651,8 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
     clickSegment(medium, 2); // Watercolour
     QTRY_VERIFY(brush->traditionalMedia());
     QCOMPARE(brush->mediumId(), QStringLiteral("watercolour"));
+    // Let ToolPropertyPanel's PanelSection height animations (140 ms) settle before clicking again.
+    QTest::qWait(180);
     clickSegment(medium, 0); // Digital
     QTRY_VERIFY(!brush->traditionalMedia());
 
@@ -820,6 +822,8 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QVERIFY(wcPaper);
     QTRY_VERIFY(wcPaper->isVisible() && wcPaper->height() > 0
         && wcPaper->parentItem()->parentItem()->parentItem()->height() >= wcPaper->height() + 4);
+    // Let ToolPropertyPanel's PanelSection height animations (140 ms) settle before scrolling/clicking.
+    QTest::qWait(180);
     scrollIntoView(wcPaper);
     QCoreApplication::processEvents();
     QList<QQuickItem*> paperSegments;

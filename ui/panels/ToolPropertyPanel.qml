@@ -150,7 +150,7 @@ Rectangle {
                             RowLayout {
                                 width: parent.width
                                 visible: panel.brush.traditionalMedia
-                                         && Object.keys(panel.brush.materialMixture).length > 0
+                                         && panel.brush.hasMaterialMixture
                                 spacing: KP.gapXS
                                 Text {
                                     Layout.fillWidth: true
