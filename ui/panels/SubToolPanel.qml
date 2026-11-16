@@ -340,6 +340,11 @@ Rectangle {
                     spacing: 2
                     boundsBehavior: Flickable.StopAtBounds
                     model: panel.library.engineTabs
+                    readonly property int activeTabIdx: panel.library.currentTabIndex
+                    onActiveTabIdxChanged: {
+                        if (activeTabIdx >= 0 && activeTabIdx < count)
+                            positionViewAtIndex(activeTabIdx, ListView.Contain)
+                    }
 
                     delegate: AbstractButton {
                         id: colTab
@@ -348,7 +353,11 @@ Rectangle {
                         readonly property bool selected: index === panel.library.currentTabIndex
                         objectName: "collectionTab_" + index
                         height: tabStrip.height
-                        implicitWidth: Math.max(48, tabRow.implicitWidth + 14)
+                        leftPadding: 6
+                        rightPadding: 6
+                        topPadding: 0
+                        bottomPadding: 0
+                        implicitWidth: Math.max(36, tabRow.implicitWidth + 12)
                         hoverEnabled: true
                         focusPolicy: Qt.NoFocus
                         Accessible.name: modelData.name
@@ -381,20 +390,22 @@ Rectangle {
 
                         contentItem: RowLayout {
                             id: tabRow
-                            anchors.centerIn: parent
                             spacing: 3
                             Rectangle {
                                 visible: Boolean(colTab.modelData.isDefault)
+                                Layout.alignment: Qt.AlignVCenter
                                 Layout.preferredWidth: 4
                                 Layout.preferredHeight: 4
                                 radius: 2
                                 color: KP.ember
                             }
                             Text {
+                                Layout.alignment: Qt.AlignVCenter
                                 text: colTab.modelData.name
                                 color: colTab.selected ? KP.textAccent : KP.textMuted
                                 font.pixelSize: KP.fontMicro
                                 font.weight: colTab.selected ? Font.DemiBold : Font.Normal
+                                verticalAlignment: Text.AlignVCenter
                             }
                         }
                     }

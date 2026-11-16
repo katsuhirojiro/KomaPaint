@@ -108,15 +108,29 @@ void click(Running& app, QQuickItem* target, Qt::MouseButton button = Qt::LeftBu
 bool scrollIntoView(QQuickItem* target)
 {
     for (auto* view = target->parentItem(); view; view = view->parentItem()) {
+        const QVariant contentX = view->property("contentX");
+        const QVariant contentWidth = view->property("contentWidth");
         const QVariant contentY = view->property("contentY");
         const QVariant contentHeight = view->property("contentHeight");
         if (!contentY.isValid() || !contentHeight.isValid()) continue;
+        bool moved = false;
+        if (contentX.isValid() && contentWidth.isValid() && contentWidth.toReal() > view->width()) {
+            const qreal centreX = view->mapFromItem(target, QPointF(target->width() / 2, 0)).x();
+            const qreal maxX = std::max(0.0, contentWidth.toReal() - view->width());
+            const qreal nextX = std::clamp(contentX.toReal() + centreX - view->width() / 2, 0.0, maxX);
+            if (qAbs(nextX - contentX.toReal()) >= 0.5) {
+                view->setProperty("contentX", nextX);
+                moved = true;
+            }
+        }
         const qreal centre = view->mapFromItem(target, QPointF(0, target->height() / 2)).y();
         const qreal maximum = std::max(0.0, contentHeight.toReal() - view->height());
         const qreal next = std::clamp(contentY.toReal() + centre - view->height() / 2, 0.0, maximum);
-        if (qAbs(next - contentY.toReal()) < 0.5) return true;
-        view->setProperty("contentY", next);
-        QCoreApplication::processEvents();
+        if (qAbs(next - contentY.toReal()) >= 0.5) {
+            view->setProperty("contentY", next);
+            moved = true;
+        }
+        if (moved) QCoreApplication::processEvents();
         return true;
     }
     return false;
@@ -903,6 +917,9 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
 
     // Realistic has its own collection tabs (Default, Gouache, Watercolour).
     QCOMPARE(ws.subTools()->currentName(), QStringLiteral("Gouache Round"));
+    QQuickItem* wcTab = nullptr;
+    QTRY_VERIFY((wcTab = item(app, QStringLiteral("collectionTab_2"))) != nullptr
+                && wcTab->isVisible() && wcTab->width() > 0 && wcTab->height() > 0);
     QVERIFY(clickNamed(app, QStringLiteral("collectionTab_2"))); // Watercolour tab
     QTRY_COMPARE(ws.subTools()->currentTabName(), QStringLiteral("Watercolour"));
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Watercolour Round"));
@@ -1734,17 +1751,19 @@ void TestBrushUi::brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects()
         QVERIFY(!tempTabId.isEmpty());
 
         // UI deliberate confirmation modal deletes Temp Tab cleanly.
+        auto* subPanel = item(app, QStringLiteral("subToolPanel"));
+        QVERIFY(subPanel);
         auto* tabOptBtn = item(app, QStringLiteral("tabOptionsButton"));
         QVERIFY(tabOptBtn && tabOptBtn->isVisible());
         click(app, tabOptBtn);
-        auto* tabMenu = app.root->findChild<QObject*>(QStringLiteral("collectionTabMenu"));
+        auto* tabMenu = subPanel->findChild<QObject*>(QStringLiteral("collectionTabMenu"));
         QVERIFY(tabMenu);
         QTRY_VERIFY(tabMenu->property("opened").toBool());
         QQuickItem* deleteMenuItem = nullptr;
         QTRY_VERIFY((deleteMenuItem = item(app, QStringLiteral("tabMenuDelete"))) != nullptr
                     && deleteMenuItem->isVisible());
         click(app, deleteMenuItem);
-        auto* confirmDlg = app.root->findChild<QObject*>(QStringLiteral("deleteTabConfirmDialog"));
+        auto* confirmDlg = subPanel->findChild<QObject*>(QStringLiteral("deleteTabConfirmDialog"));
         QVERIFY(confirmDlg);
         QTRY_VERIFY(confirmDlg->property("opened").toBool());
         click(app, item(app, QStringLiteral("deleteTabConfirmButton")));
