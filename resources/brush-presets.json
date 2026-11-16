@@ -5,52 +5,137 @@
       "tool": "pen",
       "erase": false,
       "presets": [
-        { "name": "Fine pen", "category": "Inking", "size": 4, "opacity": 100, "flow": 100, "spacing": 5, "hardness": 100, "stabilization": 20, "textured": false },
-        { "name": "Marker", "category": "Inking", "size": 18, "opacity": 100, "flow": 100, "spacing": 8, "hardness": 100, "stabilization": 10, "textured": false },
-        { "name": "Rough pen", "category": "Inking", "size": 8, "opacity": 100, "flow": 90, "spacing": 8, "hardness": 100, "stabilization": 10, "textured": true }
+        { "id": "pen-fine", "name": "Fine pen", "category": "Inking", "size": 4, "opacity": 100, "flow": 100, "spacing": 5, "hardness": 100, "stabilization": 20, "textured": false, "tipStyle": "round", "pressureSize": 45, "pressureOpacity": 20, "minSizeRatio": 25 },
+        { "id": "pen-marker", "name": "Marker", "category": "Inking", "size": 18, "opacity": 100, "flow": 100, "spacing": 8, "hardness": 100, "stabilization": 10, "textured": false, "tipStyle": "round", "aspectRatio": 140, "tipAngle": -20 },
+        { "id": "pen-rough", "name": "Rough pen", "category": "Inking", "size": 8, "opacity": 100, "flow": 90, "spacing": 8, "hardness": 100, "stabilization": 10, "textured": true, "tipStyle": "textured", "pressureSize": 35, "pressureOpacity": 60 }
       ]
     },
     {
       "tool": "pencil",
       "erase": false,
       "presets": [
-        { "name": "Sketch pencil", "category": "Sketching", "size": 6, "opacity": 90, "flow": 70, "spacing": 10, "hardness": 100, "stabilization": 0, "textured": true },
-        { "name": "Soft pencil", "category": "Sketching", "size": 12, "opacity": 70, "flow": 45, "spacing": 10, "hardness": 60, "stabilization": 0, "textured": true }
+        { "id": "pencil-sketch", "name": "Sketch pencil", "category": "Sketching", "size": 6, "opacity": 90, "flow": 70, "spacing": 10, "hardness": 100, "stabilization": 0, "textured": true, "tipStyle": "graphite", "pressureSize": 25, "pressureOpacity": 90 },
+        { "id": "pencil-soft", "name": "Soft pencil", "category": "Sketching", "size": 12, "opacity": 70, "flow": 45, "spacing": 10, "hardness": 60, "stabilization": 0, "textured": true, "tipStyle": "graphite", "aspectRatio": 160, "tipAngle": 25, "pressureSize": 35, "pressureOpacity": 95 }
       ]
     },
     {
       "tool": "brush",
       "erase": false,
       "presets": [
-        { "name": "Round brush", "category": "Paint", "size": 16, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 100, "stabilization": 0, "textured": false },
-        { "name": "Soft brush", "category": "Paint", "size": 40, "opacity": 100, "flow": 35, "spacing": 10, "hardness": 30, "stabilization": 0, "textured": false },
-        { "name": "Dry brush", "category": "Paint", "size": 32, "opacity": 90, "flow": 55, "spacing": 15, "hardness": 90, "stabilization": 0, "textured": true },
-        { "name": "Gouache Round", "category": "Traditional", "size": 18, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 72, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "gouache", "materialPresetId": "gouache-round", "paintLoad": 88, "pigmentConcentration": 82, "waterAmount": 22, "paintBody": 78, "pickup": 16, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 8, "toothResponse": 18, "granulation": 5, "dryingSpeed": 115, "pressureToAmount": 62, "pressureToContact": 35 },
-        { "name": "Watercolour Round", "category": "Watercolour", "size": 14, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 35, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-round", "paintLoad": 88, "pigmentConcentration": 42, "waterAmount": 78, "paintBody": 18, "pickup": 18, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 28, "toothResponse": 12, "granulation": 15, "dryingSpeed": 85, "pressureToAmount": 68, "pressureToContact": 45 },
-        { "name": "Watercolour Fine Round", "category": "Watercolour", "size": 5, "opacity": 100, "flow": 100, "spacing": 12, "hardness": 58, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-fine-round", "paintLoad": 84, "pigmentConcentration": 52, "waterAmount": 62, "paintBody": 22, "pickup": 10, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 18, "toothResponse": 12, "granulation": 10, "dryingSpeed": 95, "pressureToAmount": 72, "pressureToContact": 52 },
-        { "name": "Watercolour Mop", "category": "Watercolour", "size": 72, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 12, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-mop", "paintLoad": 95, "pigmentConcentration": 32, "waterAmount": 92, "paintBody": 12, "pickup": 18, "aspectRatio": 132, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 18, "toothResponse": 8, "granulation": 12, "dryingSpeed": 75, "pressureToAmount": 55, "pressureToContact": 50 },
-        { "name": "Watercolour Wash", "category": "Watercolour", "size": 48, "opacity": 100, "flow": 100, "spacing": 12, "hardness": 42, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-wash", "paintLoad": 92, "pigmentConcentration": 30, "waterAmount": 88, "paintBody": 10, "pickup": 12, "aspectRatio": 220, "tipAngle": 0, "followDirection": true, "depletion": 100, "edgeAccumulation": 15, "toothResponse": 6, "granulation": 10, "dryingSpeed": 78, "pressureToAmount": 38, "pressureToContact": 25 },
-        { "name": "Watercolour Granulating", "category": "Watercolour", "size": 18, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 28, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "granulating-watercolour", "paintLoad": 90, "pigmentConcentration": 44, "waterAmount": 82, "paintBody": 16, "pickup": 10, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 34, "toothResponse": 78, "granulation": 94, "dryingSpeed": 80, "pressureToAmount": 62, "pressureToContact": 35 },
-        { "name": "Watercolour Dry Brush", "category": "Watercolour", "size": 28, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 70, "stabilization": 0, "textured": true, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-dry-brush", "paintLoad": 58, "pigmentConcentration": 68, "waterAmount": 18, "paintBody": 45, "pickup": 5, "aspectRatio": 100, "tipAngle": 0, "followDirection": true, "depletion": 100, "edgeAccumulation": 10, "toothResponse": 96, "granulation": 35, "dryingSpeed": 115, "pressureToAmount": 88, "pressureToContact": 35 },
-        { "name": "Clean Water", "category": "Watercolour", "size": 24, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 25, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "clean-water", "paintLoad": 82, "pigmentConcentration": 10, "waterAmount": 100, "paintBody": 0, "pickup": 0, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 10, "toothResponse": 8, "granulation": 0, "dryingSpeed": 70, "pressureToAmount": 60, "pressureToContact": 40 },
-        { "name": "Paint Lifting", "category": "Watercolour", "size": 20, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 45, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "paint-lifting", "paintLoad": 70, "pigmentConcentration": 10, "waterAmount": 45, "paintBody": 5, "pickup": 72, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 4, "toothResponse": 10, "granulation": 0, "dryingSpeed": 95, "pressureToAmount": 55, "pressureToContact": 40 }
+        { "id": "digital-round-brush", "name": "Round brush", "category": "Paint", "size": 16, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 100, "stabilization": 0, "textured": false, "tipStyle": "round" },
+        { "id": "digital-soft-brush", "name": "Soft brush", "category": "Paint", "size": 40, "opacity": 100, "flow": 35, "spacing": 10, "hardness": 30, "stabilization": 0, "textured": false, "tipStyle": "round" },
+        { "id": "digital-dry-brush", "name": "Dry brush", "category": "Paint", "size": 32, "opacity": 90, "flow": 55, "spacing": 15, "hardness": 90, "stabilization": 0, "textured": true, "tipStyle": "bristle", "aspectRatio": 155, "followDirection": true, "pressureSize": 30, "pressureOpacity": 90 }
       ]
     },
     {
       "tool": "airbrush",
       "erase": false,
       "presets": [
-        { "name": "Soft airbrush", "category": "Airbrush", "size": 90, "opacity": 100, "flow": 8, "spacing": 8, "hardness": 0, "stabilization": 0, "textured": false },
-        { "name": "Fine spray", "category": "Airbrush", "size": 36, "opacity": 100, "flow": 14, "spacing": 8, "hardness": 10, "stabilization": 0, "textured": true }
+        { "id": "airbrush-soft", "name": "Soft airbrush", "category": "Airbrush", "size": 90, "opacity": 100, "flow": 8, "spacing": 8, "hardness": 0, "stabilization": 0, "textured": false, "tipStyle": "round" },
+        { "id": "airbrush-fine", "name": "Fine spray", "category": "Airbrush", "size": 36, "opacity": 100, "flow": 14, "spacing": 8, "hardness": 10, "stabilization": 0, "textured": true, "tipStyle": "stipple" }
       ]
     },
     {
       "tool": "eraser",
       "erase": true,
       "presets": [
-        { "name": "Hard eraser", "category": "Eraser", "size": 24, "opacity": 100, "flow": 100, "spacing": 10, "hardness": 100, "stabilization": 0, "textured": false },
-        { "name": "Soft eraser", "category": "Eraser", "size": 60, "opacity": 100, "flow": 35, "spacing": 10, "hardness": 20, "stabilization": 0, "textured": false }
+        { "id": "eraser-hard", "name": "Hard eraser", "category": "Eraser", "size": 24, "opacity": 100, "flow": 100, "spacing": 10, "hardness": 100, "stabilization": 0, "textured": false, "tipStyle": "round" },
+        { "id": "eraser-soft", "name": "Soft eraser", "category": "Eraser", "size": 60, "opacity": 100, "flow": 35, "spacing": 10, "hardness": 20, "stabilization": 0, "textured": false, "tipStyle": "round" }
       ]
     }
-  ]
+  ],
+  "brushCollections": {
+    "digital": {
+      "defaultTabId": "digital-default",
+      "tabs": [
+        {
+          "id": "digital-default",
+          "name": "Default",
+          "presets": [
+            { "id": "digital-round-brush", "name": "Round brush", "category": "Paint", "size": 16, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 100, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 0, "pressureOpacity": 100 },
+            { "id": "digital-soft-brush", "name": "Soft brush", "category": "Paint", "size": 40, "opacity": 100, "flow": 35, "spacing": 10, "hardness": 30, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 15, "pressureOpacity": 95 },
+            { "id": "digital-dry-brush", "name": "Dry brush", "category": "Paint", "size": 32, "opacity": 90, "flow": 55, "spacing": 15, "hardness": 90, "stabilization": 0, "textured": true, "tipStyle": "bristle", "aspectRatio": 155, "followDirection": true, "pressureSize": 30, "pressureOpacity": 90 },
+            { "id": "digital-flat-chisel", "name": "Flat Chisel", "category": "Paint", "size": 26, "opacity": 96, "flow": 92, "spacing": 10, "hardness": 94, "stabilization": 0, "textured": false, "tipStyle": "round", "aspectRatio": 260, "tipAngle": 25, "followDirection": true, "pressureSize": 25, "pressureOpacity": 80 }
+          ]
+        },
+        {
+          "id": "digital-sketching",
+          "name": "Sketching",
+          "presets": [
+            { "id": "digital-mechanical-pencil", "name": "Mechanical Pencil", "category": "Sketching", "size": 3, "opacity": 92, "flow": 90, "spacing": 8, "hardness": 92, "stabilization": 0, "textured": true, "tipStyle": "graphite", "pressureSize": 25, "pressureOpacity": 90, "pressureGamma": 95 },
+            { "id": "digital-drawing-pencil-hb", "name": "Drawing Pencil HB", "category": "Sketching", "size": 6, "opacity": 85, "flow": 78, "spacing": 10, "hardness": 78, "stabilization": 0, "textured": true, "tipStyle": "graphite", "pressureSize": 35, "pressureOpacity": 95, "pressureGamma": 105 },
+            { "id": "digital-graphite-shader", "name": "Graphite Shader", "category": "Sketching", "size": 22, "opacity": 60, "flow": 50, "spacing": 12, "hardness": 45, "stabilization": 0, "textured": true, "tipStyle": "graphite", "aspectRatio": 210, "tipAngle": 35, "pressureSize": 30, "pressureOpacity": 100 },
+            { "id": "digital-charcoal-stick", "name": "Charcoal Stick", "category": "Sketching", "size": 24, "opacity": 84, "flow": 75, "spacing": 13, "hardness": 62, "stabilization": 0, "textured": true, "tipStyle": "textured", "aspectRatio": 180, "followDirection": true, "pressureSize": 40, "pressureOpacity": 95 }
+          ]
+        },
+        {
+          "id": "digital-inking",
+          "name": "Inking",
+          "presets": [
+            { "id": "digital-pressure-ink", "name": "Pressure Ink Nib", "category": "Inking", "size": 8, "opacity": 100, "flow": 100, "spacing": 6, "hardness": 100, "stabilization": 22, "textured": false, "tipStyle": "round", "pressureSize": 82, "pressureOpacity": 35, "minSizeRatio": 12, "pressureGamma": 90 },
+            { "id": "digital-smooth-lineart", "name": "Smooth Line-Art Pen", "category": "Inking", "size": 6, "opacity": 100, "flow": 100, "spacing": 6, "hardness": 100, "stabilization": 48, "textured": false, "tipStyle": "round", "pressureSize": 65, "pressureOpacity": 20, "minSizeRatio": 18, "pressureGamma": 105 },
+            { "id": "digital-calligraphy-nib", "name": "Calligraphy Nib", "category": "Inking", "size": 14, "opacity": 100, "flow": 100, "spacing": 6, "hardness": 100, "stabilization": 25, "textured": false, "tipStyle": "round", "aspectRatio": 280, "tipAngle": -35, "pressureSize": 45, "pressureOpacity": 15 }
+          ]
+        },
+        {
+          "id": "digital-painting",
+          "name": "Paint & Blend",
+          "presets": [
+            { "id": "digital-opaque-painter", "name": "Opaque Painter", "category": "Paint", "size": 24, "opacity": 100, "flow": 95, "spacing": 10, "hardness": 88, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 45, "pressureOpacity": 70 },
+            { "id": "digital-soft-painter", "name": "Soft Painter", "category": "Paint", "size": 32, "opacity": 82, "flow": 65, "spacing": 10, "hardness": 24, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 35, "pressureOpacity": 95 },
+            { "id": "digital-wet-blender", "name": "Wet Mix Blender", "category": "Blending", "size": 26, "opacity": 88, "flow": 85, "spacing": 10, "hardness": 42, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 25, "pressureOpacity": 85, "blendStrength": 78, "colorMix": 45 },
+            { "id": "digital-smudge-finger", "name": "Smudge Tool", "category": "Blending", "size": 22, "opacity": 92, "flow": 90, "spacing": 10, "hardness": 35, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 30, "pressureOpacity": 90, "blendStrength": 92, "colorMix": 0 }
+          ]
+        },
+        {
+          "id": "digital-airbrush-texture",
+          "name": "Airbrush & Texture",
+          "presets": [
+            { "id": "digital-soft-airbrush", "name": "Soft Airbrush", "category": "Airbrush", "size": 48, "opacity": 68, "flow": 38, "spacing": 8, "hardness": 0, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 15, "pressureOpacity": 100 },
+            { "id": "digital-stipple-texture", "name": "Stipple Texture", "category": "Texture", "size": 34, "opacity": 85, "flow": 72, "spacing": 18, "hardness": 55, "stabilization": 0, "textured": true, "tipStyle": "stipple", "pressureSize": 30, "pressureOpacity": 95 },
+            { "id": "digital-rake-bristle", "name": "Rake Bristle", "category": "Texture", "size": 30, "opacity": 92, "flow": 88, "spacing": 12, "hardness": 90, "stabilization": 0, "textured": true, "tipStyle": "bristle", "aspectRatio": 175, "followDirection": true, "pressureSize": 35, "pressureOpacity": 85 }
+          ]
+        }
+      ]
+    },
+    "realistic": {
+      "defaultTabId": "realistic-default",
+      "tabs": [
+        {
+          "id": "realistic-default",
+          "name": "Default",
+          "presets": [
+            { "id": "realistic-gouache-round", "name": "Gouache Round", "category": "Gouache", "size": 18, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 72, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "gouache", "materialPresetId": "gouache-round", "paintLoad": 88, "pigmentConcentration": 82, "waterAmount": 22, "paintBody": 78, "pickup": 16, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 8, "toothResponse": 18, "granulation": 5, "dryingSpeed": 115, "pressureToAmount": 62, "pressureToContact": 35 },
+            { "id": "realistic-watercolour-round", "name": "Watercolour Round", "category": "Watercolour", "size": 14, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 35, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-round", "paintLoad": 88, "pigmentConcentration": 42, "waterAmount": 78, "paintBody": 18, "pickup": 18, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 28, "toothResponse": 12, "granulation": 15, "dryingSpeed": 85, "pressureToAmount": 68, "pressureToContact": 45 },
+            { "id": "realistic-clean-water", "name": "Clean Water", "category": "Watercolour", "size": 24, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 25, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "clean-water", "paintLoad": 82, "pigmentConcentration": 10, "waterAmount": 100, "paintBody": 0, "pickup": 0, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 10, "toothResponse": 8, "granulation": 0, "dryingSpeed": 70, "pressureToAmount": 60, "pressureToContact": 40 },
+            { "id": "realistic-paint-lifting", "name": "Paint Lifting", "category": "Watercolour", "size": 20, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 45, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "paint-lifting", "paintLoad": 70, "pigmentConcentration": 10, "waterAmount": 45, "paintBody": 5, "pickup": 72, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 4, "toothResponse": 10, "granulation": 0, "dryingSpeed": 95, "pressureToAmount": 55, "pressureToContact": 40 }
+          ]
+        },
+        {
+          "id": "realistic-gouache",
+          "name": "Gouache",
+          "presets": [
+            { "id": "realistic-gouache-round-tab", "name": "Gouache Round", "category": "Gouache", "size": 18, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 72, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "gouache", "materialPresetId": "gouache-round", "paintLoad": 88, "pigmentConcentration": 82, "waterAmount": 22, "paintBody": 78, "pickup": 16, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 8, "toothResponse": 18, "granulation": 5, "dryingSpeed": 115, "pressureToAmount": 62, "pressureToContact": 35 },
+            { "id": "realistic-dry-gouache", "name": "Dry Gouache", "category": "Gouache", "size": 24, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 84, "stabilization": 0, "textured": true, "tipStyle": "bristle", "traditionalMedia": true, "persistentReservoir": false, "mediumId": "gouache", "materialPresetId": "dry-gouache", "paintLoad": 68, "pigmentConcentration": 88, "waterAmount": 8, "paintBody": 92, "pickup": 5, "aspectRatio": 100, "tipAngle": 0, "followDirection": true, "depletion": 100, "edgeAccumulation": 12, "toothResponse": 88, "granulation": 10, "dryingSpeed": 135, "pressureToAmount": 78, "pressureToContact": 40 },
+            { "id": "realistic-tiny-gouache", "name": "Tiny Gouache", "category": "Gouache", "size": 4, "opacity": 100, "flow": 100, "spacing": 12, "hardness": 85, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "gouache", "materialPresetId": "tiny-gouache", "paintLoad": 80, "pigmentConcentration": 84, "waterAmount": 18, "paintBody": 75, "pickup": 5, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 4, "toothResponse": 5, "granulation": 0, "dryingSpeed": 120, "pressureToAmount": 82, "pressureToContact": 45 },
+            { "id": "realistic-spatula", "name": "Paint Mixing Spatula", "category": "Gouache", "size": 30, "opacity": 100, "flow": 100, "spacing": 12, "hardness": 90, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "gouache", "materialPresetId": "paint-mixing-spatula", "paintLoad": 60, "pigmentConcentration": 75, "waterAmount": 18, "paintBody": 88, "pickup": 95, "aspectRatio": 180, "tipAngle": 0, "followDirection": true, "depletion": 100, "edgeAccumulation": 8, "toothResponse": 15, "granulation": 0, "dryingSpeed": 115, "pressureToAmount": 60, "pressureToContact": 85 }
+          ]
+        },
+        {
+          "id": "realistic-watercolour",
+          "name": "Watercolour",
+          "presets": [
+            { "id": "realistic-wc-round", "name": "Watercolour Round", "category": "Watercolour", "size": 14, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 35, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-round", "paintLoad": 88, "pigmentConcentration": 42, "waterAmount": 78, "paintBody": 18, "pickup": 18, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 28, "toothResponse": 12, "granulation": 15, "dryingSpeed": 85, "pressureToAmount": 68, "pressureToContact": 45 },
+            { "id": "realistic-wc-fine-round", "name": "Watercolour Fine Round", "category": "Watercolour", "size": 5, "opacity": 100, "flow": 100, "spacing": 12, "hardness": 58, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-fine-round", "paintLoad": 84, "pigmentConcentration": 52, "waterAmount": 62, "paintBody": 22, "pickup": 10, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 18, "toothResponse": 12, "granulation": 10, "dryingSpeed": 95, "pressureToAmount": 72, "pressureToContact": 52 },
+            { "id": "realistic-wc-mop", "name": "Watercolour Mop", "category": "Watercolour", "size": 72, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 12, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-mop", "paintLoad": 95, "pigmentConcentration": 32, "waterAmount": 92, "paintBody": 12, "pickup": 18, "aspectRatio": 132, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 18, "toothResponse": 8, "granulation": 12, "dryingSpeed": 75, "pressureToAmount": 55, "pressureToContact": 50 },
+            { "id": "realistic-wc-wash", "name": "Watercolour Wash", "category": "Watercolour", "size": 48, "opacity": 100, "flow": 100, "spacing": 12, "hardness": 42, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-wash", "paintLoad": 92, "pigmentConcentration": 30, "waterAmount": 88, "paintBody": 10, "pickup": 12, "aspectRatio": 220, "tipAngle": 0, "followDirection": true, "depletion": 100, "edgeAccumulation": 15, "toothResponse": 6, "granulation": 10, "dryingSpeed": 78, "pressureToAmount": 38, "pressureToContact": 25 },
+            { "id": "realistic-wc-granulating", "name": "Watercolour Granulating", "category": "Watercolour", "size": 18, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 28, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "granulating-watercolour", "paintLoad": 90, "pigmentConcentration": 44, "waterAmount": 82, "paintBody": 16, "pickup": 10, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 34, "toothResponse": 78, "granulation": 94, "dryingSpeed": 80, "pressureToAmount": 62, "pressureToContact": 35 },
+            { "id": "realistic-wc-dry-brush", "name": "Watercolour Dry Brush", "category": "Watercolour", "size": 28, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 70, "stabilization": 0, "textured": true, "tipStyle": "bristle", "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "watercolour-dry-brush", "paintLoad": 58, "pigmentConcentration": 68, "waterAmount": 18, "paintBody": 45, "pickup": 5, "aspectRatio": 100, "tipAngle": 0, "followDirection": true, "depletion": 100, "edgeAccumulation": 10, "toothResponse": 96, "granulation": 35, "dryingSpeed": 115, "pressureToAmount": 88, "pressureToContact": 35 },
+            { "id": "realistic-wc-clean-water", "name": "Clean Water", "category": "Watercolour", "size": 24, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 25, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "clean-water", "paintLoad": 82, "pigmentConcentration": 10, "waterAmount": 100, "paintBody": 0, "pickup": 0, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 10, "toothResponse": 8, "granulation": 0, "dryingSpeed": 70, "pressureToAmount": 60, "pressureToContact": 40 },
+            { "id": "realistic-wc-paint-lifting", "name": "Paint Lifting", "category": "Watercolour", "size": 20, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 45, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "mediumId": "watercolour", "materialPresetId": "paint-lifting", "paintLoad": 70, "pigmentConcentration": 10, "waterAmount": 45, "paintBody": 5, "pickup": 72, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 4, "toothResponse": 10, "granulation": 0, "dryingSpeed": 95, "pressureToAmount": 55, "pressureToContact": 40 }
+          ]
+        }
+      ]
+    }
+  }
 }

@@ -27,10 +27,12 @@
 #include <cmath>
 #include <memory>
 
+#include "app/BrushLibraryStore.h"
 #include "app/BrushSettings.h"
 #include "app/CanvasViewport.h"
 #include "app/DockModel.h"
 #include "app/MixerSurfaceItem.h"
+#include "app/PaintMixerController.h"
 #include "app/PanelManager.h"
 #include "app/SubToolLibrary.h"
 #include "app/WorkspaceState.h"
@@ -281,6 +283,8 @@ private slots:
     void preferencesDialogStoresThemeAndIconColours();
     void komaSettingsApplyAndCancelPersistGlobalValues();
     void brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive();
+    void brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects();
+    void brushLibraryMigrationPreservesUserCollectionsAndUpgradesBuiltIns();
     void brushPanelsCanBeClosedAndComeBack();
 private:
     bool start(Running& app, const QString& name);
@@ -410,6 +414,8 @@ void TestBrushUi::subToolLibraryLoadsRemembersAndResets()
     // workspace that starts on the brush tool.
     library.setTool(QStringLiteral("brush"));
     QVERIFY(library.isPaintTool());
+    QVERIFY(library.isBrushTool());
+    QCOMPARE(library.activeEngine(), QStringLiteral("digital"));
     QCOMPARE(library.currentIndex(), 0);
     QCOMPARE(brush.size(), defaultSize);
     QCOMPARE(brush.spacing(), defaultSpacing);
@@ -423,13 +429,20 @@ void TestBrushUi::subToolLibraryLoadsRemembersAndResets()
     library.select(library.subTools().first().toMap().value(QStringLiteral("index")).toInt());
     QCOMPARE(brush.size(), 40); // filtering still selects the real brush configuration
     library.setSearchText(QString());
-    library.setCategoryFilter(QStringLiteral("Paint"));
-    QCOMPARE(library.subTools().size(), 3);
-    library.setCategoryFilter(QStringLiteral("Traditional"));
-    QCOMPARE(library.subTools().size(), 1);
-    QCOMPARE(library.subTools().first().toMap().value(QStringLiteral("name")).toString(),
-             QStringLiteral("Gouache Round"));
-    library.select(library.subTools().first().toMap().value(QStringLiteral("index")).toInt());
+    QCOMPARE(library.subTools().size(), 4); // Default Digital tab: Round, Soft, Dry, Flat Chisel
+
+    // Digital tabs are separate collections from Realistic tabs.
+    QVERIFY(library.engineTabs().size() >= 5);
+    library.selectTab(2); // Inking tab
+    QCOMPARE(library.currentTabName(), QStringLiteral("Inking"));
+    QVERIFY(brush.pressureSize() > 0);
+    library.selectTab(0);
+    library.select(0);
+
+    // Switching to Realistic engine loads the Realistic collection cleanly.
+    brush.setBrushEngine(QStringLiteral("realistic"));
+    QCOMPARE(library.activeEngine(), QStringLiteral("realistic"));
+    QCOMPARE(library.currentName(), QStringLiteral("Gouache Round"));
     QVERIFY(brush.traditionalMedia());
     QVERIFY(!brush.persistentReservoir());
     QCOMPARE(brush.materialPresetId(), QStringLiteral("gouache-round"));
@@ -440,8 +453,9 @@ void TestBrushUi::subToolLibraryLoadsRemembersAndResets()
     library.resetCurrent();
     QCOMPARE(brush.waterAmount(), 22);
     QVERIFY(!library.isModified());
-    library.setCategoryFilter(QString());
-    library.select(0);
+    brush.setBrushEngine(QStringLiteral("digital"));
+    QCOMPARE(library.activeEngine(), QStringLiteral("digital"));
+    QVERIFY(!brush.traditionalMedia());
 
     // Every shipped value is inside the range the engine accepts, so loading
     // a sub tool never gets clamped into something else.
@@ -459,6 +473,24 @@ void TestBrushUi::subToolLibraryLoadsRemembersAndResets()
         }
         library.select(0);
     }
+    library.setTool(QStringLiteral("brush"));
+    for (const QString& engine : {QStringLiteral("digital"), QStringLiteral("realistic")}) {
+        brush.setBrushEngine(engine);
+        const int tabCount = library.engineTabs().size();
+        for (int t = 0; t < tabCount; ++t) {
+            library.selectTab(t);
+            const int count = library.subTools().size();
+            for (int b = 0; b < count; ++b) {
+                library.select(b);
+                QVERIFY2(!library.isModified(),
+                         qPrintable(engine + QStringLiteral("/") + library.currentName()
+                                    + QStringLiteral(": shipped value was clamped")));
+            }
+        }
+    }
+    brush.setBrushEngine(QStringLiteral("digital"));
+    library.selectTab(0);
+    library.select(0);
 
     // A change in the Tool Property panel belongs to the current sub tool.
     library.setTool(QStringLiteral("eraser"));
@@ -642,7 +674,12 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
     auto* materialSection = item(app, QStringLiteral("materialPaintSection"));
     QVERIFY(materialSection && !materialSection->isVisible());
 
-    // Switching to Realistic reveals physical material controls and medium choice.
+    // Switching to Realistic is locked until enabled; once enabled it reveals
+    // physical material controls and medium choice.
+    QVERIFY(!app.workspace.isRealisticEngineEnabled());
+    app.workspace.setBrushEngine(QStringLiteral("realistic"));
+    QCOMPARE(app.workspace.brushEngine(), QStringLiteral("digital"));
+    app.workspace.setRealisticEngineEnabled(true);
     app.workspace.setBrushEngine(QStringLiteral("realistic"));
     QTRY_VERIFY(medium->isVisible());
     QTRY_VERIFY(paperSection->isVisible());
@@ -817,46 +854,57 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QVERIFY(clickNamed(app, QStringLiteral("tool_brush")));  // the list is the brush's
     auto* list = item(app, QStringLiteral("subToolList"));
     QVERIFY(list && list->isVisible());
-    QTRY_COMPARE(list->property("count").toInt(), 12);      // Round, Soft, Dry, Gouache Round + 8 Watercolour presets
-    // Preset rows are list delegates: they take their geometry together with the
-    // model, so wait for the row itself rather than assuming a settled layout.
+    QTRY_COMPARE(list->property("count").toInt(), 4);       // Digital Default: Round, Soft, Dry, Flat Chisel
     auto* softRow = item(app, QStringLiteral("subTool1"));
     QVERIFY(softRow);
     QTRY_VERIFY(softRow->isVisible() && softRow->width() > 0 && softRow->height() > 0);
 
-    // Selecting a Realistic-only preset while Digital is active explains that
-    // Realistic engine must be selected and blocks physical strokes.
-    QVERIFY(clickNamed(app, QStringLiteral("subTool3")));  // Gouache Round
-    QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Gouache Round"));
-    QVERIFY(brush->traditionalMedia());
-    QCOMPARE(brush->mediumId(), QStringLiteral("gouache"));
-    QVERIFY(!brush->persistentReservoir());
-    auto* subToolWarning = item(app, QStringLiteral("subToolRealisticWarning"));
-    QVERIFY(subToolWarning && subToolWarning->isVisible());
-    auto* propertyWarning = item(app, QStringLiteral("realisticPresetNotice"));
-    QVERIFY(propertyWarning && propertyWarning->isVisible());
-    auto* loadSlider = item(app, QStringLiteral("brushPaintLoadSlider"));
-    QVERIFY(loadSlider && !loadSlider->isVisible());
+    // Primary engine tabs: Digital is selected by default; Realistic is locked
+    // until enabled in Settings → Brush Engine.
+    auto* digitalTab = item(app, QStringLiteral("primaryEngineTab_digital"));
+    auto* realisticTab = item(app, QStringLiteral("primaryEngineTab_realistic"));
+    QVERIFY(digitalTab && digitalTab->isVisible());
+    QVERIFY(realisticTab && realisticTab->isVisible());
+    QCOMPARE(ws.brushEngine(), QStringLiteral("digital"));
+    QVERIFY(!ws.isRealisticEngineEnabled());
 
-    // Attempting to paint with the Realistic-only preset in Digital mode shows
-    // an explanatory dialog without allocating material tiles.
+    // Clicking locked Realistic tab shows an inline unlock prompt without
+    // changing the active engine or allocating physical material tiles.
+    click(app, realisticTab);
+    QCOMPARE(ws.brushEngine(), QStringLiteral("digital"));
+    auto* lockedNotice = item(app, QStringLiteral("realisticLockedNotice"));
+    QVERIFY(lockedNotice && lockedNotice->isVisible());
     drag(app, {onCanvas(app, 200, 200), onCanvas(app, 230, 200)});
-    auto* errorDlg = app.root->findChild<QObject*>(QStringLiteral("brushErrorDialog"));
-    QVERIFY(errorDlg);
-    QTRY_VERIFY(errorDlg->property("opened").toBool());
-    auto* errorLabel = app.root->findChild<QObject*>(QStringLiteral("brushErrorLabel"));
-    QVERIFY(errorLabel && errorLabel->property("text").toString().contains(QStringLiteral("Realistic")));
     QCOMPARE(ws.layers()->layerAt(0)->materialTiles().allocatedTiles(), std::size_t(0));
-    QMetaObject::invokeMethod(errorDlg, "accept");
-    QTRY_VERIFY(!errorDlg->property("opened").toBool());
 
-    // Enable Realistic engine: warnings disappear and material controls become active.
-    ws.setBrushEngine(QStringLiteral("realistic"));
-    QTRY_VERIFY(!subToolWarning->isVisible());
-    QTRY_VERIFY(!propertyWarning->isVisible());
+    // Clicking Settings… opens Settings → Brush Engine; enabling Realistic and
+    // selecting it unlocks the Realistic tab and activates the material engine.
+    auto* unlockBtn = item(app, QStringLiteral("realisticUnlockSettingsButton"));
+    QVERIFY(unlockBtn && unlockBtn->isVisible());
+    click(app, unlockBtn);
+    auto* settingsDlg = app.root->findChild<QObject*>(QStringLiteral("komaSettingsDialog"));
+    QVERIFY(settingsDlg);
+    QTRY_VERIFY(settingsDlg->property("opened").toBool());
+    auto* enableToggle = item(app, QStringLiteral("realisticEngineEnableToggle"));
+    QVERIFY(enableToggle && enableToggle->isVisible());
+    click(app, enableToggle);
+    auto* realisticOpt = item(app, QStringLiteral("brushEngineOption_realistic"));
+    QVERIFY(realisticOpt && realisticOpt->isVisible());
+    click(app, realisticOpt);
+    click(app, item(app, QStringLiteral("komaSettingsApply")));
+    QTRY_VERIFY(!settingsDlg->property("opened").toBool());
+
+    QCOMPARE(ws.brushEngine(), QStringLiteral("realistic"));
+    QVERIFY(ws.isRealisticEngineEnabled());
+    QTRY_VERIFY(!lockedNotice->isVisible());
+    auto* loadSlider = item(app, QStringLiteral("brushPaintLoadSlider"));
+    QVERIFY(loadSlider);
     QTRY_VERIFY(loadSlider->isVisible());
 
-    ws.subTools()->select(4); // Watercolour Round
+    // Realistic has its own collection tabs (Default, Gouache, Watercolour).
+    QCOMPARE(ws.subTools()->currentName(), QStringLiteral("Gouache Round"));
+    QVERIFY(clickNamed(app, QStringLiteral("collectionTab_2"))); // Watercolour tab
+    QTRY_COMPARE(ws.subTools()->currentTabName(), QStringLiteral("Watercolour"));
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Watercolour Round"));
     QCOMPARE(brush->mediumId(), QStringLiteral("watercolour"));
     QCOMPARE(brush->materialPresetId(), QStringLiteral("watercolour-round"));
@@ -864,7 +912,6 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QVERIFY(wcPaper);
     QTRY_VERIFY(wcPaper->isVisible() && wcPaper->height() > 0
         && wcPaper->parentItem()->parentItem()->parentItem()->height() >= wcPaper->height() + 4);
-    // Let ToolPropertyPanel's PanelSection height animations (140 ms) settle before scrolling/clicking.
     QTest::qWait(180);
     scrollIntoView(wcPaper);
     QCoreApplication::processEvents();
@@ -881,15 +928,17 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QVERIFY(setSlider(app, QStringLiteral("paperWetnessSlider"), 0.5));
     QVERIFY(ws.document()->surfaceWetness() >= 45 && ws.document()->surfaceWetness() <= 55);
 
-    ws.subTools()->select(10); // Clean Water
+    ws.subTools()->select(6); // Clean Water in Watercolour tab
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Clean Water"));
     QCOMPARE(brush->materialPresetId(), QStringLiteral("clean-water"));
-    ws.subTools()->select(11); // Paint Lifting
+    ws.subTools()->select(7); // Paint Lifting in Watercolour tab
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Paint Lifting"));
     QCOMPARE(brush->materialPresetId(), QStringLiteral("paint-lifting"));
 
-    ws.setBrushEngine(QStringLiteral("digital"));
-    QTRY_VERIFY(subToolWarning->isVisible());
+    // Return to Digital via the primary Digital tab.
+    click(app, digitalTab);
+    QTRY_COMPARE(ws.brushEngine(), QStringLiteral("digital"));
+    QVERIFY(!loadSlider->isVisible());
     QTest::qWait(50);
     QCoreApplication::processEvents();
     auto* softAgain = item(app, QStringLiteral("subTool1"));
@@ -1480,8 +1529,10 @@ void TestBrushUi::komaSettingsApplyAndCancelPersistGlobalValues()
     }
     auto draft = dialog->property("draft").toMap();
     QCOMPARE(draft.value(QStringLiteral("brushEngine")).toString(), QStringLiteral("digital"));
+    QCOMPARE(draft.value(QStringLiteral("realisticEngineEnabled")).toBool(), false);
     draft.insert(QStringLiteral("theme"), QStringLiteral("light"));
     draft.insert(QStringLiteral("defaultTool"), QStringLiteral("pen"));
+    draft.insert(QStringLiteral("realisticEngineEnabled"), true);
     draft.insert(QStringLiteral("brushEngine"), QStringLiteral("realistic"));
     draft.insert(QStringLiteral("recoveryInterval"), 15);
     dialog->setProperty("draft", draft);
@@ -1491,10 +1542,12 @@ void TestBrushUi::komaSettingsApplyAndCancelPersistGlobalValues()
     QTRY_VERIFY(!dialog->property("opened").toBool());
     QCOMPARE(app.settings->value(QStringLiteral("ui/theme")).toString(), QStringLiteral("light"));
     QCOMPARE(app.settings->value(QStringLiteral("tools/defaultTool")).toString(), QStringLiteral("pen"));
+    QCOMPARE(app.settings->value(QStringLiteral("tools/realisticEngineEnabled")).toBool(), true);
     QCOMPARE(app.settings->value(QStringLiteral("tools/brushEngine")).toString(), QStringLiteral("realistic"));
     QCOMPARE(app.settings->value(QStringLiteral("recovery/intervalMinutes")).toInt(), 15);
     QCOMPARE(app.workspace.defaultTool(), QStringLiteral("pen"));
     QCOMPARE(app.workspace.brushEngine(), QStringLiteral("realistic"));
+    QVERIFY(app.workspace.isRealisticEngineEnabled());
     // The active document's tool is project-specific and is not overwritten.
     QCOMPARE(app.workspace.activeTool(), QStringLiteral("brush"));
     QCOMPARE(themeOf(app)->property("mode").toString(), QStringLiteral("light"));
@@ -1517,6 +1570,7 @@ void TestBrushUi::komaSettingsApplyAndCancelPersistGlobalValues()
     QCOMPARE(app.workspace.brushEngine(), QStringLiteral("realistic"));
     QCOMPARE(themeOf(app)->property("mode").toString(), QStringLiteral("light"));
     app.settings->setValue(QStringLiteral("tools/brushEngine"), QStringLiteral("digital"));
+    app.settings->setValue(QStringLiteral("tools/realisticEngineEnabled"), false);
 
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
@@ -1525,15 +1579,19 @@ void TestBrushUi::brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive(
 {
     {
         Settings fresh(QStringLiteral("KomaPaintTests"), QStringLiteral("BrushUiEngineRestart"));
+        fresh.setValue(QStringLiteral("tools/realisticEngineEnabled"), false);
         fresh.setValue(QStringLiteral("tools/brushEngine"), QStringLiteral("digital"));
         fresh.sync();
     }
     {
         Running app;
         QVERIFY(start(app, QStringLiteral("BrushUiEngineRestart")));
+        app.workspace.setRealisticEngineEnabled(
+            app.settings->value(QStringLiteral("tools/realisticEngineEnabled"), false).toBool());
         app.workspace.setBrushEngine(app.settings->value(QStringLiteral("tools/brushEngine"),
                                                           QStringLiteral("digital")).toString());
         QCOMPARE(app.workspace.brushEngine(), QStringLiteral("digital"));
+        QVERIFY(!app.workspace.isRealisticEngineEnabled());
         auto* statusEngine = item(app, QStringLiteral("statusBarBrushEngine"));
         QVERIFY(statusEngine);
         QCOMPARE(statusEngine->property("text").toString(), QStringLiteral("Digital"));
@@ -1554,17 +1612,46 @@ void TestBrushUi::brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive(
         auto* dialog = app.root->findChild<QObject*>(QStringLiteral("komaSettingsDialog"));
         QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("opened").toBool());
+        // Attempting to select Realistic before enabling it keeps draft on Digital.
         auto* realisticOpt = item(app, QStringLiteral("brushEngineOption_realistic"));
         QVERIFY(realisticOpt && realisticOpt->isVisible());
+        click(app, realisticOpt);
+        QCOMPARE(dialog->property("draft").toMap().value(QStringLiteral("brushEngine")).toString(),
+                 QStringLiteral("digital"));
+
+        // Enable Realistic first, then select Realistic and apply.
+        auto* enableToggle = item(app, QStringLiteral("realisticEngineEnableToggle"));
+        QVERIFY(enableToggle && enableToggle->isVisible());
+        click(app, enableToggle);
         click(app, realisticOpt);
         auto* apply = item(app, QStringLiteral("komaSettingsApply"));
         QVERIFY(apply);
         click(app, apply);
         QTRY_VERIFY(!dialog->property("opened").toBool());
 
+        QVERIFY(app.workspace.isRealisticEngineEnabled());
         QCOMPARE(app.workspace.brushEngine(), QStringLiteral("realistic"));
         QCOMPARE(statusEngine->property("text").toString(), QStringLiteral("Realistic"));
+        QCOMPARE(app.settings->value(QStringLiteral("tools/realisticEngineEnabled")).toBool(), true);
         QCOMPARE(app.settings->value(QStringLiteral("tools/brushEngine")).toString(), QStringLiteral("realistic"));
+
+        // Disabling Realistic while Realistic is active is blocked until returning to Digital.
+        scrollIntoView(openBtn);
+        click(app, openBtn);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        click(app, enableToggle);
+        QCOMPARE(dialog->property("draft").toMap().value(QStringLiteral("realisticEngineEnabled")).toBool(), true);
+        // Returning to Digital first allows disabling Realistic cleanly.
+        auto* digitalOpt = item(app, QStringLiteral("brushEngineOption_digital"));
+        QVERIFY(digitalOpt && digitalOpt->isVisible());
+        click(app, digitalOpt);
+        click(app, enableToggle);
+        QCOMPARE(dialog->property("draft").toMap().value(QStringLiteral("realisticEngineEnabled")).toBool(), false);
+        // Re-enable & select Realistic for the restart test below.
+        click(app, enableToggle);
+        click(app, realisticOpt);
+        click(app, apply);
+        QTRY_VERIFY(!dialog->property("opened").toBool());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
         app.root.reset();
         app.window = nullptr;
@@ -1576,16 +1663,19 @@ void TestBrushUi::brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive(
     {
         Running restarted;
         QVERIFY(start(restarted, QStringLiteral("BrushUiEngineRestart")));
+        restarted.workspace.setRealisticEngineEnabled(
+            restarted.settings->value(QStringLiteral("tools/realisticEngineEnabled"), false).toBool());
         restarted.workspace.setBrushEngine(restarted.settings->value(QStringLiteral("tools/brushEngine"),
                                                                      QStringLiteral("digital")).toString());
         QCOMPARE(restarted.workspace.brushEngine(), QStringLiteral("realistic"));
+        QVERIFY(restarted.workspace.isRealisticEngineEnabled());
         auto* statusEngine = item(restarted, QStringLiteral("statusBarBrushEngine"));
         QVERIFY(statusEngine);
         QCOMPARE(statusEngine->property("text").toString(), QStringLiteral("Realistic"));
         auto* paperSection = item(restarted, QStringLiteral("paperSurfaceSection"));
         QVERIFY(paperSection && paperSection->isVisible());
 
-        // Restore Defaults resets draft brushEngine back to Digital.
+        // Restore Defaults resets draft brushEngine back to Digital and locks Realistic.
         auto* openBtn = item(restarted, QStringLiteral("brushEngineSettingsButton"));
         QVERIFY(openBtn);
         scrollIntoView(openBtn);
@@ -1601,9 +1691,261 @@ void TestBrushUi::brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive(
         click(restarted, apply);
         QTRY_VERIFY(!dialog->property("opened").toBool());
         QCOMPARE(restarted.workspace.brushEngine(), QStringLiteral("digital"));
+        QVERIFY(!restarted.workspace.isRealisticEngineEnabled());
         QCOMPARE(restarted.settings->value(QStringLiteral("tools/brushEngine")).toString(), QStringLiteral("digital"));
+        QCOMPARE(restarted.settings->value(QStringLiteral("tools/realisticEngineEnabled")).toBool(), false);
         QVERIFY2(restarted.warnings.isEmpty(), qPrintable(restarted.warnings.join(QLatin1Char('\n'))));
     }
+}
+
+void TestBrushUi::brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString sessionPath = dir.filePath(QStringLiteral("session.json"));
+    const QString libraryPath = dir.filePath(QStringLiteral("brush-library.json"));
+
+    QString customDigitalTabId;
+    QString customDigitalBrushId;
+    QString movedBrushId;
+    QString copiedBrushId;
+    QString realisticCustomTabId;
+    QString realisticBrushId;
+    QVariantMap storedMixture;
+
+    {
+        Running app;
+        QVERIFY(start(app, QStringLiteral("BrushLibraryPersist")));
+        QVERIFY(app.workspace.initializeSession(sessionPath));
+        auto* lib = app.workspace.subTools();
+        auto* brush = app.workspace.brush();
+
+        // Digital engine starts active; strokes never allocate physical material tiles.
+        QCOMPARE(app.workspace.brushEngine(), QStringLiteral("digital"));
+        drag(app, {onCanvas(app, 180, 180), onCanvas(app, 230, 180)});
+        QCOMPARE(app.workspace.layers()->layerAt(0)->materialTiles().allocatedTiles(), std::size_t(0));
+
+        // Create multiple user tabs, rename, reorder, and set default tab.
+        customDigitalTabId = lib->createTab(QStringLiteral("Linework Pro"));
+        QVERIFY(!customDigitalTabId.isEmpty());
+        QVERIFY(lib->renameTab(customDigitalTabId, QStringLiteral("Comics Ink")));
+        QCOMPARE(lib->currentTabName(), QStringLiteral("Comics Ink"));
+        const QString tempTabId = lib->createTab(QStringLiteral("Temp Tab"));
+        QVERIFY(!tempTabId.isEmpty());
+
+        // UI deliberate confirmation modal deletes Temp Tab cleanly.
+        auto* tabOptBtn = item(app, QStringLiteral("tabOptionsButton"));
+        QVERIFY(tabOptBtn && tabOptBtn->isVisible());
+        click(app, tabOptBtn);
+        auto* deleteMenuItem = app.root->findChild<QObject*>(QStringLiteral("tabMenuDelete"));
+        QVERIFY(deleteMenuItem);
+        QMetaObject::invokeMethod(deleteMenuItem, "trigger");
+        auto* confirmDlg = app.root->findChild<QObject*>(QStringLiteral("deleteTabConfirmDialog"));
+        QVERIFY(confirmDlg);
+        QTRY_VERIFY(confirmDlg->property("opened").toBool());
+        click(app, item(app, QStringLiteral("deleteTabConfirmButton")));
+        QTRY_VERIFY(!confirmDlg->property("opened").toBool());
+        for (const auto& t : lib->engineTabs())
+            QVERIFY(t.toMap().value(QStringLiteral("id")).toString() != tempTabId);
+
+        // Move Comics Ink to index 0 and set as default opening tab.
+        const int comicsIdx = lib->currentTabIndex();
+        QVERIFY(comicsIdx > 0);
+        QVERIFY(lib->moveTab(comicsIdx, 0));
+        QVERIFY(lib->setDefaultTab(customDigitalTabId));
+        QCOMPARE(lib->defaultTabId(), customDigitalTabId);
+
+        // Create brush from current, customize independently, duplicate, move & copy.
+        brush->setSize(27);
+        brush->setTipStyle(QStringLiteral("graphite"));
+        brush->setPressureSize(64);
+        brush->setBlendStrength(0);
+        customDigitalBrushId = lib->createBrushFromCurrent(QStringLiteral("My Pencil 2B"));
+        QVERIFY(!customDigitalBrushId.isEmpty());
+        const QString dupId = lib->duplicateBrushById(customDigitalBrushId);
+        QVERIFY(!dupId.isEmpty());
+        QVERIFY(lib->renameBrush(dupId, QStringLiteral("Soft Graphite Copy")));
+        // Modifying duplicate does NOT overwrite My Pencil 2B.
+        brush->setSize(52);
+        lib->selectById(customDigitalBrushId);
+        QCOMPARE(brush->size(), 27);
+
+        // Move/Copy across tabs in Digital.
+        movedBrushId = dupId;
+        QVERIFY(lib->moveBrushToTab(movedBrushId, QStringLiteral("digital-sketching")));
+        copiedBrushId = lib->copyBrushToTab(customDigitalBrushId, QStringLiteral("digital-default"));
+        QVERIFY(!copiedBrushId.isEmpty());
+
+        // Temporary search text must NOT be persisted in brush-library.json.
+        lib->setSearchText(QStringLiteral("Pencil"));
+        QCOMPARE(lib->searchText(), QStringLiteral("Pencil"));
+        lib->setSearchText(QString());
+
+        // Unlock & switch to Realistic: verify Paint Mixer mixture persists per brush
+        // and Realistic strokes allocate material tiles without deleting Digital artwork.
+        app.workspace.setRealisticEngineEnabled(true);
+        app.workspace.setBrushEngine(QStringLiteral("realistic"));
+        QCOMPARE(app.workspace.brushEngine(), QStringLiteral("realistic"));
+        realisticCustomTabId = lib->createTab(QStringLiteral("Studio Gouache"));
+        QVERIFY(!realisticCustomTabId.isEmpty());
+        brush->setMediumId(QStringLiteral("gouache"));
+        brush->setMaterialPresetId(QStringLiteral("gouache-round"));
+        brush->setSize(22);
+        QVERIFY(!app.workspace.mixer()->addPigmentAsNewDeposit(QStringLiteral("PB29"), 1.0).isEmpty());
+        QVERIFY(app.workspace.mixer()->loadActiveIntoBrush());
+        storedMixture = brush->materialMixture();
+        QVERIFY(!storedMixture.isEmpty());
+        realisticBrushId = lib->createBrushFromCurrent(QStringLiteral("Studio Cobalt"));
+        QVERIFY(!realisticBrushId.isEmpty());
+
+        // Second Realistic brush keeps its own independent empty/different mixture.
+        const QString secondRealId = lib->createBrushFromCurrent(QStringLiteral("Studio Clean"));
+        brush->clearMaterialMixture();
+        QVERIFY(!brush->hasMaterialMixture());
+        lib->selectById(realisticBrushId);
+        QCOMPARE(brush->materialMixture(), storedMixture);
+
+        // Realistic stroke allocates material tiles while previous Digital artwork remains.
+        drag(app, {onCanvas(app, 280, 180), onCanvas(app, 330, 180)});
+        QVERIFY(app.workspace.layers()->layerAt(0)->materialTiles().allocatedTiles() > 0);
+        const auto digitalPx = app.workspace.layers()->layerAt(0)->tiles().pixel({200, 180});
+        QVERIFY(digitalPx.has_value() && (*digitalPx >> 24) > 0);
+
+        // Switching projects preserves brush collections and engine state.
+        QVERIFY(app.workspace.newProject(QStringLiteral("Second Canvas"), 128, 128, true,
+                                        QStringLiteral("white"), 72));
+        QCOMPARE(lib->currentTabId(), realisticCustomTabId);
+        QCOMPARE(app.workspace.brushEngine(), QStringLiteral("realistic"));
+        QVERIFY(app.workspace.activateTab(0));
+        QVERIFY(app.workspace.layers()->layerAt(0)->materialTiles().allocatedTiles() > 0);
+
+        // Return to Digital before closing; confirm Realistic artwork stays intact.
+        app.workspace.setBrushEngine(QStringLiteral("digital"));
+        QVERIFY(app.workspace.layers()->layerAt(0)->materialTiles().allocatedTiles() > 0);
+        QVERIFY(QFile::exists(libraryPath));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+        app.root.reset();
+        app.window = nullptr;
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents();
+    }
+
+    // Restart: load brush-library.json and verify all tabs, default tab, brushes,
+    // and per-brush materialMixture survived without searchText leakage.
+    {
+        Running restarted;
+        QVERIFY(start(restarted, QStringLiteral("BrushLibraryPersist")));
+        QVERIFY(restarted.workspace.initializeSession(sessionPath));
+        auto* lib = restarted.workspace.subTools();
+        auto* brush = restarted.workspace.brush();
+
+        QVERIFY(lib->searchText().isEmpty());
+        QCOMPARE(lib->defaultTabId(), customDigitalTabId);
+        QCOMPARE(lib->currentTabId(), customDigitalTabId);
+        QCOMPARE(lib->currentTabName(), QStringLiteral("Comics Ink"));
+        QCOMPARE(lib->engineTabs().first().toMap().value(QStringLiteral("id")).toString(),
+                 customDigitalTabId);
+        lib->selectById(customDigitalBrushId);
+        QCOMPARE(brush->size(), 27);
+        QCOMPARE(brush->tipStyle(), QStringLiteral("graphite"));
+        QCOMPARE(brush->pressureSize(), 64);
+
+        lib->selectTabById(QStringLiteral("digital-sketching"));
+        lib->selectById(movedBrushId);
+        QCOMPARE(lib->currentName(), QStringLiteral("Soft Graphite Copy"));
+        QCOMPARE(brush->size(), 52);
+
+        restarted.workspace.setRealisticEngineEnabled(true);
+        restarted.workspace.setBrushEngine(QStringLiteral("realistic"));
+        lib->selectTabById(realisticCustomTabId);
+        lib->selectById(realisticBrushId);
+        QCOMPARE(brush->materialMixture(), storedMixture);
+
+        // Deleting last remaining tab in a collection is safely refused.
+        while (lib->engineTabs().size() > 1) {
+            const QString id = lib->engineTabs().last().toMap().value(QStringLiteral("id")).toString();
+            QVERIFY(lib->deleteTab(id));
+        }
+        const QString lastId = lib->engineTabs().first().toMap().value(QStringLiteral("id")).toString();
+        QVERIFY(!lib->deleteTab(lastId));
+        QVERIFY(!lib->lastError().isEmpty());
+        QVERIFY2(restarted.warnings.isEmpty(), qPrintable(restarted.warnings.join(QLatin1Char('\n'))));
+    }
+}
+
+void TestBrushUi::brushLibraryMigrationPreservesUserCollectionsAndUpgradesBuiltIns()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("brush-library.json"));
+
+    BrushLibraryDocument bundled;
+    BrushEntryData existingBuiltIn;
+    existingBuiltIn.id = QStringLiteral("builtin-round");
+    existingBuiltIn.name = QStringLiteral("Round");
+    existingBuiltIn.category = QStringLiteral("Paint");
+    existingBuiltIn.builtIn = true;
+    existingBuiltIn.defaults.size = 16;
+    existingBuiltIn.current.size = 16;
+
+    BrushEntryData userDeletedBuiltIn;
+    userDeletedBuiltIn.id = QStringLiteral("builtin-old-removed");
+    userDeletedBuiltIn.name = QStringLiteral("Removed");
+    userDeletedBuiltIn.category = QStringLiteral("Paint");
+    userDeletedBuiltIn.builtIn = true;
+
+    BrushTabData defTab;
+    defTab.id = QStringLiteral("digital-default");
+    defTab.name = QStringLiteral("Default");
+    defTab.currentBrushId = existingBuiltIn.id;
+    defTab.brushes = {existingBuiltIn, userDeletedBuiltIn};
+    bundled.digital.defaultTabId = defTab.id;
+    bundled.digital.currentTabId = defTab.id;
+    bundled.digital.tabs = {defTab};
+    bundled.realistic.defaultTabId = QStringLiteral("real-default");
+    bundled.realistic.currentTabId = QStringLiteral("real-default");
+    BrushTabData rTab;
+    rTab.id = QStringLiteral("real-default");
+    rTab.name = QStringLiteral("Default");
+    rTab.brushes = {existingBuiltIn};
+    rTab.brushes[0].id = QStringLiteral("real-gouache");
+    rTab.brushes[0].defaults.traditionalMedia = true;
+    rTab.brushes[0].current.traditionalMedia = true;
+    rTab.currentBrushId = QStringLiteral("real-gouache");
+    bundled.realistic.tabs = {rTab};
+    bundled.knownBuiltInIds = {QStringLiteral("builtin-round"), QStringLiteral("builtin-old-removed"),
+                               QStringLiteral("real-gouache")};
+
+    // User renamed Default -> My Brushes, edited Round size to 42, deleted builtin-old-removed,
+    // and added a custom tab.
+    BrushLibraryDocument userSaved = bundled;
+    userSaved.digital.tabs[0].name = QStringLiteral("My Brushes");
+    userSaved.digital.tabs[0].brushes[0].current.size = 42;
+    userSaved.digital.tabs[0].brushes.removeAt(1);
+    BrushTabData customTab;
+    customTab.id = QStringLiteral("user-custom-tab");
+    customTab.name = QStringLiteral("Custom Paints");
+    userSaved.digital.tabs.append(customTab);
+    QString err;
+    QVERIFY2(BrushLibraryStore::save(path, userSaved, &err), qPrintable(err));
+
+    // App upgrade adds a brand-new built-in brush.
+    BrushEntryData newlyShipped = existingBuiltIn;
+    newlyShipped.id = QStringLiteral("builtin-new-v2");
+    newlyShipped.name = QStringLiteral("New V2 Rake");
+    newlyShipped.defaults.tipStyle = QStringLiteral("bristle");
+    newlyShipped.current.tipStyle = QStringLiteral("bristle");
+    bundled.digital.tabs[0].brushes.append(newlyShipped);
+    bundled.knownBuiltInIds.append(newlyShipped.id);
+
+    BrushLibraryDocument migrated;
+    QVERIFY2(BrushLibraryStore::load(path, bundled, &migrated, &err), qPrintable(err));
+    QCOMPARE(migrated.digital.tabs.size(), 2);
+    QCOMPARE(migrated.digital.tabs[0].name, QStringLiteral("My Brushes"));
+    QCOMPARE(migrated.digital.tabs[1].name, QStringLiteral("Custom Paints"));
+    QCOMPARE(migrated.digital.tabs[0].brushes.size(), 2); // Round (user edited) + New V2 Rake; deleted stays deleted!
+    QCOMPARE(migrated.digital.tabs[0].brushes[0].current.size, 42);
+    QCOMPARE(migrated.digital.tabs[0].brushes[1].id, QStringLiteral("builtin-new-v2"));
 }
 
 // ---------------------------------------------------------------- panel dock

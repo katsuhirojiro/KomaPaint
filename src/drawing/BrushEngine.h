@@ -3,8 +3,10 @@
 #include <cstdint>
 
 namespace komapaint {
-// Value settings can later select other renderers, sensor curves and textures.
-enum class BrushTip { Round, Textured };
+// Digital brush tips: crisp/soft round, anchored grain texture, multi-tuft
+// bristle, directional pencil/graphite, and organic stipple/scatter.
+enum class BrushTip { Round, Textured, Bristle, Graphite, Stipple };
+
 struct BrushDefinition {
     double size = 16;             // document pixels
     double opacity = 1;           // per dab; repeated dabs build up
@@ -14,22 +16,45 @@ struct BrushDefinition {
     BrushTip tip = BrushTip::Round;
     double hardness = 1;          // 1 = crisp edge; 0 = fades from the centre to the rim
     bool erase = false;           // remove paint from the layer instead of depositing colour
+
+    // Tip geometry & directionality
+    double aspectRatio = 1.0;     // 1.0 = circular; > 1.0 = flat/chisel ellipse
+    double angleRadians = 0.0;    // base tip rotation
+    bool followDirection = false; // align tip along stroke tangent
+
+    // Pressure curves (defaults keep existing fixed-size linear opacity behaviour)
+    double pressureSize = 0.0;    // 0 = fixed size, 1 = full pressure->size modulation
+    double pressureOpacity = 1.0; // 0 = fixed opacity, 1 = full pressure->opacity modulation
+    double pressureGamma = 1.0;   // < 1 lifts light pressure; > 1 requires firmer press
+    double minSizeRatio = 0.15;   // minimum diameter fraction when pressureSize > 0
+
+    // Digital blending & smudging (0 = pure deposit; > 0 = blend/smudge existing pixels)
+    double blendStrength = 0.0;   // 0..1 how strongly existing canvas paint blends/smears
+    double colorMix = 1.0;        // 0 = pure smudge/blend, 1 = full foreground colour
 };
+
 struct InputSample { double x, y, pressure = 1; };
 
 // Stateless tip mask, sensor response and paint deposition helpers.
 class BrushRasterizer {
 public:
     static double sensorOpacity(double pressure);
-    static double tipCoverage(BrushTip tip, double dx, double dy, double radius, std::int64_t x, std::int64_t y, double hardness = 1);
+    static double shapedPressure(double pressure, double gamma);
+    static double tipCoverage(BrushTip tip, double dx, double dy, double radius,
+                              std::int64_t x, std::int64_t y, double hardness = 1,
+                              double aspectRatio = 1.0, double angleRadians = 0.0);
     static std::uint32_t deposit(std::uint32_t destination, std::uint32_t color, double amount);
+    // Blends a premultiplied destination pixel toward a carried/mixed premultiplied sample.
+    static std::uint32_t blend(std::uint32_t destination, std::uint32_t carryPremul, double amount);
     // Scales a premultiplied pixel towards transparent; amount 1 clears it.
     static std::uint32_t erase(std::uint32_t destination, double amount);
-    static SparseTileStore::WriteResult dab(SparseTileStore& store, const BrushDefinition& brush, InputSample sample);
+    static SparseTileStore::WriteResult dab(SparseTileStore& store, const BrushDefinition& brush,
+                                            InputSample sample, double strokeAngle = 0.0,
+                                            std::uint32_t carryPremul = 0, bool hasCarry = false);
 };
 
-// Maintains spacing across input events. One instance is one stroke. Caller owns
-// and keeps the store alive, and enforces layer lock/visibility and input mapping.
+// Maintains spacing, directional angle, and smudge carry across input events.
+// One instance is one stroke. Caller owns and keeps the store alive.
 class BrushStroke {
 public:
     BrushStroke(SparseTileStore& store, BrushDefinition definition);
@@ -40,11 +65,16 @@ public:
     SparseTileStore::WriteResult failureReason() const { return m_failureReason; }
 private:
     bool stamp(InputSample sample);
+    void updateCarry(InputSample sample);
     SparseTileStore& m_store;
     BrushDefinition m_brush;
     InputSample m_previous{};
     double m_remaining = 0;
     double m_spacing = 1;
+    double m_strokeAngle = 0;
+    bool m_hasAngle = false;
+    std::uint32_t m_carryPremul = 0;
+    bool m_hasCarry = false;
     bool m_started = false;
     bool m_failed = false;
     SparseTileStore::WriteResult m_failureReason = SparseTileStore::WriteResult::Unchanged;

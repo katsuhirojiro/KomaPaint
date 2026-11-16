@@ -1,5 +1,7 @@
 # Application-level services (QML engine, main window controller).
 add_library(komapaint_app STATIC
+    BrushLibraryStore.cpp
+    BrushLibraryStore.h
     BrushSettings.h
     CanvasViewport.cpp
     CanvasViewport.h

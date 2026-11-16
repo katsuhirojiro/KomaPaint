@@ -59,6 +59,11 @@ Rectangle {
                     flow: panel.brush.flow
                     spacing: panel.brush.spacing
                     textured: panel.brush.textured
+                    tipStyle: panel.brush.tipStyle
+                    aspectRatio: panel.brush.aspectRatio
+                    tipAngle: panel.brush.tipAngle
+                    pressureSize: panel.brush.pressureSize
+                    blendStrength: panel.brush.blendStrength
                     scaleHint: 0.5
                     ink: KP.text
                 }
@@ -81,7 +86,7 @@ Rectangle {
                         iconSize: 12
                         cell: 18
                         tooltip: qsTr("Return this preset to its default settings")
-                        enabled: panel.library.modified
+                        enabled: panel.library.modified && (!panel.library.brushTool || panel.library.currentBrushBuiltIn)
                         onActivated: panel.library.resetCurrent()
                     }
                 }
@@ -410,6 +415,117 @@ Rectangle {
                                 onChosen: function(index) { panel.brush.hardness = [0, 25, 50, 75, 100][index] }
                             }
 
+                        }
+                    }
+                }
+
+                PanelSection {
+                    objectName: "digitalDynamicsSection"
+                    width: parent.width
+                    title: qsTr("Digital dynamics")
+                    hint: panel.brush.blendStrength > 0 ? qsTr("blend · pressure") : panel.brush.tipStyle
+                    visible: !panel.realisticEngine && !panel.brush.erase
+                    collapsible: true
+                    expanded: false
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+
+                    Item {
+                        width: parent.width
+                        height: digitalDynamicsColumn.height
+                        Column {
+                            id: digitalDynamicsColumn
+                            width: parent.width
+                            spacing: KP.gapXS
+
+                            Text { text: qsTr("Tip profile"); color: KP.text; font.pixelSize: KP.fontS }
+                            SegmentedChoice {
+                                objectName: "digitalTipStyleChoice"
+                                width: parent.width
+                                options: [qsTr("Round"), qsTr("Textured"), qsTr("Bristle"), qsTr("Graphite"), qsTr("Stipple")]
+                                currentIndex: Math.max(0, ["round", "textured", "bristle", "graphite", "stipple"].indexOf(panel.brush.tipStyle))
+                                onChosen: function(index) {
+                                    const styles = ["round", "textured", "bristle", "graphite", "stipple"]
+                                    panel.brush.tipStyle = styles[index]
+                                }
+                            }
+                            PropertySlider {
+                                objectName: "digitalAspectRatioSlider"
+                                width: parent.width
+                                label: qsTr("Tip flatness")
+                                unit: "%"
+                                from: 100
+                                to: 400
+                                value: panel.brush.aspectRatio
+                                onEdited: function(v) { panel.brush.aspectRatio = v }
+                            }
+                            PropertySlider {
+                                objectName: "digitalTipAngleSlider"
+                                width: parent.width
+                                label: qsTr("Tip angle")
+                                unit: "°"
+                                from: -180
+                                to: 180
+                                value: panel.brush.tipAngle
+                                onEdited: function(v) { panel.brush.tipAngle = v }
+                            }
+                            CheckBox {
+                                objectName: "digitalFollowDirectionCheck"
+                                text: qsTr("Follow stroke direction")
+                                checked: panel.brush.followDirection
+                                onToggled: panel.brush.followDirection = checked
+                            }
+                            PropertySlider {
+                                objectName: "digitalPressureSizeSlider"
+                                width: parent.width
+                                label: qsTr("Pressure → Size")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.pressureSize
+                                onEdited: function(v) { panel.brush.pressureSize = v }
+                            }
+                            PropertySlider {
+                                objectName: "digitalPressureOpacitySlider"
+                                width: parent.width
+                                label: qsTr("Pressure → Opacity")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.pressureOpacity
+                                onEdited: function(v) { panel.brush.pressureOpacity = v }
+                            }
+                            PropertySlider {
+                                objectName: "digitalPressureGammaSlider"
+                                width: parent.width
+                                label: qsTr("Pressure curve")
+                                unit: "%"
+                                from: 40
+                                to: 200
+                                value: panel.brush.pressureGamma
+                                onEdited: function(v) { panel.brush.pressureGamma = v }
+                            }
+                            PropertySlider {
+                                objectName: "digitalBlendStrengthSlider"
+                                width: parent.width
+                                label: qsTr("Blend / Smudge")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.blendStrength
+                                onEdited: function(v) { panel.brush.blendStrength = v }
+                            }
+                            PropertySlider {
+                                objectName: "digitalColorMixSlider"
+                                width: parent.width
+                                visible: panel.brush.blendStrength > 0
+                                label: qsTr("Colour mix")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.colorMix
+                                onEdited: function(v) { panel.brush.colorMix = v }
+                            }
                         }
                     }
                 }

@@ -523,10 +523,25 @@ void WorkspaceState::setDefaultTool(const QString& tool)
 void WorkspaceState::setBrushEngine(const QString& engine)
 {
     const QString normalized = BrushSettings::normalizeBrushEngine(engine);
+    if (normalized == QStringLiteral("realistic") && !m_realisticEngineEnabled) {
+        emit realisticEngineLocked();
+        return;
+    }
     if (m_brushEngine == normalized && m_brush->brushEngine() == normalized) return;
     m_brushEngine = normalized;
     m_brush->setBrushEngine(normalized);
     emit brushEngineChanged(m_brushEngine);
+}
+
+void WorkspaceState::setRealisticEngineEnabled(bool enabled)
+{
+    if (!enabled && isRealisticEngine()) {
+        emit realisticDisableBlocked();
+        return;
+    }
+    if (m_realisticEngineEnabled == enabled) return;
+    m_realisticEngineEnabled = enabled;
+    emit realisticEngineEnabledChanged(m_realisticEngineEnabled);
 }
 
 void WorkspaceState::openBrushEngineSettings()
@@ -1096,6 +1111,10 @@ bool WorkspaceState::initializeSession(const QString& filePath)
 {
     if (filePath.isEmpty()) return false;
     m_sessionPath = QFileInfo(filePath).absoluteFilePath();
+    if (m_subTools) {
+        m_subTools->initializePersistence(
+            QFileInfo(m_sessionPath).dir().filePath(QStringLiteral("brush-library.json")));
+    }
     if (m_mixer) {
         m_mixer->initializePersistence(
             QFileInfo(m_sessionPath).dir().filePath(QStringLiteral("mixtures.json")));

@@ -29,7 +29,7 @@ KpDialog {
                                            qsTr("Every 60 minutes"), qsTr("Never")]
     property int categoryIndex: 0
     property int pendingCategoryIndex: -1
-    property var draft: ({ theme: "dark", defaultTool: "brush", brushEngine: "digital", recoveryInterval: 10 })
+    property var draft: ({ theme: "dark", defaultTool: "brush", brushEngine: "digital", realisticEngineEnabled: false, recoveryInterval: 10 })
     property string validationMessage: ""
 
     function openCategory(categoryId) {
@@ -44,12 +44,15 @@ KpDialog {
     function loadDraft() {
         const savedTheme = String(Settings.value("ui/theme", "dark"))
         const savedTool = String(Settings.value("tools/defaultTool", "brush"))
-        const savedEngine = String(Settings.value("tools/brushEngine", "digital")).toLowerCase()
+        const rawEnabled = Settings.value("tools/realisticEngineEnabled", Workspace.realisticEngineEnabled)
+        const savedRealisticEnabled = rawEnabled === true || String(rawEnabled).toLowerCase() === "true"
+        const savedEngine = String(Settings.value("tools/brushEngine", Workspace.brushEngine)).toLowerCase()
         const savedInterval = Number(Settings.value("recovery/intervalMinutes", 10))
         draft = {
             theme: savedTheme === "light" ? "light" : "dark",
             defaultTool: toolIds.indexOf(savedTool) >= 0 ? savedTool : "brush",
-            brushEngine: savedEngine === "realistic" ? "realistic" : "digital",
+            realisticEngineEnabled: savedRealisticEnabled,
+            brushEngine: (savedEngine === "realistic" && savedRealisticEnabled) ? "realistic" : "digital",
             recoveryInterval: recoveryIntervals.indexOf(savedInterval) >= 0 ? savedInterval : 10
         }
         categoryIndex = pendingCategoryIndex >= 0 ? pendingCategoryIndex : 0
@@ -59,16 +62,25 @@ KpDialog {
     function setDraft(key, value) {
         const next = Object.assign({}, draft)
         next[key] = value
+        if (key === "realisticEngineEnabled" && !value && next.brushEngine === "realistic") {
+            validationMessage = qsTr("Switch the active brush engine back to Digital before disabling Realistic.")
+            return
+        }
+        if (key === "brushEngine" && value === "realistic" && !next.realisticEngineEnabled) {
+            validationMessage = qsTr("Enable Realistic brushes above before selecting the Realistic engine.")
+            return
+        }
         draft = next
         validationMessage = ""
     }
     function restoreDraftDefaults() {
-        draft = { theme: "dark", defaultTool: "brush", brushEngine: "digital", recoveryInterval: 10 }
+        draft = { theme: "dark", defaultTool: "brush", brushEngine: "digital", realisticEngineEnabled: false, recoveryInterval: 10 }
         validationMessage = ""
     }
     function applyDraft() {
         if (toolIds.indexOf(draft.defaultTool) < 0
             || (draft.brushEngine !== "digital" && draft.brushEngine !== "realistic")
+            || (!draft.realisticEngineEnabled && draft.brushEngine === "realistic")
             || recoveryIntervals.indexOf(Number(draft.recoveryInterval)) < 0
             || (draft.theme !== "dark" && draft.theme !== "light")) {
             validationMessage = qsTr("One or more settings are invalid. Review the selected values and try again.")
@@ -76,17 +88,20 @@ KpDialog {
         }
         const oldTheme = Settings.value("ui/theme", "dark")
         const oldTool = Settings.value("tools/defaultTool", "brush")
+        const oldEnabled = Settings.value("tools/realisticEngineEnabled", false)
         const oldEngine = Settings.value("tools/brushEngine", "digital")
         const oldInterval = Settings.value("recovery/intervalMinutes", 10)
         const oldConfigured = Settings.value("recovery/configured", false)
         Settings.setValue("ui/theme", draft.theme)
         Settings.setValue("tools/defaultTool", draft.defaultTool)
+        Settings.setValue("tools/realisticEngineEnabled", Boolean(draft.realisticEngineEnabled))
         Settings.setValue("tools/brushEngine", draft.brushEngine)
         Settings.setValue("recovery/intervalMinutes", Number(draft.recoveryInterval))
         Settings.setValue("recovery/configured", true)
         if (!Settings.sync()) {
             Settings.setValue("ui/theme", oldTheme)
             Settings.setValue("tools/defaultTool", oldTool)
+            Settings.setValue("tools/realisticEngineEnabled", oldEnabled)
             Settings.setValue("tools/brushEngine", oldEngine)
             Settings.setValue("recovery/intervalMinutes", oldInterval)
             Settings.setValue("recovery/configured", oldConfigured)
@@ -95,7 +110,13 @@ KpDialog {
             return false
         }
         Workspace.defaultTool = draft.defaultTool
-        Workspace.brushEngine = draft.brushEngine
+        if (draft.realisticEngineEnabled) {
+            Workspace.realisticEngineEnabled = true
+            Workspace.brushEngine = draft.brushEngine
+        } else {
+            Workspace.brushEngine = "digital"
+            Workspace.realisticEngineEnabled = false
+        }
         Workspace.setRecoveryInterval(Number(draft.recoveryInterval))
         KP.mode = draft.theme
         return true
@@ -256,8 +277,70 @@ KpDialog {
                     Text { text: qsTr("Brush Engine"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
                     Text {
                         Layout.fillWidth: true
-                        text: qsTr("Choose how new painting strokes behave across the workspace. Digital is the default engine.")
+                        text: qsTr("Digital is enabled by default. Enable Realistic below to unlock physical pigment painting and the Realistic brush collection.")
                         color: KP.textMuted; font.pixelSize: KP.fontS; wrapMode: Text.WordWrap
+                    }
+
+                    AbstractButton {
+                        id: realisticEnableToggle
+                        objectName: "realisticEngineEnableToggle"
+                        readonly property bool checkedState: Boolean(dialog.draft.realisticEngineEnabled)
+                        readonly property bool disableBlocked: checkedState && dialog.draft.brushEngine === "realistic"
+                        Layout.fillWidth: true
+                        padding: KP.gapM
+                        implicitHeight: enableToggleCol.implicitHeight + 2 * KP.gapM
+                        hoverEnabled: true
+                        Accessible.name: qsTr("Enable Realistic brush engine")
+                        onClicked: dialog.setDraft("realisticEngineEnabled", !checkedState)
+
+                        background: Rectangle {
+                            radius: KP.radiusS
+                            color: realisticEnableToggle.checkedState ? KP.rowSelected
+                                 : realisticEnableToggle.hovered ? KP.hoverOverlay : KP.paneBgAlt
+                            border.width: 1
+                            border.color: realisticEnableToggle.checkedState ? KP.ember : KP.hairline
+                        }
+                        contentItem: ColumnLayout {
+                            id: enableToggleCol
+                            spacing: KP.gapXS
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: KP.gapS
+                                Rectangle {
+                                    Layout.preferredWidth: 16
+                                    Layout.preferredHeight: 16
+                                    radius: KP.radiusXS
+                                    color: realisticEnableToggle.checkedState ? KP.ember : "transparent"
+                                    border.width: 1.5
+                                    border.color: realisticEnableToggle.checkedState ? KP.ember : KP.border
+                                    Text {
+                                        anchors.centerIn: parent
+                                        visible: realisticEnableToggle.checkedState
+                                        text: "\u2713"
+                                        color: KP.textAccent
+                                        font.pixelSize: 11
+                                        font.weight: Font.Bold
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Enable Realistic Brush Engine & Collection")
+                                    color: realisticEnableToggle.checkedState ? KP.textAccent : KP.text
+                                    font.pixelSize: KP.fontS + 1
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 24
+                                text: realisticEnableToggle.disableBlocked
+                                      ? qsTr("Return the active engine to Digital below before disabling Realistic.")
+                                      : qsTr("Unlocks the Realistic tab in Painting Brushes with gouache, watercolour, paper wetting, and Paint Mixer integration.")
+                                color: realisticEnableToggle.disableBlocked ? KP.ember : KP.textMuted
+                                font.pixelSize: KP.fontXS
+                                wrapMode: Text.WordWrap
+                            }
+                        }
                     }
 
                     Repeater {
@@ -265,7 +348,7 @@ KpDialog {
                             {
                                 id: "digital",
                                 title: qsTr("Digital (Default)"),
-                                summary: qsTr("Normal digital raster painting with conventional RGB colour blending, lightweight strokes, and no physical pigment simulation.")
+                                summary: qsTr("Fast digital raster painting with pressure curves, bristle/graphite/stipple tips, blending/smudging, and no physical pigment simulation.")
                             },
                             {
                                 id: "realistic",
@@ -276,19 +359,21 @@ KpDialog {
                         delegate: AbstractButton {
                             id: engineOption
                             required property var modelData
+                            readonly property bool locked: modelData.id === "realistic" && !dialog.draft.realisticEngineEnabled
                             readonly property bool selected: dialog.draft.brushEngine === modelData.id
                             objectName: "brushEngineOption_" + modelData.id
                             Layout.fillWidth: true
                             padding: KP.gapM
                             implicitHeight: engineColumn.implicitHeight + 2 * KP.gapM
-                            hoverEnabled: true
+                            hoverEnabled: !locked
+                            opacity: locked ? 0.55 : 1.0
                             Accessible.name: modelData.title
                             onClicked: dialog.setDraft("brushEngine", modelData.id)
 
                             background: Rectangle {
                                 radius: KP.radiusS
                                 color: engineOption.selected ? KP.rowSelected
-                                     : engineOption.hovered ? KP.hoverOverlay : KP.paneBgAlt
+                                     : (engineOption.hovered && !engineOption.locked) ? KP.hoverOverlay : KP.paneBgAlt
                                 border.width: 1
                                 border.color: engineOption.selected ? KP.ember : KP.hairline
                             }
@@ -312,6 +397,12 @@ KpDialog {
                                         color: engineOption.selected ? KP.textAccent : KP.text
                                         font.pixelSize: KP.fontS + 1
                                         font.weight: Font.DemiBold
+                                    }
+                                    Text {
+                                        visible: engineOption.locked
+                                        text: qsTr("Locked — enable above")
+                                        color: KP.textSubtle
+                                        font.pixelSize: KP.fontXS
                                     }
                                 }
                                 Text {

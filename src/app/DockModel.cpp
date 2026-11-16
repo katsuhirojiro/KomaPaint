@@ -153,7 +153,7 @@ void DockModel::buildDefault()
 
     Node left = column({ tabs(QStringLiteral("subtool")), tabs(QStringLiteral("toolproperty")),
                          tabs(QStringLiteral("brushsize")) },
-                       { 0.18, 0.57, 0.25 });
+                       { 0.28, 0.49, 0.23 });
     Node centre = makeCanvas();
     Node colorTabs = tabs(QStringLiteral("color"));
     colorTabs.panels.append(QStringLiteral("properties"));

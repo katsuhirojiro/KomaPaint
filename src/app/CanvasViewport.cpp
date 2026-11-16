@@ -697,8 +697,22 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
     BrushDefinition definition;
     definition.size = brush->size(); definition.opacity = brush->opacity() / 100.0;
     definition.flow = brush->flow() / 100.0; definition.spacing = brush->spacing() / 100.0;
-    definition.tip = brush->textured() ? BrushTip::Textured : BrushTip::Round;
+    const QString tipStyle = brush->tipStyle();
+    if (tipStyle == QStringLiteral("bristle")) definition.tip = BrushTip::Bristle;
+    else if (tipStyle == QStringLiteral("graphite")) definition.tip = BrushTip::Graphite;
+    else if (tipStyle == QStringLiteral("stipple")) definition.tip = BrushTip::Stipple;
+    else if (tipStyle == QStringLiteral("textured") || brush->textured()) definition.tip = BrushTip::Textured;
+    else definition.tip = BrushTip::Round;
     definition.hardness = brush->hardness() / 100.0;
+    definition.aspectRatio = brush->aspectRatio() / 100.0;
+    definition.angleRadians = qDegreesToRadians(double(brush->tipAngle()));
+    definition.followDirection = brush->followDirection();
+    definition.pressureSize = brush->pressureSize() / 100.0;
+    definition.pressureOpacity = brush->pressureOpacity() / 100.0;
+    definition.pressureGamma = brush->pressureGamma() / 100.0;
+    definition.minSizeRatio = brush->minSizeRatio() / 100.0;
+    definition.blendStrength = brush->blendStrength() / 100.0;
+    definition.colorMix = brush->colorMix() / 100.0;
     definition.erase = brush->erase();
     definition.color = color.rgba();
     try { m_stroke = std::make_unique<BrushStroke>(layer->tiles(), definition); }

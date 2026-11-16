@@ -13,10 +13,18 @@ class BrushSettings : public QObject {
     Q_PROPERTY(int flow READ flow WRITE setFlow NOTIFY changed)
     Q_PROPERTY(int spacing READ spacing WRITE setSpacing NOTIFY changed)
     Q_PROPERTY(bool textured READ textured WRITE setTextured NOTIFY changed)
+    Q_PROPERTY(QString tipStyle READ tipStyle WRITE setTipStyle NOTIFY changed)
     // 100 = crisp edge, 0 = fades from the centre of the tip to its rim.
     Q_PROPERTY(int hardness READ hardness WRITE setHardness NOTIFY changed)
     // 0 = the line follows the pointer exactly; higher values smooth it.
     Q_PROPERTY(int stabilization READ stabilization WRITE setStabilization NOTIFY changed)
+    // Digital brush pressure dynamics & blending (used only by the Digital engine).
+    Q_PROPERTY(int pressureSize READ pressureSize WRITE setPressureSize NOTIFY changed)
+    Q_PROPERTY(int pressureOpacity READ pressureOpacity WRITE setPressureOpacity NOTIFY changed)
+    Q_PROPERTY(int pressureGamma READ pressureGamma WRITE setPressureGamma NOTIFY changed)
+    Q_PROPERTY(int minSizeRatio READ minSizeRatio WRITE setMinSizeRatio NOTIFY changed)
+    Q_PROPERTY(int blendStrength READ blendStrength WRITE setBlendStrength NOTIFY changed)
+    Q_PROPERTY(int colorMix READ colorMix WRITE setColorMix NOTIFY changed)
     // True while an eraser is selected: strokes remove paint from the layer.
     Q_PROPERTY(bool erase READ erase WRITE setErase NOTIFY changed)
     Q_PROPERTY(QString brushEngine READ brushEngine WRITE setBrushEngine NOTIFY brushEngineChanged)
@@ -61,6 +69,13 @@ public:
         return engine.trimmed().compare(QStringLiteral("realistic"), Qt::CaseInsensitive) == 0
             ? QStringLiteral("realistic") : QStringLiteral("digital");
     }
+    static QString normalizeTipStyle(const QString& style) {
+        const QString s = style.trimmed().toLower();
+        if (s == QStringLiteral("textured") || s == QStringLiteral("bristle")
+            || s == QStringLiteral("graphite") || s == QStringLiteral("stipple"))
+            return s;
+        return QStringLiteral("round");
+    }
     using QObject::QObject;
     // Limits of the brush engine (see BrushRasterizer::dab and BrushStroke).
     static constexpr int MinSize = 1, MaxSize = 256, MinSpacing = 5, MaxSpacing = 50;
@@ -69,8 +84,15 @@ public:
     int flow() const { return m_flow; }
     int spacing() const { return m_spacing; }
     bool textured() const { return m_textured; }
+    QString tipStyle() const { return m_tipStyle; }
     int hardness() const { return m_hardness; }
     int stabilization() const { return m_stabilization; }
+    int pressureSize() const { return m_pressureSize; }
+    int pressureOpacity() const { return m_pressureOpacity; }
+    int pressureGamma() const { return m_pressureGamma; }
+    int minSizeRatio() const { return m_minSizeRatio; }
+    int blendStrength() const { return m_blendStrength; }
+    int colorMix() const { return m_colorMix; }
     bool erase() const { return m_erase; }
     QString brushEngine() const { return m_brushEngine; }
     bool isRealisticEngine() const { return m_brushEngine == QStringLiteral("realistic"); }
@@ -108,9 +130,31 @@ public:
     void setOpacity(int v) { v = qBound(0, v, 100); if (m_opacity != v) { m_opacity = v; emit changed(); } }
     void setFlow(int v) { v = qBound(0, v, 100); if (m_flow != v) { m_flow = v; emit changed(); } }
     void setSpacing(int v) { v = qBound(MinSpacing, v, MaxSpacing); if (m_spacing != v) { m_spacing = v; emit changed(); } }
-    void setTextured(bool v) { if (m_textured != v) { m_textured = v; emit changed(); } }
+    void setTextured(bool v) {
+        const QString nextStyle = v
+            ? (m_tipStyle == QStringLiteral("round") ? QStringLiteral("textured") : m_tipStyle)
+            : QStringLiteral("round");
+        if (m_textured == v && m_tipStyle == nextStyle) return;
+        m_textured = v;
+        m_tipStyle = nextStyle;
+        emit changed();
+    }
+    void setTipStyle(const QString& style) {
+        const QString normalized = normalizeTipStyle(style);
+        const bool nextTextured = normalized != QStringLiteral("round");
+        if (m_tipStyle == normalized && m_textured == nextTextured) return;
+        m_tipStyle = normalized;
+        m_textured = nextTextured;
+        emit changed();
+    }
     void setHardness(int v) { v = qBound(0, v, 100); if (m_hardness != v) { m_hardness = v; emit changed(); } }
     void setStabilization(int v) { v = qBound(0, v, 100); if (m_stabilization != v) { m_stabilization = v; emit changed(); } }
+    void setPressureSize(int v) { v = qBound(0, v, 100); if (m_pressureSize != v) { m_pressureSize = v; emit changed(); } }
+    void setPressureOpacity(int v) { v = qBound(0, v, 100); if (m_pressureOpacity != v) { m_pressureOpacity = v; emit changed(); } }
+    void setPressureGamma(int v) { v = qBound(40, v, 200); if (m_pressureGamma != v) { m_pressureGamma = v; emit changed(); } }
+    void setMinSizeRatio(int v) { v = qBound(5, v, 100); if (m_minSizeRatio != v) { m_minSizeRatio = v; emit changed(); } }
+    void setBlendStrength(int v) { v = qBound(0, v, 100); if (m_blendStrength != v) { m_blendStrength = v; emit changed(); } }
+    void setColorMix(int v) { v = qBound(0, v, 100); if (m_colorMix != v) { m_colorMix = v; emit changed(); } }
     void setErase(bool v) { if (m_erase != v) { m_erase = v; emit changed(); } }
     void setBrushEngine(const QString& engine) {
         const QString normalized = normalizeBrushEngine(engine);
@@ -188,6 +232,13 @@ private:
     int m_size = 16, m_opacity = 100, m_flow = 100, m_spacing = 15;
     int m_hardness = 100, m_stabilization = 0;
     bool m_textured = false;
+    QString m_tipStyle = QStringLiteral("round");
+    int m_pressureSize = 0;
+    int m_pressureOpacity = 100;
+    int m_pressureGamma = 100;
+    int m_minSizeRatio = 15;
+    int m_blendStrength = 0;
+    int m_colorMix = 100;
     bool m_erase = false;
     QString m_brushEngine = QStringLiteral("digital");
     bool m_traditionalMedia = false;

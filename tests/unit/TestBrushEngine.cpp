@@ -114,5 +114,61 @@ int main() {
         CHECK(line.pixel({12, 16}).value() == 0xff2060c0U);
         CHECK(line.pixel({80, 16}).value() == 0xff2060c0U);
     }
+    // ---- Digital tip geometry, pressure dynamics, and blending/smudging.
+    {
+        // Elliptical flat brush (aspectRatio > 1) stays narrower along minor axis.
+        SparseTileStore flatStore(64, 64, 16);
+        BrushDefinition flat;
+        flat.size = 24; flat.aspectRatio = 2.5; flat.angleRadians = 0.0; flat.color = 0xff000000;
+        CHECK(BrushRasterizer::dab(flatStore, flat, {32, 32, 1.0}) == W::Changed);
+        CHECK((flatStore.pixel({22, 32}).value() >> 24) > 0);
+        CHECK((flatStore.pixel({32, 22}).value() >> 24) == 0);
+
+        // Bristle, Graphite, and Stipple produce distinct non-uniform coverage profiles.
+        auto dabCenterSum = [&](BrushTip tip) {
+            SparseTileStore s(48, 48, 16);
+            BrushDefinition d;
+            d.size = 28; d.color = 0xff102030; d.tip = tip; d.hardness = 0.8;
+            CHECK(BrushRasterizer::dab(s, d, {24, 24, 1.0}) == W::Changed);
+            std::uint64_t sum = 0;
+            for (int y = 12; y <= 36; ++y)
+                for (int x = 12; x <= 36; ++x) sum += (s.pixel({x, y}).value() >> 24);
+            return sum;
+        };
+        const auto sumRound = dabCenterSum(BrushTip::Round);
+        const auto sumBristle = dabCenterSum(BrushTip::Bristle);
+        const auto sumGraphite = dabCenterSum(BrushTip::Graphite);
+        const auto sumStipple = dabCenterSum(BrushTip::Stipple);
+        CHECK(sumBristle > 0 && sumBristle < sumRound);
+        CHECK(sumGraphite > 0 && sumGraphite < sumRound);
+        CHECK(sumStipple > 0 && sumStipple < sumRound);
+
+        // Pressure-to-size tapers diameter cleanly on light pressure.
+        SparseTileStore lightPress(64, 64, 16), fullPress(64, 64, 16);
+        BrushDefinition tapered;
+        tapered.size = 30; tapered.pressureSize = 0.85; tapered.minSizeRatio = 0.15; tapered.pressureOpacity = 0.0;
+        CHECK(BrushRasterizer::dab(lightPress, tapered, {32, 32, 0.1}) == W::Changed);
+        CHECK(BrushRasterizer::dab(fullPress, tapered, {32, 32, 1.0}) == W::Changed);
+        CHECK((lightPress.pixel({43, 32}).value() >> 24) == 0);
+        CHECK((fullPress.pixel({43, 32}).value() >> 24) > 0);
+
+        // Blending / smudging pulls existing paint across into empty canvas without physical simulation.
+        SparseTileStore smudgeStore(96, 48, 16);
+        BrushDefinition redPaint;
+        redPaint.size = 16; redPaint.color = 0xffff2020;
+        BrushStroke drawRed(smudgeStore, redPaint);
+        CHECK(drawRed.begin({20, 24, 1.0})); CHECK(drawRed.end({28, 24, 1.0}));
+        CHECK(smudgeStore.pixel({56, 24}).value() == 0U);
+
+        BrushDefinition smudge;
+        smudge.size = 16; smudge.spacing = 0.15; smudge.opacity = 0.9; smudge.flow = 0.9;
+        smudge.hardness = 0.4; smudge.blendStrength = 0.9; smudge.colorMix = 0.0;
+        BrushStroke smear(smudgeStore, smudge);
+        CHECK(smear.begin({24, 24, 1.0}));
+        CHECK(smear.end({58, 24, 1.0}));
+        const auto smeared = smudgeStore.pixel({48, 24}).value();
+        CHECK((smeared >> 24) > 0);
+        CHECK(((smeared >> 16) & 255U) > (smeared & 255U));
+    }
     std::cout << "Brush engine tests passed\n";
 }

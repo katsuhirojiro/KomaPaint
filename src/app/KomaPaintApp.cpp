@@ -30,10 +30,21 @@ KomaPaintApp::KomaPaintApp(const QString& fileToOpen, QObject* parent)
 {
     m_workspace.setDefaultTool(m_settings.value(QStringLiteral("tools/defaultTool"),
                                                 QStringLiteral("brush")).toString());
+    m_workspace.setRealisticEngineEnabled(
+        m_settings.value(QStringLiteral("tools/realisticEngineEnabled"), false).toBool());
     m_workspace.setBrushEngine(m_settings.value(QStringLiteral("tools/brushEngine"),
                                                 QStringLiteral("digital")).toString());
     const int recoveryInterval = m_settings.value(QStringLiteral("recovery/intervalMinutes"), 10).toInt();
     m_workspace.setRecoveryInterval(recoveryInterval);
+
+    connect(&m_workspace, &WorkspaceState::brushEngineChanged, this, [this](const QString& engine) {
+        m_settings.setValue(QStringLiteral("tools/brushEngine"), engine);
+        m_settings.sync();
+    });
+    connect(&m_workspace, &WorkspaceState::realisticEngineEnabledChanged, this, [this](bool enabled) {
+        m_settings.setValue(QStringLiteral("tools/realisticEngineEnabled"), enabled);
+        m_settings.sync();
+    });
 }
 
 KomaPaintApp::~KomaPaintApp() = default;
@@ -127,6 +138,8 @@ int KomaPaintApp::run()
     app->setOrganizationDomain(QStringLiteral(KOMAPAINT_DOMAIN));
     m_workspace.setDefaultTool(m_settings.value(QStringLiteral("tools/defaultTool"),
                                                QStringLiteral("brush")).toString());
+    m_workspace.setRealisticEngineEnabled(
+        m_settings.value(QStringLiteral("tools/realisticEngineEnabled"), false).toBool());
     m_workspace.setBrushEngine(m_settings.value(QStringLiteral("tools/brushEngine"),
                                                 QStringLiteral("digital")).toString());
 

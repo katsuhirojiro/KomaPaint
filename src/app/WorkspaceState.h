@@ -65,6 +65,7 @@ class WorkspaceState : public QObject
     Q_PROPERTY(QString         defaultTool READ defaultTool WRITE setDefaultTool NOTIFY defaultToolChanged)
     Q_PROPERTY(QString         brushEngine READ brushEngine WRITE setBrushEngine NOTIFY brushEngineChanged)
     Q_PROPERTY(bool            realisticEngine READ isRealisticEngine NOTIFY brushEngineChanged)
+    Q_PROPERTY(bool            realisticEngineEnabled READ isRealisticEngineEnabled WRITE setRealisticEngineEnabled NOTIFY realisticEngineEnabledChanged)
     Q_PROPERTY(qreal           zoom      READ zoom      WRITE setZoom      NOTIFY zoomChanged)
 
 public:
@@ -83,6 +84,8 @@ public:
     QString defaultTool() const { return m_defaultTool; }
     QString brushEngine() const { return m_brushEngine; }
     bool isRealisticEngine() const { return m_brushEngine == QStringLiteral("realistic"); }
+    bool isRealisticEngineEnabled() const { return m_realisticEngineEnabled; }
+    Q_INVOKABLE bool canDisableRealisticEngine() const { return !isRealisticEngine(); }
     Q_INVOKABLE void openBrushEngineSettings();
     qreal   zoom()       const { return m_zoom; }
     QString currentFile() const { return m_currentFile; }
@@ -200,6 +203,7 @@ public slots:
     void setActiveTool(const QString& tool);
     void setDefaultTool(const QString& tool);
     void setBrushEngine(const QString& engine);
+    void setRealisticEngineEnabled(bool enabled);
     void setZoom(qreal z);
 
 signals:
@@ -207,6 +211,9 @@ signals:
     void activeToolChanged(const QString& tool);
     void defaultToolChanged(const QString& tool);
     void brushEngineChanged(const QString& engine);
+    void realisticEngineEnabledChanged(bool enabled);
+    void realisticEngineLocked();
+    void realisticDisableBlocked();
     void openBrushEngineSettingsRequested();
     void zoomChanged(qreal zoom);
     void fitRequested();
@@ -292,6 +299,7 @@ private:
     QString         m_activeTool = QStringLiteral("brush");
     QString         m_defaultTool = QStringLiteral("brush");
     QString         m_brushEngine = QStringLiteral("digital");
+    bool            m_realisticEngineEnabled = false;
     QString         m_currentFile;
     QString         m_creationError;
     qreal           m_zoom       = 100.0;
