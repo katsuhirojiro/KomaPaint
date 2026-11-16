@@ -622,9 +622,10 @@ QString PaintMixerController::duplicateSavedMixture(const QString& savedId)
     const auto it = std::find_if(m_savedMixtures.begin(), m_savedMixtures.end(),
                                  [&savedId](const SavedMixture& m) { return m.id == savedId; });
     if (it == m_savedMixtures.end()) return {};
+    const QString sourceName = it->name;
     SavedMixture copy = *it;
     copy.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    copy.name = QStringLiteral("%1 (Copy)").arg(it->name);
+    copy.name = QStringLiteral("%1 (Copy)").arg(sourceName);
     const QString now = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
     copy.createdAt = now;
     copy.updatedAt = now;
@@ -633,7 +634,7 @@ QString PaintMixerController::duplicateSavedMixture(const QString& savedId)
     m_savedMixtures.insert(insertAt, std::move(copy));
     emit savedMixturesChanged();
     persistLibrary();
-    setNotice(QStringLiteral("Duplicated mixture \"%1\".").arg(it->name));
+    setNotice(QStringLiteral("Duplicated mixture \"%1\".").arg(sourceName));
     return createdId;
 }
 

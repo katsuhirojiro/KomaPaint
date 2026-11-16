@@ -44,6 +44,13 @@ struct Running {
     std::unique_ptr<QObject> root;
     QQuickWindow* window = nullptr;
     QStringList messages;
+
+    ~Running()
+    {
+        root.reset();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents();
+    }
 };
 
 QQuickItem* findVisual(QQuickItem* from, const QString& name)
