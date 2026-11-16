@@ -25,6 +25,7 @@ class BrushSettings : public QObject {
     // strokes as an optional advanced workflow.
     Q_PROPERTY(bool persistentReservoir READ persistentReservoir WRITE setPersistentReservoir NOTIFY changed)
     // Traditional material brush properties (also stored per preset in SubToolLibrary).
+    Q_PROPERTY(QString mediumId READ mediumId WRITE setMediumId NOTIFY changed)
     Q_PROPERTY(QString materialPresetId READ materialPresetId WRITE setMaterialPresetId NOTIFY changed)
     Q_PROPERTY(int paintLoad READ paintLoad WRITE setPaintLoad NOTIFY changed)
     Q_PROPERTY(int pigmentConcentration READ pigmentConcentration WRITE setPigmentConcentration NOTIFY changed)
@@ -62,6 +63,7 @@ public:
     bool erase() const { return m_erase; }
     bool traditionalMedia() const { return m_traditionalMedia; }
     bool persistentReservoir() const { return m_persistentReservoir; }
+    QString mediumId() const { return m_mediumId; }
     QString materialPresetId() const { return m_materialPresetId; }
     int paintLoad() const { return m_paintLoad; }
     int pigmentConcentration() const { return m_pigmentConcentration; }
@@ -93,6 +95,25 @@ public:
     void setErase(bool v) { if (m_erase != v) { m_erase = v; emit changed(); } }
     void setTraditionalMedia(bool v) { if (m_traditionalMedia != v) { m_traditionalMedia = v; emit changed(); } }
     void setPersistentReservoir(bool v) { if (m_persistentReservoir != v) { m_persistentReservoir = v; emit changed(); } }
+    void setMediumId(const QString& v) {
+        const QString normalized = v.trimmed() == QStringLiteral("watercolour")
+            ? QStringLiteral("watercolour") : QStringLiteral("gouache");
+        if (m_mediumId == normalized) return;
+        m_mediumId = normalized;
+        if (normalized == QStringLiteral("watercolour")) {
+            if (m_materialPresetId == QStringLiteral("gouache-round")
+                || m_materialPresetId == QStringLiteral("dry-gouache")
+                || m_materialPresetId == QStringLiteral("tiny-gouache"))
+                m_materialPresetId = QStringLiteral("watercolour-round");
+        } else {
+            if (m_materialPresetId.startsWith(QStringLiteral("watercolour-"))
+                || m_materialPresetId == QStringLiteral("granulating-watercolour")
+                || m_materialPresetId == QStringLiteral("clean-water")
+                || m_materialPresetId == QStringLiteral("paint-lifting"))
+                m_materialPresetId = QStringLiteral("gouache-round");
+        }
+        emit changed();
+    }
     void setMaterialPresetId(const QString& v) {
         const QString normalized = v.trimmed().isEmpty() ? QStringLiteral("gouache-round") : v.trimmed();
         if (m_materialPresetId != normalized) { m_materialPresetId = normalized; emit changed(); }
@@ -133,6 +154,7 @@ private:
     bool m_erase = false;
     bool m_traditionalMedia = false;
     bool m_persistentReservoir = false;
+    QString m_mediumId = QStringLiteral("gouache");
     QString m_materialPresetId = QStringLiteral("gouache-round");
     int m_paintLoad = 88;
     int m_pigmentConcentration = 82;

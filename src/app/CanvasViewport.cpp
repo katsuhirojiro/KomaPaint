@@ -77,6 +77,7 @@ const material::MaterialRenderer& canvasMaterialRenderer()
 }
 
 bool prepareMaterialRenderLayers(std::vector<CompositeLayer>& layers, TilePoint tile,
+                                 const material::SurfaceProfile& surface,
                                  std::vector<std::unique_ptr<SparseTileStore>>& temporaryStores)
 {
     try {
@@ -88,7 +89,7 @@ bool prepareMaterialRenderLayers(std::vector<CompositeLayer>& layers, TilePoint 
             std::vector<std::uint32_t> rendered;
             if (!canvasMaterialRenderer().renderTile(source->materialTiles(), tile,
                     source->tiles().tilePixels(tile), material::gouacheProfile(),
-                    material::absorbentPaper(), &rendered)) return false;
+                    surface, &rendered)) return false;
             auto output = std::make_unique<SparseTileStore>(geometry.width(), geometry.height(), geometry.tileSize());
             if (std::any_of(rendered.begin(), rendered.end(), [](std::uint32_t pixel) { return pixel != 0; })) {
                 std::vector<SparseTileStore::TileSnapshot> snapshot;
@@ -182,6 +183,9 @@ void CanvasViewport::setDocument(QObject* object)
         qDebug() << "[CanvasViewport] setDocument: connecting signals for new document"
                  << "size=" << doc->width() << "x" << doc->height();
         connect(doc, &CanvasDocument::backgroundChanged, this, &CanvasViewport::invalidateAll);
+        connect(doc, &CanvasDocument::surfaceChanged, this, [this] {
+            m_invalidation.reset(); clearCache(); invalidateAll();
+        });
         connect(doc, &CanvasDocument::sizeChanged, this, [this] {
             qDebug() << "[CanvasViewport] sizeChanged signal received";
             m_invalidation.reset(); clearCache(); invalidateAll();
@@ -245,12 +249,13 @@ void CanvasViewport::tickMaterialSimulation()
     m_lastMaterialTick = now;
     bool active = false;
     auto* model = m_document->layers();
+    const auto& surface = m_document->surfaceProfile();
     for (int row = 0; row < model->rowCount(); ++row) {
         auto* layer = model->layerAt(row);
         if (layer->materialTiles().activeTilePoints().empty()) continue;
         active = true;
         const auto result = canvasMaterialEngine().advanceWetMaterial(
-            layer->materialTiles(), elapsed, material::coldPressedPaper());
+            layer->materialTiles(), elapsed, surface);
         if (result.failed)
             qWarning() << "[CanvasViewport] wet material update stopped early on layer" << row;
     }
@@ -416,7 +421,8 @@ QImage CanvasViewport::composedTile(TilePoint tile, const std::vector<CompositeL
     if (list.empty()) return {};
     auto renderedLayers = list;
     std::vector<std::unique_ptr<SparseTileStore>> materialStores;
-    if (!prepareMaterialRenderLayers(renderedLayers, tile, materialStores)) return {};
+    const auto surface = m_document ? m_document->surfaceProfile() : material::coldPressedPaper();
+    if (!prepareMaterialRenderLayers(renderedLayers, tile, surface, materialStores)) return {};
     auto composite = CpuTileCompositor::compose(list[0].store->geometry(), tile, renderedLayers, background);
     if (!composite) return {};
     QImage image(static_cast<int>(composite->width), static_cast<int>(composite->height), QImage::Format_ARGB32_Premultiplied);
@@ -520,12 +526,26 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                 mixerPaintLoaded = true;
             }
             const QByteArray requestedPreset = brush->materialPresetId().toUtf8();
+            const std::string requestedMedium = brush->mediumId().toStdString();
             auto preset = std::find_if(presets.begin(), presets.end(),
-                [mixerPaintLoaded, &mixerPaint, &requestedPreset](const auto& item) {
+                [mixerPaintLoaded, &mixerPaint, &requestedPreset, &requestedMedium](const auto& item) {
                     if (!mixerPaintLoaded) return item.id == requestedPreset.constData();
                     return item.mediumId == mixerPaint.mediumId
                         && item.tip == material::TipGeometry::Round;
                 });
+            if (!mixerPaintLoaded && preset != presets.end()
+                && preset->mediumId != requestedMedium) {
+                const std::string fallbackId = requestedMedium == "watercolour"
+                    ? "watercolour-round" : "gouache-round";
+                auto mediumMatch = std::find_if(presets.begin(), presets.end(),
+                    [&fallbackId](const auto& item) { return item.id == fallbackId; });
+                if (mediumMatch != presets.end()) preset = mediumMatch;
+            }
+            if (preset == presets.end()) {
+                preset = std::find_if(presets.begin(), presets.end(), [&requestedMedium](const auto& item) {
+                    return item.mediumId == requestedMedium && item.tip == material::TipGeometry::Round;
+                });
+            }
             if (preset == presets.end()) {
                 preset = std::find_if(presets.begin(), presets.end(), [](const auto& item) {
                     return item.id == "gouache-round";
@@ -572,24 +592,42 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             definition.contactTransfer *= brush->opacity() / 100.0
                 * (brush->erase() ? brush->flow() / 100.0 : 1.0);
             definition.autoReloadOnStroke = !brush->persistentReservoir();
-            if (brush->textured()) {
+            if (brush->textured() && definition.tip == material::TipGeometry::Round) {
                 definition.tip = material::TipGeometry::Bristle;
                 definition.bristleCount = 13;
                 definition.bristleSpread = 0.55;
                 definition.textureStrength = std::max(definition.textureStrength, 0.45);
             }
             if (!brush->erase() && !mixerPaintLoaded) {
-                const double alpha = std::max(0.05, double(color.alphaF()));
-                const double concentration = brush->pigmentConcentration() / 100.0;
-                const double waterRatio = brush->waterAmount() / 100.0;
-                const double bodyRatio = brush->paintBody() / 100.0;
-                const double pigmentMass = alpha * (0.35 + 1.25 * concentration);
-                const double binderMass = alpha * (0.12 + 0.45 * bodyRatio);
-                const double waterMass = alpha * (0.08 + 1.60 * waterRatio);
-                definition.initialPaint = material::makeResidualPaint(
-                    color.rgba(), pigmentMass, waterMass, binderMass, definition.mediumId);
-                if (bodyRatio > 0.0 && definition.mediumId == "gouache")
-                    definition.initialPaint.addFiller(alpha * 0.22 * bodyRatio);
+                if (preset->initialPaint.pigments.empty()) {
+                    // Clean Water & Paint Lifting remain pigment-free; water
+                    // amount adjusts moisture load without introducing pigment.
+                    definition.initialPaint = preset->initialPaint;
+                    const double waterScale = std::max(0.1, brush->waterAmount() / 100.0);
+                    definition.initialPaint.water = std::max(0.25, preset->initialPaint.water * waterScale);
+                    definition.initialPaint.wetness = 1.0;
+                    definition.initialPaint.consistency = 0.0;
+                } else {
+                    const double alpha = std::max(0.05, double(color.alphaF()));
+                    const double concentration = brush->pigmentConcentration() / 100.0;
+                    const double waterRatio = brush->waterAmount() / 100.0;
+                    const double bodyRatio = brush->paintBody() / 100.0;
+                    if (definition.mediumId == "watercolour") {
+                        const double pigmentMass = alpha * (0.35 + 0.90 * concentration);
+                        const double binderMass = alpha * (0.04 + 0.14 * bodyRatio);
+                        const double waterMass = alpha * (0.40 + 2.20 * waterRatio);
+                        definition.initialPaint = material::makeResidualPaint(
+                            color.rgba(), pigmentMass, waterMass, binderMass, definition.mediumId);
+                    } else {
+                        const double pigmentMass = alpha * (0.35 + 1.25 * concentration);
+                        const double binderMass = alpha * (0.12 + 0.45 * bodyRatio);
+                        const double waterMass = alpha * (0.08 + 1.60 * waterRatio);
+                        definition.initialPaint = material::makeResidualPaint(
+                            color.rgba(), pigmentMass, waterMass, binderMass, definition.mediumId);
+                        if (bodyRatio > 0.0)
+                            definition.initialPaint.addFiller(alpha * 0.22 * bodyRatio);
+                    }
+                }
             }
             if (!m_materialReservoir || !brush->persistentReservoir()
                 || m_materialReservoir->capacity() != definition.reservoirCapacity) {
@@ -604,7 +642,7 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             }
             m_materialStroke = std::make_unique<material::MaterialStroke>(layer->materialTiles(),
                 std::move(definition), *m_materialReservoir, canvasMaterialEngine(),
-                *selectedMedium, material::coldPressedPaper(), brush->erase());
+                *selectedMedium, m_document->surfaceProfile(), brush->erase());
             m_strokeLayer = layer;
             const auto point = viewportToDocument(x, y);
             m_stabilizer = StrokeStabilizer(brush->stabilization());
@@ -763,7 +801,7 @@ QVariant CanvasViewport::colorAt(qreal x, qreal y) const
     const auto background = m_document->hasTransparentBackground() ? 0U : m_document->backgroundColor().rgba();
     auto renderedLayers = list;
     std::vector<std::unique_ptr<SparseTileStore>> materialStores;
-    if (!prepareMaterialRenderLayers(renderedLayers, address->tile, materialStores)) return {};
+    if (!prepareMaterialRenderLayers(renderedLayers, address->tile, m_document->surfaceProfile(), materialStores)) return {};
     const auto tile = CpuTileCompositor::compose(geometry, address->tile, renderedLayers, background);
     if (!tile) return {};
     const auto index = static_cast<std::size_t>(address->local.y) * static_cast<std::size_t>(tile->width)

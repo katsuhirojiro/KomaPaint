@@ -17,7 +17,8 @@ class DocumentFile {
 public:
     // Latest supported version. v4 material cells remain readable with inferred
     // drying state; v5 additionally stores lifecycle state explicitly.
-    static constexpr quint16 FormatVersion = 5;
+    static constexpr quint16 FormatVersion = 6;
+    static constexpr quint16 MaterialLifecycleVersion = 5;
     static constexpr quint16 MaterialVersion = 4;
     static constexpr quint16 LayerMetadataVersion = 3;
     static constexpr quint16 FlatEnvelopeVersion = 2;

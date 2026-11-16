@@ -209,13 +209,23 @@ struct SurfaceProfile {
     double dryingAcceleration = 1.0;
     double edgeAccumulation = 0.2;
     double rewetting = 0.5;
+    std::string name;
+    double absorptionRate = 0.5;
+    double surfaceWetness = 0.0;
+    double granulationInteraction = 0.5;
 };
 
 const SurfaceProfile& absorbentPaper() noexcept;
 const SurfaceProfile& hotPressedPaper() noexcept;
 const SurfaceProfile& coldPressedPaper() noexcept;
 const SurfaceProfile& roughPaper() noexcept;
+const SurfaceProfile& smoothIllustrationPaper() noexcept;
+const SurfaceProfile& texturedIllustrationPaper() noexcept;
 const SurfaceProfile& nonAbsorbentPalette() noexcept;
+const std::vector<SurfaceProfile>& defaultSurfaceProfiles() noexcept;
+const SurfaceProfile* findSurfaceProfile(const std::string& id) noexcept;
+const std::vector<MediumProfile>& defaultMediumProfiles() noexcept;
+double surfaceToothHeightAt(std::int64_t x, std::int64_t y, const SurfaceProfile& surface) noexcept;
 
 struct OpticalResult {
     std::uint32_t straightArgb = 0;

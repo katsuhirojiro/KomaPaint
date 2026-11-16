@@ -82,6 +82,13 @@ bool parseValues(const QJsonObject& object, SubToolLibrary::Values* values)
         if (!presetId.isString() || presetId.toString().trimmed().isEmpty()) return false;
         v.materialPresetId = presetId.toString().trimmed();
     }
+    const QJsonValue mediumId = object.value(QStringLiteral("mediumId"));
+    if (!mediumId.isUndefined()) {
+        if (!mediumId.isString()) return false;
+        const QString m = mediumId.toString().trimmed();
+        if (m != QStringLiteral("gouache") && m != QStringLiteral("watercolour")) return false;
+        v.mediumId = m;
+    }
     return true;
 }
 
@@ -241,6 +248,7 @@ void SubToolLibrary::apply()
     m_brush->setTraditionalMedia(values.traditionalMedia);
     m_brush->setPersistentReservoir(values.persistentReservoir);
     m_brush->setMaterialPresetId(values.materialPresetId);
+    m_brush->setMediumId(values.mediumId);
     m_brush->setPaintLoad(values.paintLoad);
     m_brush->setPigmentConcentration(values.pigmentConcentration);
     m_brush->setWaterAmount(values.waterAmount);
@@ -274,6 +282,7 @@ void SubToolLibrary::capture()
     values.textured = m_brush->textured();
     values.traditionalMedia = m_brush->traditionalMedia();
     values.persistentReservoir = m_brush->persistentReservoir();
+    values.mediumId = m_brush->mediumId();
     values.materialPresetId = m_brush->materialPresetId();
     values.paintLoad = m_brush->paintLoad();
     values.pigmentConcentration = m_brush->pigmentConcentration();

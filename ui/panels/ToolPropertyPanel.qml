@@ -18,6 +18,7 @@ Rectangle {
 
     readonly property var brush: Workspace.brush
     readonly property var library: Workspace.subTools
+    readonly property var doc: Workspace.document
     readonly property bool painting: library.paintTool
     function hint(tool) {
         if (tool === "zoom") return qsTr("Click to zoom in. Alt-click or right-click to zoom out.")
@@ -111,9 +112,13 @@ Rectangle {
                     objectName: "paintingMediumSection"
                     width: parent.width
                     title: qsTr("Painting medium")
-                    hint: panel.brush.traditionalMedia
-                        ? (panel.brush.erase ? qsTr("gouache · lift material") : qsTr("gouache · composition-preserving"))
-                        : qsTr("digital · raster")
+                    hint: !panel.brush.traditionalMedia
+                        ? qsTr("digital · raster")
+                        : (panel.brush.erase
+                            ? qsTr("lift material")
+                            : (panel.brush.mediumId === "watercolour"
+                                ? qsTr("watercolour · transparent fluid")
+                                : qsTr("gouache · opaque matte")))
                     contentTopMargin: KP.gapS
                     contentBottomMargin: KP.gapS
                     Item {
@@ -123,9 +128,81 @@ Rectangle {
                             id: mediumChoice
                             objectName: "paintingMediumChoice"
                             width: parent.width
-                            options: [qsTr("Digital"), qsTr("Gouache")]
-                            currentIndex: panel.brush.traditionalMedia ? 1 : 0
-                            onChosen: function(index) { panel.brush.traditionalMedia = index === 1 }
+                            options: [qsTr("Digital"), qsTr("Gouache"), qsTr("Watercolour")]
+                            currentIndex: !panel.brush.traditionalMedia ? 0
+                                : (panel.brush.mediumId === "watercolour" ? 2 : 1)
+                            onChosen: function(index) {
+                                if (index === 0) {
+                                    panel.brush.traditionalMedia = false
+                                } else if (index === 1) {
+                                    panel.brush.mediumId = "gouache"
+                                    panel.brush.traditionalMedia = true
+                                } else {
+                                    panel.brush.mediumId = "watercolour"
+                                    panel.brush.traditionalMedia = true
+                                }
+                            }
+                        }
+                    }
+                }
+
+                PanelSection {
+                    objectName: "paperSurfaceSection"
+                    width: parent.width
+                    title: qsTr("Paper & surface")
+                    hint: panel.doc ? panel.doc.surfaceName : qsTr("Cold Press")
+                    visible: panel.brush.traditionalMedia && panel.doc !== null
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+
+                    Item {
+                        width: parent.width
+                        height: surfaceColumn.height
+                        Column {
+                            id: surfaceColumn
+                            width: parent.width
+                            spacing: KP.gapXS
+
+                            SegmentedChoice {
+                                id: watercolourPaperChoice
+                                objectName: "watercolourPaperChoice"
+                                width: parent.width
+                                visible: panel.brush.mediumId === "watercolour"
+                                options: [qsTr("Hot Press"), qsTr("Cold Press"), qsTr("Rough")]
+                                currentIndex: !panel.doc ? 1
+                                    : (panel.doc.surfaceId === "hot-press" ? 0
+                                        : (panel.doc.surfaceId === "rough-paper" ? 2 : 1))
+                                onChosen: function(index) {
+                                    if (!panel.doc) return
+                                    var ids = ["hot-press", "cold-press", "rough-paper"]
+                                    panel.doc.surfaceId = ids[index]
+                                }
+                            }
+
+                            SegmentedChoice {
+                                id: gouachePaperChoice
+                                objectName: "gouachePaperChoice"
+                                width: parent.width
+                                visible: panel.brush.mediumId !== "watercolour"
+                                options: [qsTr("Smooth"), qsTr("Textured")]
+                                currentIndex: !panel.doc ? 0
+                                    : (panel.doc.surfaceId === "textured-illustration" ? 1 : 0)
+                                onChosen: function(index) {
+                                    if (!panel.doc) return
+                                    panel.doc.surfaceId = index === 1 ? "textured-illustration" : "smooth-illustration"
+                                }
+                            }
+
+                            PropertySlider {
+                                objectName: "paperWetnessSlider"
+                                width: parent.width
+                                label: qsTr("Surface wetness")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.doc ? panel.doc.surfaceWetness : 0
+                                onEdited: function(v) { if (panel.doc) panel.doc.surfaceWetness = v }
+                            }
                         }
                     }
                 }
@@ -439,6 +516,125 @@ Rectangle {
                                     currentIndex: panel.brush.persistentReservoir ? 1 : 0
                                     onChosen: function(index) { panel.brush.persistentReservoir = index === 1 }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                PanelSection {
+                    objectName: "advancedPaperSection"
+                    width: parent.width
+                    title: qsTr("Advanced paper physics")
+                    hint: panel.doc ? panel.doc.surfaceId : ""
+                    visible: panel.brush.traditionalMedia && panel.doc !== null
+                    collapsible: true
+                    expanded: false
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+
+                    Item {
+                        width: parent.width
+                        height: paperPhysicsColumn.height
+                        Column {
+                            id: paperPhysicsColumn
+                            width: parent.width
+                            spacing: KP.gapXS
+                            PropertySlider {
+                                objectName: "paperAbsorbencySlider"
+                                width: parent.width
+                                label: qsTr("Absorbency")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.doc ? panel.doc.surfaceAbsorbency : 60
+                                onEdited: function(v) { if (panel.doc) panel.doc.surfaceAbsorbency = v }
+                            }
+                            PropertySlider {
+                                objectName: "paperAbsorptionRateSlider"
+                                width: parent.width
+                                label: qsTr("Absorption rate")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.doc ? panel.doc.surfaceAbsorptionRate : 55
+                                onEdited: function(v) { if (panel.doc) panel.doc.surfaceAbsorptionRate = v }
+                            }
+                            PropertySlider {
+                                objectName: "paperPorositySlider"
+                                width: parent.width
+                                label: qsTr("Porosity")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.doc ? panel.doc.surfacePorosity : 58
+                                onEdited: function(v) { if (panel.doc) panel.doc.surfacePorosity = v }
+                            }
+                            PropertySlider {
+                                objectName: "paperWaterRetentionSlider"
+                                width: parent.width
+                                label: qsTr("Water retention")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.doc ? panel.doc.surfaceWaterRetention : 62
+                                onEdited: function(v) { if (panel.doc) panel.doc.surfaceWaterRetention = v }
+                            }
+                            PropertySlider {
+                                objectName: "paperToothDepthSlider"
+                                width: parent.width
+                                label: qsTr("Tooth / texture")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.doc ? panel.doc.surfaceTooth : 52
+                                onEdited: function(v) { if (panel.doc) panel.doc.surfaceTooth = v }
+                            }
+                            PropertySlider {
+                                objectName: "paperRoughnessSlider"
+                                width: parent.width
+                                label: qsTr("Roughness")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.doc ? panel.doc.surfaceRoughness : 48
+                                onEdited: function(v) { if (panel.doc) panel.doc.surfaceRoughness = v }
+                            }
+                            PropertySlider {
+                                objectName: "paperPigmentRetentionSlider"
+                                width: parent.width
+                                label: qsTr("Pigment retention")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.doc ? panel.doc.surfacePigmentRetention : 60
+                                onEdited: function(v) { if (panel.doc) panel.doc.surfacePigmentRetention = v }
+                            }
+                            PropertySlider {
+                                objectName: "paperGranulationSlider"
+                                width: parent.width
+                                label: qsTr("Granulation interaction")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.doc ? panel.doc.surfaceGranulation : 65
+                                onEdited: function(v) { if (panel.doc) panel.doc.surfaceGranulation = v }
+                            }
+                            PropertySlider {
+                                objectName: "paperRewettingSlider"
+                                width: parent.width
+                                label: qsTr("Rewetting response")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.doc ? panel.doc.surfaceRewetting : 58
+                                onEdited: function(v) { if (panel.doc) panel.doc.surfaceRewetting = v }
+                            }
+                            KpButton {
+                                objectName: "resetPaperButton"
+                                width: parent.width
+                                small: true
+                                label: qsTr("Reset paper defaults")
+                                onClicked: { if (panel.doc) panel.doc.resetSurfaceSettings() }
                             }
                         }
                     }

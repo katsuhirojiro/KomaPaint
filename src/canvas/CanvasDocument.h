@@ -2,6 +2,7 @@
 
 #include <QColor>
 #include "../layers/LayerModel.h"
+#include "../material/MaterialEngine.h"
 #include <QObject>
 #include <QSize>
 #include <QString>
@@ -21,6 +22,18 @@ class CanvasDocument : public QObject
     Q_PROPERTY(qreal   dpi      READ dpi      WRITE setDpi      NOTIFY dpiChanged)
     Q_PROPERTY(bool    hasTransparentBackground READ hasTransparentBackground
                WRITE setTransparentBackground NOTIFY backgroundChanged)
+    Q_PROPERTY(QString surfaceId READ surfaceId WRITE setSurfaceId NOTIFY surfaceChanged)
+    Q_PROPERTY(QString surfaceName READ surfaceName NOTIFY surfaceChanged)
+    Q_PROPERTY(int surfaceAbsorbency READ surfaceAbsorbency WRITE setSurfaceAbsorbency NOTIFY surfaceChanged)
+    Q_PROPERTY(int surfaceAbsorptionRate READ surfaceAbsorptionRate WRITE setSurfaceAbsorptionRate NOTIFY surfaceChanged)
+    Q_PROPERTY(int surfacePorosity READ surfacePorosity WRITE setSurfacePorosity NOTIFY surfaceChanged)
+    Q_PROPERTY(int surfaceWaterRetention READ surfaceWaterRetention WRITE setSurfaceWaterRetention NOTIFY surfaceChanged)
+    Q_PROPERTY(int surfaceTooth READ surfaceTooth WRITE setSurfaceTooth NOTIFY surfaceChanged)
+    Q_PROPERTY(int surfaceRoughness READ surfaceRoughness WRITE setSurfaceRoughness NOTIFY surfaceChanged)
+    Q_PROPERTY(int surfacePigmentRetention READ surfacePigmentRetention WRITE setSurfacePigmentRetention NOTIFY surfaceChanged)
+    Q_PROPERTY(int surfaceWetness READ surfaceWetness WRITE setSurfaceWetness NOTIFY surfaceChanged)
+    Q_PROPERTY(int surfaceGranulation READ surfaceGranulation WRITE setSurfaceGranulation NOTIFY surfaceChanged)
+    Q_PROPERTY(int surfaceRewetting READ surfaceRewetting WRITE setSurfaceRewetting NOTIFY surfaceChanged)
 
 public:
     explicit CanvasDocument(QObject* parent = nullptr);
@@ -52,6 +65,23 @@ public:
     qreal   dpi() const { return m_dpi; }
     bool    hasTransparentBackground() const { return m_transparent; }
 
+    const material::SurfaceProfile& surfaceProfile() const noexcept { return m_surface; }
+    void setSurfaceProfile(const material::SurfaceProfile& profile);
+    bool hasCustomSurfaceSettings() const noexcept;
+    QString surfaceId() const { return QString::fromStdString(m_surface.id); }
+    QString surfaceName() const { return QString::fromStdString(m_surface.name); }
+    int surfaceAbsorbency() const;
+    int surfaceAbsorptionRate() const;
+    int surfacePorosity() const;
+    int surfaceWaterRetention() const;
+    int surfaceTooth() const;
+    int surfaceRoughness() const;
+    int surfacePigmentRetention() const;
+    int surfaceWetness() const;
+    int surfaceGranulation() const;
+    int surfaceRewetting() const;
+    Q_INVOKABLE void resetSurfaceSettings();
+
 public slots:
     void setBackgroundColor(const QColor& color);
     void setTitle(const QString& title);
@@ -60,6 +90,17 @@ public slots:
     void setSize(const QSize& size);
     void setDpi(qreal dpi);
     void setTransparentBackground(bool t);
+    void setSurfaceId(const QString& id);
+    void setSurfaceAbsorbency(int value);
+    void setSurfaceAbsorptionRate(int value);
+    void setSurfacePorosity(int value);
+    void setSurfaceWaterRetention(int value);
+    void setSurfaceTooth(int value);
+    void setSurfaceRoughness(int value);
+    void setSurfacePigmentRetention(int value);
+    void setSurfaceWetness(int value);
+    void setSurfaceGranulation(int value);
+    void setSurfaceRewetting(int value);
 
 signals:
     void modifiedChanged();
@@ -67,6 +108,7 @@ signals:
     void sizeChanged();
     void dpiChanged();
     void backgroundChanged();
+    void surfaceChanged();
 
 private:
     void connectArtworkSignals();
@@ -78,6 +120,7 @@ private:
     qreal   m_dpi   = 300.0;
     bool    m_transparent = true;
     QString m_documentType = QString::fromLatin1(IllustrationTypeId);
+    material::SurfaceProfile m_surface = material::coldPressedPaper();
 };
 
 }  // namespace komapaint

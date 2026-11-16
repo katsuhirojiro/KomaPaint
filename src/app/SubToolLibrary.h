@@ -41,6 +41,7 @@ public:
         bool textured = false;
         bool traditionalMedia = false;
         bool persistentReservoir = false;
+        QString mediumId = QStringLiteral("gouache");
         QString materialPresetId = QStringLiteral("gouache-round");
         int paintLoad = 88, pigmentConcentration = 82, waterAmount = 22, paintBody = 78, pickup = 16;
         int aspectRatio = 100, tipAngle = 0;

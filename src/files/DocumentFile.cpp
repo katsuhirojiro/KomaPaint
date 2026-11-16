@@ -260,6 +260,8 @@ struct IllustrationPayload {
     QString title;
     quint32 activeLayer = 0;
     std::vector<LayerRecord> records;
+    bool hasSurface = false;
+    material::SurfaceProfile surface = material::coldPressedPaper();
 };
 
 // Fully validates an illustration document payload stored in data[begin,end).
@@ -401,7 +403,7 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
                 record.materialCompositions.push_back(std::move(composition));
             }
             quint64 materialPixelCount = 0;
-            const qsizetype materialRecordSize = version >= DocumentFile::FormatVersion ? 56 : 48;
+            const qsizetype materialRecordSize = version >= DocumentFile::MaterialLifecycleVersion ? 56 : 48;
             if (!reader.readU64(materialPixelCount)
                 || materialPixelCount > static_cast<quint64>(reader.remaining() / materialRecordSize))
                 return fail(QStringLiteral("\"%1\" has an invalid material pixel count.").arg(path));
@@ -417,7 +419,7 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
                     || !reader.readFloat(pixel.cell.binder) || !reader.readFloat(pixel.cell.filler)
                     || !reader.readFloat(pixel.cell.wetness) || !reader.readFloat(pixel.cell.consistency))
                     return fail(QStringLiteral("\"%1\" has a truncated material pixel.").arg(path));
-                if (version >= DocumentFile::FormatVersion) {
+                if (version >= DocumentFile::MaterialLifecycleVersion) {
                     if (!reader.readFloat(pixel.cell.drying) || !reader.readFloat(pixel.cell.settling))
                         return fail(QStringLiteral("\"%1\" has truncated material lifecycle state.").arg(path));
                 } else {
@@ -448,6 +450,33 @@ bool parseIllustrationPayload(const QByteArray& data, qsizetype begin, qsizetype
             }
         }
         records.push_back(std::move(record));
+    }
+    if (version >= DocumentFile::FormatVersion) {
+        QString surfaceId, surfaceName;
+        if (!reader.readUtf8(DocumentFile::MaxNameBytes, surfaceId)
+            || surfaceId.trimmed().isEmpty()
+            || !reader.readUtf8(DocumentFile::MaxNameBytes, surfaceName))
+            return fail(QStringLiteral("\"%1\" has an invalid substrate identifier.").arg(path));
+        material::SurfaceProfile surface;
+        const QByteArray idBytes = surfaceId.toUtf8();
+        const QByteArray nameBytes = surfaceName.toUtf8();
+        surface.id.assign(idBytes.constData(), static_cast<std::size_t>(idBytes.size()));
+        surface.name.assign(nameBytes.constData(), static_cast<std::size_t>(nameBytes.size()));
+        auto readUnitDouble = [&](double* dst) {
+            return reader.readDouble(*dst) && std::isfinite(*dst) && *dst >= 0.0 && *dst <= 1.0;
+        };
+        if (!readUnitDouble(&surface.absorbency) || !readUnitDouble(&surface.absorptionRate)
+            || !readUnitDouble(&surface.porosity) || !readUnitDouble(&surface.waterRetention)
+            || !readUnitDouble(&surface.tooth) || !readUnitDouble(&surface.roughness)
+            || !readUnitDouble(&surface.pigmentRetention) || !readUnitDouble(&surface.binderRetention)
+            || !readUnitDouble(&surface.flowResistance)
+            || !reader.readDouble(surface.dryingAcceleration) || !std::isfinite(surface.dryingAcceleration)
+            || surface.dryingAcceleration < 0.0 || surface.dryingAcceleration > 5.0
+            || !readUnitDouble(&surface.edgeAccumulation) || !readUnitDouble(&surface.rewetting)
+            || !readUnitDouble(&surface.surfaceWetness) || !readUnitDouble(&surface.granulationInteraction))
+            return fail(QStringLiteral("\"%1\" has invalid substrate parameters.").arg(path));
+        payload->hasSurface = true;
+        payload->surface = std::move(surface);
     }
     if (reader.remaining() != 0)
         return fail(QStringLiteral("\"%1\" has trailing data.").arg(path));
@@ -554,7 +583,7 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
             if (!anyNonZero)
                 return fail(QStringLiteral("Internal error: an empty tile was reported as present."));
         }
-        if (version >= DocumentFile::FormatVersion) {
+        if (version >= DocumentFile::MaterialLifecycleVersion) {
             const auto& materialStore = layer->materialTiles();
             const auto& compositions = materialStore.compositions();
             std::vector<TilePoint> materialPoints = materialStore.allocatedTilePoints();
@@ -685,6 +714,25 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
             if (written != materialPixelCount)
                 return fail(QStringLiteral("The material content changed while saving. The file was not changed."));
         }
+    }
+    if (version >= DocumentFile::FormatVersion) {
+        const auto& surface = document.surfaceProfile();
+        if (surface.id.empty() || !putUtf8String(buffer, surface.id) || !putUtf8String(buffer, surface.name))
+            return fail(QStringLiteral("The document substrate settings could not be serialized. The file was not changed."));
+        putDouble(buffer, surface.absorbency);
+        putDouble(buffer, surface.absorptionRate);
+        putDouble(buffer, surface.porosity);
+        putDouble(buffer, surface.waterRetention);
+        putDouble(buffer, surface.tooth);
+        putDouble(buffer, surface.roughness);
+        putDouble(buffer, surface.pigmentRetention);
+        putDouble(buffer, surface.binderRetention);
+        putDouble(buffer, surface.flowResistance);
+        putDouble(buffer, surface.dryingAcceleration);
+        putDouble(buffer, surface.edgeAccumulation);
+        putDouble(buffer, surface.rewetting);
+        putDouble(buffer, surface.surfaceWetness);
+        putDouble(buffer, surface.granulationInteraction);
     }
     if (static_cast<quint64>(buffer.size()) > DocumentFile::MaxFileBytes - 32)
         return fail(QStringLiteral("The document is too large for the native file format. The file was not changed."));
@@ -831,6 +879,8 @@ CanvasDocument* buildDocument(const IllustrationPayload& payload, const QString&
     }
     document->layers()->setActiveLayerIndex(static_cast<int>(payload.activeLayer));
     document->setTitle(payload.title);
+    if (payload.hasSurface)
+        document->setSurfaceProfile(payload.surface);
     document->setModified(false);
     return document.release();
 }
@@ -864,6 +914,8 @@ bool DocumentFile::save(const CanvasDocument& document, const QString& path, QSt
         if (layer->materialTiles().allocatedTiles() != 0)
             writeVersion = FormatVersion;
     }
+    if (document.hasCustomSurfaceSettings())
+        writeVersion = FormatVersion;
     QByteArray payload;
     payload.reserve(1024 * 1024);
     if (!buildIllustrationPayload(document, writeVersion, &payload, error)) return false;
@@ -959,7 +1011,8 @@ CanvasDocument* DocumentFile::open(const QString& path, QString* error) try
         if (!parseIllustrationPayload(data, payloadBegin, contentEnd, version, path, &payload, error))
             return nullptr;
     } else if (version == FlatEnvelopeVersion || version == LayerMetadataVersion
-               || version == MaterialVersion || version == FormatVersion) {
+               || version == MaterialVersion || version == MaterialLifecycleVersion
+               || version == FormatVersion) {
         // Versions 2-5: unified project envelope.
         quint32 documentCount = 0;
         if (!head.readU32(documentCount)) return fail(QStringLiteral("\"%1\" is truncated.").arg(path));

@@ -23,6 +23,7 @@ private slots:
     void materialUndoRedoRetainsComposition();
     void nativeSaveOpenRetainsMaterialAndDigitalPlane();
     void reclamationRespectsUndoPinsAndDenseSaveAfterHoles();
+    void substrateMetadataPersistsAcrossSaveOpenAndDigitalIsolation();
 };
 
 void TestMaterialDocument::materialUndoRedoRetainsComposition()
@@ -208,6 +209,45 @@ void TestMaterialDocument::reclamationRespectsUndoPinsAndDenseSaveAfterHoles()
     history.clear();
     layer->materialTiles().reclaimUnreferenced();
     QCOMPARE(layer->materialTiles().activeCompositionCount(), std::size_t(1));
+}
+
+void TestMaterialDocument::substrateMetadataPersistsAcrossSaveOpenAndDigitalIsolation()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("substrate-roundtrip.koma"));
+
+    CanvasDocument document;
+    document.setSize(QSize(128, 128));
+    document.setSurfaceId(QStringLiteral("rough-paper"));
+    document.setSurfaceWetness(68);
+    document.setSurfaceTooth(91);
+    document.setSurfaceGranulation(88);
+    QCOMPARE(document.surfaceId(), QStringLiteral("rough-paper"));
+    QCOMPARE(document.surfaceWetness(), 68);
+    QCOMPARE(document.surfaceTooth(), 91);
+
+    // Digital strokes stay purely on the raster tile store without material tiles.
+    Layer* layer = document.layers()->layerAt(0);
+    QVERIFY(layer);
+    QCOMPARE(layer->tiles().setPixel({16, 16}, 0xffcc4422U), SparseTileStore::WriteResult::Changed);
+    QCOMPARE(layer->materialTiles().allocatedTiles(), std::size_t(0));
+
+    QString error;
+    QVERIFY2(DocumentFile::save(document, path, &error), qPrintable(error));
+    std::unique_ptr<CanvasDocument> reopened(DocumentFile::open(path, &error));
+    QVERIFY2(reopened != nullptr, qPrintable(error));
+    QCOMPARE(reopened->surfaceId(), QStringLiteral("rough-paper"));
+    QCOMPARE(reopened->surfaceWetness(), 68);
+    QCOMPARE(reopened->surfaceTooth(), 91);
+    QCOMPARE(reopened->surfaceGranulation(), 88);
+    QVERIFY(!reopened->isModified());
+    QCOMPARE(reopened->layers()->layerAt(0)->tiles().pixel({16, 16}).value(), 0xffcc4422U);
+    QCOMPARE(reopened->layers()->layerAt(0)->materialTiles().allocatedTiles(), std::size_t(0));
+
+    reopened->resetSurfaceSettings();
+    QCOMPARE(reopened->surfaceWetness(), 0);
+    QCOMPARE(reopened->surfaceTooth(), 86);
 }
 
 QTEST_GUILESS_MAIN(TestMaterialDocument)

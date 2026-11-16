@@ -2,9 +2,11 @@
 #include "material/MaterialTileStore.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <vector>
@@ -897,6 +899,443 @@ void brushPropertiesIndependentlyAffectMaterialSimulation()
           == SparseTileStore::WriteResult::Changed);
     CHECK(fastDryStore.batchAt({32, 32})->drying > slowDryStore.batchAt({32, 32})->drying);
 }
+
+void stage6SubstrateProfilesAndWetOnWetVsWetOnDry()
+{
+    const auto profiles = defaultSurfaceProfiles();
+    CHECK(profiles.size() >= 5);
+    const auto* hot = findSurfaceProfile("hot-press");
+    const auto* cold = findSurfaceProfile("cold-press");
+    const auto* rough = findSurfaceProfile("rough-paper");
+    const auto* smooth = findSurfaceProfile("smooth-illustration");
+    const auto* textured = findSurfaceProfile("textured-illustration");
+    CHECK(hot && cold && rough && smooth && textured);
+    if (!hot || !cold || !rough || !smooth || !textured) return;
+
+    CHECK(hot->tooth < cold->tooth && cold->tooth < rough->tooth);
+    CHECK(hot->absorptionRate < cold->absorptionRate && cold->absorptionRate < rough->absorptionRate);
+    CHECK(hot->granulationInteraction < cold->granulationInteraction && cold->granulationInteraction < rough->granulationInteraction);
+    CHECK(smooth->tooth < textured->tooth);
+    CHECK(smooth->roughness < textured->roughness);
+
+    // Heightfield is deterministic, bounded in [0, 1], and varies across tooth peaks/valleys.
+    double minTooth = 1.0, maxTooth = 0.0;
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 32; ++x) {
+            const double h = surfaceToothHeightAt(x, y, *rough);
+            CHECK(h >= 0.0 && h <= 1.0);
+            minTooth = std::min(minTooth, h);
+            maxTooth = std::max(maxTooth, h);
+        }
+    }
+    CHECK(maxTooth - minTooth > 0.35);
+
+    // Wet-on-wet vs wet-on-dry behaviour via SurfaceProfile::surfaceWetness.
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    auto presets = defaultBrushDefinitions();
+    const auto roundIt = std::find_if(presets.begin(), presets.end(), [](const auto& b) { return b.id == "watercolour-round"; });
+    CHECK(roundIt != presets.end());
+    if (roundIt == presets.end()) return;
+
+    SurfaceProfile drySurface = *cold;
+    drySurface.surfaceWetness = 0.0;
+    SurfaceProfile preWetSurface = *cold;
+    preWetSurface.surfaceWetness = 0.85;
+
+    MaterialTileStore dryStore(128, 128, 64), wetStore(128, 128, 64);
+    BrushReservoir dryRes(roundIt->reservoirCapacity), wetRes(roundIt->reservoirCapacity);
+    MaterialStroke dryStroke(dryStore, *roundIt, dryRes, engine, watercolourProfile(), drySurface);
+    MaterialStroke wetStroke(wetStore, *roundIt, wetRes, engine, watercolourProfile(), preWetSurface);
+    CHECK(dryStroke.begin({64.0, 64.0, {0.7, 0.1, 0.0, 0.0}}) && dryStroke.end({64.0, 64.0, {0.7, 0.1, 0.0, 0.0}}));
+    CHECK(wetStroke.begin({64.0, 64.0, {0.7, 0.1, 0.0, 0.0}}) && wetStroke.end({64.0, 64.0, {0.7, 0.1, 0.0, 0.0}}));
+
+    for (int step = 0; step < 3; ++step) {
+        CHECK(!engine.advanceWetMaterial(dryStore, 0.25, drySurface).failed);
+        CHECK(!engine.advanceWetMaterial(wetStore, 0.25, preWetSurface).failed);
+    }
+
+    auto outerPigment = [](const MaterialTileStore& store) {
+        double sum = 0.0;
+        for (int y = 44; y <= 84; ++y) {
+            for (int x = 44; x <= 84; ++x) {
+                const int dx = x - 64, dy = y - 64;
+                if (dx * dx + dy * dy >= 100) {
+                    if (const auto batch = store.batchAt({x, y})) sum += batch->pigmentMass();
+                }
+            }
+        }
+        return sum;
+    };
+    CHECK(outerPigment(wetStore) > outerPigment(dryStore) * 1.15);
+}
+
+void stage6AllSixWatercolourBrushesBehaveDistinctly()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    const auto presets = defaultBrushDefinitions();
+    auto findPreset = [&](const std::string& id) -> const BrushDefinition* {
+        auto it = std::find_if(presets.begin(), presets.end(), [&](const auto& b) { return b.id == id; });
+        return it == presets.end() ? nullptr : &(*it);
+    };
+    const auto* roundB = findPreset("watercolour-round");
+    const auto* fineB = findPreset("watercolour-fine-round");
+    const auto* mopB = findPreset("watercolour-mop");
+    const auto* washB = findPreset("watercolour-wash");
+    const auto* granB = findPreset("granulating-watercolour");
+    const auto* dryB = findPreset("watercolour-dry-brush");
+    CHECK(roundB && fineB && mopB && washB && granB && dryB);
+    if (!roundB || !fineB || !mopB || !washB || !granB || !dryB) return;
+
+    auto paintLine = [&](const BrushDefinition& def, const SurfaceProfile& surface, MaterialTileStore& store) {
+        BrushReservoir res(def.effectiveReservoirCapacity());
+        MaterialStroke s(store, def, res, engine, watercolourProfile(), surface);
+        CHECK(s.begin({32.0, 64.0, {0.75, 0.1, 0.0, 0.0}}));
+        CHECK(s.extend({140.0, 64.0, {0.75, 0.1, 0.0, 0.0}}));
+        CHECK(s.end({220.0, 64.0, {0.75, 0.1, 0.0, 0.0}}));
+        CHECK(!engine.advanceWetMaterial(store, 0.35, surface).failed);
+    };
+
+    MaterialTileStore fineStore(256, 128, 64), mopStore(256, 128, 64), washStore(256, 128, 64);
+    paintLine(*fineB, coldPressedPaper(), fineStore);
+    paintLine(*mopB, coldPressedPaper(), mopStore);
+    paintLine(*washB, coldPressedPaper(), washStore);
+
+    auto measureCrossSpan = [](const MaterialTileStore& store) {
+        int minY = 128, maxY = -1;
+        for (int y = 0; y < 128; ++y) {
+            if (const auto b = store.batchAt({128, y}); b && b->pigmentMass() > 0.0) {
+                minY = std::min(minY, y);
+                maxY = std::max(maxY, y);
+            }
+        }
+        return maxY >= minY ? (maxY - minY + 1) : 0;
+    };
+    const int fineSpan = measureCrossSpan(fineStore);
+    const int mopSpan = measureCrossSpan(mopStore);
+    const int washSpan = measureCrossSpan(washStore);
+    CHECK(fineSpan > 0 && fineSpan < 14);
+    CHECK(mopSpan > fineSpan * 3);
+    CHECK(washSpan > fineSpan * 2);
+
+    // Granulating brush concentrates more mass in tooth valleys on Rough paper than Hot Press.
+    MaterialTileStore granHot(256, 128, 64), granRough(256, 128, 64);
+    paintLine(*granB, hotPressedPaper(), granHot);
+    paintLine(*granB, roughPaper(), granRough);
+    auto valleyPeakDiff = [&](const MaterialTileStore& store, const SurfaceProfile& surface) {
+        double valleyMass = 0.0, peakMass = 0.0;
+        int vCount = 0, pCount = 0;
+        for (int y = 58; y <= 70; ++y) {
+            for (int x = 60; x <= 180; ++x) {
+                if (const auto b = store.batchAt({x, y}); b && b->pigmentMass() > 0.0) {
+                    const double h = surfaceToothHeightAt(x, y, surface);
+                    if (h < 0.35) { valleyMass += b->pigmentMass(); ++vCount; }
+                    else if (h > 0.65) { peakMass += b->pigmentMass(); ++pCount; }
+                }
+            }
+        }
+        if (vCount == 0 || pCount == 0) return 0.0;
+        return (valleyMass / vCount) - (peakMass / pCount);
+    };
+    CHECK(valleyPeakDiff(granRough, roughPaper()) > valleyPeakDiff(granHot, hotPressedPaper()));
+
+    // Dry brush hits tooth peaks and skips valleys on rough paper.
+    MaterialTileStore dryRough(256, 128, 64);
+    paintLine(*dryB, roughPaper(), dryRough);
+    double dryPeak = 0.0, dryValley = 0.0;
+    int dpCount = 0, dvCount = 0, skippedValleys = 0;
+    for (int y = 58; y <= 70; ++y) {
+        for (int x = 60; x <= 180; ++x) {
+            const double h = surfaceToothHeightAt(x, y, roughPaper());
+            const auto b = dryRough.batchAt({x, y});
+            const double mass = b ? b->pigmentMass() : 0.0;
+            if (h > 0.68) { dryPeak += mass; ++dpCount; }
+            else if (h < 0.32) {
+                dryValley += mass; ++dvCount;
+                if (mass == 0.0) ++skippedValleys;
+            }
+        }
+    }
+    CHECK(dpCount > 0 && dvCount > 0);
+    CHECK((dryPeak / dpCount) > (dryValley / dvCount) * 1.4);
+    CHECK(skippedValleys > 0);
+}
+
+void stage6CleanWaterRewetsAndRedistributesWithoutPigment()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    const auto presets = defaultBrushDefinitions();
+    const auto cleanIt = std::find_if(presets.begin(), presets.end(), [](const auto& b) { return b.id == "clean-water"; });
+    CHECK(cleanIt != presets.end());
+    if (cleanIt == presets.end()) return;
+
+    // 1. Clean Water on blank paper deposits water ONLY (zero pigment, not opaque white).
+    MaterialTileStore blankStore(128, 128, 64);
+    BrushReservoir cleanRes(cleanIt->effectiveReservoirCapacity());
+    MaterialStroke blankWater(blankStore, *cleanIt, cleanRes, engine, watercolourProfile(), coldPressedPaper());
+    CHECK(blankWater.begin({64.0, 64.0, {0.8, 0.0, 0.0, 0.0}}) && blankWater.end({64.0, 64.0, {0.8, 0.0, 0.0, 0.0}}));
+    const auto centerWater = blankStore.batchAt({64, 64});
+    CHECK(centerWater && centerWater->water > 0.0 && centerWater->pigmentMass() == 0.0);
+
+    MaterialRenderer renderer(engine);
+    std::vector<std::uint32_t> blankPixels;
+    CHECK(renderer.renderTile(blankStore, {1, 1}, {}, watercolourProfile(), coldPressedPaper(), &blankPixels));
+    CHECK(blankPixels[0] == 0U);
+
+    // 2. Clean Water across a dried pigment band rewets it and pushes pigment into clean neighbor cells.
+    MaterialTileStore store(128, 128, 64);
+    PaintBatch driedBand;
+    driedBand.mediumId = "watercolour";
+    driedBand.addPigment("PB29", 0.55);
+    driedBand.addWater(0.0);
+    driedBand.addBinder(0.06);
+    driedBand.wetness = 0.0;
+    for (int y = 52; y <= 76; ++y) {
+        for (int x = 36; x <= 56; ++x) {
+            CHECK(store.setBatch({x, y}, driedBand) == MaterialTileStore::Result::Changed);
+            CHECK(store.updateCellState({x, y}, 0.0, 0.06, 0.0, 0.92, 0.0) == MaterialTileStore::Result::Changed);
+        }
+    }
+
+    BrushReservoir rewetRes(cleanIt->effectiveReservoirCapacity());
+    MaterialStroke rewetStroke(store, *cleanIt, rewetRes, engine, watercolourProfile(), coldPressedPaper());
+    CHECK(rewetStroke.begin({46.0, 64.0, {0.75, 0.0, 0.0, 0.0}}));
+    CHECK(rewetStroke.extend({62.0, 64.0, {0.75, 0.0, 0.0, 0.0}}));
+    CHECK(rewetStroke.end({74.0, 64.0, {0.75, 0.0, 0.0, 0.0}}));
+
+    const auto rewetted = store.cellAt({48, 64});
+    CHECK(rewetted && rewetted->wetness > 0.25F && rewetted->drying < 0.70F);
+    const auto pushedPigment = store.batchAt({66, 64});
+    CHECK(pushedPigment && pushedPigment->pigmentMass() > 0.0);
+
+    // 3. Hot Press vs Cold Press water absorption rate difference.
+    MaterialTileStore hotStore(128, 128, 64), coldStore(128, 128, 64);
+    BrushReservoir hotRes(cleanIt->effectiveReservoirCapacity()), coldRes(cleanIt->effectiveReservoirCapacity());
+    MaterialStroke hotW(hotStore, *cleanIt, hotRes, engine, watercolourProfile(), hotPressedPaper());
+    MaterialStroke coldW(coldStore, *cleanIt, coldRes, engine, watercolourProfile(), coldPressedPaper());
+    CHECK(hotW.begin({64.0, 64.0, {0.8, 0.0, 0.0, 0.0}}) && hotW.end({64.0, 64.0, {0.8, 0.0, 0.0, 0.0}}));
+    CHECK(coldW.begin({64.0, 64.0, {0.8, 0.0, 0.0, 0.0}}) && coldW.end({64.0, 64.0, {0.8, 0.0, 0.0, 0.0}}));
+    CHECK(!engine.advanceWetMaterial(hotStore, 0.5, hotPressedPaper()).failed);
+    CHECK(!engine.advanceWetMaterial(coldStore, 0.5, coldPressedPaper()).failed);
+    CHECK(hotStore.batchAt({64, 64})->water > coldStore.batchAt({64, 64})->water);
+}
+
+void stage6PaintLiftingRespectsWetDrySubstrateAndStaining()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    const auto presets = defaultBrushDefinitions();
+    const auto liftIt = std::find_if(presets.begin(), presets.end(), [](const auto& b) { return b.id == "paint-lifting"; });
+    CHECK(liftIt != presets.end());
+    if (liftIt == presets.end()) return;
+
+    auto runLift = [&](const std::string& pigmentId, bool wetPaint, const SurfaceProfile& surface) {
+        MaterialTileStore store(128, 128, 64);
+        PaintBatch base;
+        base.mediumId = "watercolour";
+        base.addPigment(pigmentId, 0.80);
+        base.addWater(wetPaint ? 1.8 : 0.0);
+        base.addBinder(0.08);
+        base.wetness = wetPaint ? 0.90 : 0.0;
+        for (int y = 50; y <= 78; ++y) {
+            for (int x = 50; x <= 78; ++x) {
+                CHECK(store.setBatch({x, y}, base) == MaterialTileStore::Result::Changed);
+                CHECK(store.updateCellState({x, y}, wetPaint ? 1.8 : 0.0, 0.08, 0.0,
+                                            wetPaint ? 0.05 : 0.95, 0.0) == MaterialTileStore::Result::Changed);
+            }
+        }
+        const double before = store.batchAt({64, 64})->pigmentMass();
+        BrushReservoir res(liftIt->effectiveReservoirCapacity());
+        MaterialStroke s(store, *liftIt, res, engine, watercolourProfile(), surface);
+        CHECK(s.begin({64.0, 64.0, {0.8, 0.0, 0.0, 0.0}}) && s.end({64.0, 64.0, {0.8, 0.0, 0.0, 0.0}}));
+        const double after = store.batchAt({64, 64})->pigmentMass();
+        return before - after;
+    };
+
+    const double liftedWet = runLift("PB29", true, coldPressedPaper());
+    const double liftedDry = runLift("PB29", false, coldPressedPaper());
+    const double liftedHot = runLift("PB29", false, hotPressedPaper());
+    const double liftedRough = runLift("PB29", false, roughPaper());
+    const double liftedNonStain = runLift("PB29", true, hotPressedPaper());
+    const double liftedStain = runLift("PB15", true, hotPressedPaper());
+
+    CHECK(liftedWet > 0.15);
+    CHECK(liftedWet > liftedDry * 1.4);
+    CHECK(liftedHot > liftedRough * 1.25);
+    CHECK(liftedNonStain > liftedStain * 1.15);
+}
+
+void stage6MediumSeparationSparsePerformanceAndMetrics()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    MaterialRenderer renderer(engine);
+
+    // 1. Same PB15 pigment has dramatically different opacity/coverage under Gouache vs Watercolour.
+    PaintBatch wcPaint;
+    wcPaint.mediumId = "watercolour";
+    wcPaint.addPigment("PB15", 0.65);
+    wcPaint.addWater(0.35);
+    wcPaint.addBinder(0.35);
+    PaintBatch gouachePaint = wcPaint;
+    gouachePaint.mediumId = "gouache";
+    gouachePaint.addFiller(0.18);
+    const auto wcOptics = engine.opticalResult(wcPaint, watercolourProfile(), coldPressedPaper(), 4.0);
+    const auto goOptics = engine.opticalResult(gouachePaint, gouacheProfile(), coldPressedPaper(), 4.0);
+    CHECK(goOptics.alpha > wcOptics.alpha + 0.18);
+
+    // 2. Sparse allocation & bounded wet-region stepping on a 1600x1200 canvas.
+    MaterialTileStore bigStore(1600, 1200, 64);
+    const auto presets = defaultBrushDefinitions();
+    const auto washIt = std::find_if(presets.begin(), presets.end(), [](const auto& b) { return b.id == "watercolour-wash"; });
+    const auto liftIt = std::find_if(presets.begin(), presets.end(), [](const auto& b) { return b.id == "paint-lifting"; });
+    CHECK(washIt != presets.end() && liftIt != presets.end());
+    if (washIt == presets.end() || liftIt == presets.end()) return;
+
+    const auto t0 = std::chrono::steady_clock::now();
+    BrushReservoir res(washIt->effectiveReservoirCapacity());
+    MaterialStroke stroke(bigStore, *washIt, res, engine, watercolourProfile(), coldPressedPaper());
+    CHECK(stroke.begin({120.0, 200.0, {0.8, 0.0, 0.0, 0.0}}));
+    CHECK(stroke.extend({420.0, 200.0, {0.8, 0.0, 0.0, 0.0}}));
+    CHECK(stroke.end({720.0, 200.0, {0.8, 0.0, 0.0, 0.0}}));
+    const auto t1 = std::chrono::steady_clock::now();
+
+    const std::size_t totalCanvasTiles = 25U * 19U;
+    const std::size_t allocatedAfterStroke = bigStore.allocatedTiles();
+    const std::size_t activeWetTiles = bigStore.activeTilePoints().size();
+    CHECK(allocatedAfterStroke > 0 && allocatedAfterStroke < totalCanvasTiles / 4);
+    CHECK(activeWetTiles > 0 && activeWetTiles <= allocatedAfterStroke);
+
+    const auto simStart = std::chrono::steady_clock::now();
+    CHECK(!engine.advanceWetMaterial(bigStore, 0.2, coldPressedPaper()).failed);
+    const auto simEnd = std::chrono::steady_clock::now();
+
+    std::vector<std::uint32_t> rendered;
+    const auto renderStart = std::chrono::steady_clock::now();
+    for (const auto& tp : bigStore.activeTilePoints()) {
+        CHECK(renderer.renderTile(bigStore, tp, {}, watercolourProfile(), coldPressedPaper(), &rendered));
+    }
+    const auto renderEnd = std::chrono::steady_clock::now();
+
+    // Composition reclamation check after clearing tiles.
+    const std::size_t beforeComps = bigStore.activeCompositionCount();
+    const std::size_t bytesBeforeClear = bigStore.allocatedBytes();
+    for (const auto& tp : bigStore.allocatedTilePoints()) {
+        std::vector<MaterialTileSnapshot> empty{MaterialTileSnapshot{tp, {}}};
+        CHECK(bigStore.restoreTiles(empty, false) != MaterialTileStore::Result::InvalidData);
+    }
+    const std::size_t reclaimed = bigStore.reclaimUnreferenced();
+    CHECK(beforeComps > 0 && reclaimed == beforeComps);
+    CHECK(bigStore.activeCompositionCount() == 0);
+
+    const double strokeMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    const double simMs = std::chrono::duration<double, std::milli>(simEnd - simStart).count();
+    const double renderMs = std::chrono::duration<double, std::milli>(renderEnd - renderStart).count();
+    std::cout << "STAGE6_METRICS allocated_tiles=" << allocatedAfterStroke
+              << "/" << totalCanvasTiles
+              << " active_wet_tiles=" << activeWetTiles
+              << " compositions_before_clear=" << beforeComps
+              << " reclaimed=" << reclaimed
+              << " memory_bytes=" << bytesBeforeClear
+              << " stroke_ms=" << strokeMs
+              << " wet_step_ms=" << simMs
+              << " render_active_ms=" << renderMs << "\n";
+}
+
+void stage6RenderReproducibleTestSheet()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    MaterialRenderer renderer(engine);
+    const auto presets = defaultBrushDefinitions();
+    auto findPreset = [&](const std::string& id) {
+        return *std::find_if(presets.begin(), presets.end(), [&](const auto& b) { return b.id == id; });
+    };
+
+    constexpr int W = 768;
+    constexpr int H = 512;
+    MaterialTileStore sheet(W, H, 64);
+
+    // Helper: draw stroke segment cleanly with white-paper optical compositing later.
+    auto drawSeg = [&](BrushDefinition def, const SurfaceProfile& surface, const std::string& medium,
+                       std::uint32_t argb, double x0, double y0, double x1, double y1, bool liftOrWater = false) {
+        if (!liftOrWater && def.id != "granulating-watercolour") {
+            def.initialPaint = makeResidualPaint(argb, medium == "gouache" ? 0.95 : 0.72,
+                medium == "gouache" ? 0.35 : 1.55, medium == "gouache" ? 0.32 : 0.08, medium);
+            if (medium == "gouache") def.initialPaint.addFiller(0.18);
+        }
+        def.size = std::min(def.size, 26.0);
+        BrushReservoir res(def.effectiveReservoirCapacity());
+        const auto* prof = findMediumProfile(medium);
+        MaterialStroke s(sheet, def, res, engine, *prof, surface);
+        CHECK(s.begin({x0, y0, {0.82, 0.0, 0.0, 0.0}}));
+        CHECK(s.extend({(x0 + x1) * 0.5, (y0 + y1) * 0.5, {0.82, 0.0, 0.0, 0.0}}));
+        CHECK(s.end({x1, y1, {0.82, 0.0, 0.0, 0.0}}));
+    };
+
+    // Row 1 (y=64): All 6 Watercolour brushes on Cold Press.
+    const std::vector<std::string> wcBrushes = {
+        "watercolour-round", "watercolour-fine-round", "watercolour-mop",
+        "watercolour-wash", "granulating-watercolour", "watercolour-dry-brush"
+    };
+    for (std::size_t i = 0; i < wcBrushes.size(); ++i) {
+        const double x0 = 24.0 + double(i) * 124.0;
+        drawSeg(findPreset(wcBrushes[i]), coldPressedPaper(), "watercolour", 0xFF1F5DA8U, x0, 64.0, x0 + 96.0, 64.0);
+    }
+
+    // Row 2 (y=192): Hot Press, Cold Press, Rough, Wet-on-Wet (surfaceWetness=0.85).
+    drawSeg(findPreset("granulating-watercolour"), hotPressedPaper(), "watercolour", 0xFF6B4226U, 24.0, 192.0, 164.0, 192.0);
+    drawSeg(findPreset("granulating-watercolour"), coldPressedPaper(), "watercolour", 0xFF6B4226U, 204.0, 192.0, 344.0, 192.0);
+    drawSeg(findPreset("granulating-watercolour"), roughPaper(), "watercolour", 0xFF6B4226U, 384.0, 192.0, 524.0, 192.0);
+    SurfaceProfile wetPaper = coldPressedPaper();
+    wetPaper.surfaceWetness = 0.85;
+    drawSeg(findPreset("watercolour-round"), wetPaper, "watercolour", 0xFFC22B68U, 564.0, 192.0, 720.0, 192.0);
+
+    // Row 3 (y=320): Clean Water bloom + Paint Lifting across dried blue band.
+    drawSeg(findPreset("watercolour-wash"), coldPressedPaper(), "watercolour", 0xFF2855A0U, 24.0, 320.0, 720.0, 320.0);
+    for (int step = 0; step < 3; ++step)
+        CHECK(!engine.advanceWetMaterial(sheet, 0.8, coldPressedPaper()).failed);
+    drawSeg(findPreset("clean-water"), coldPressedPaper(), "watercolour", 0U, 120.0, 290.0, 120.0, 355.0, true);
+    drawSeg(findPreset("paint-lifting"), coldPressedPaper(), "watercolour", 0U, 360.0, 290.0, 360.0, 355.0, true);
+
+    // Row 4 (y=448): Gouache Round under-layer + opaque overstroke on Smooth & Textured illustration paper.
+    drawSeg(findPreset("gouache-round"), smoothIllustrationPaper(), "gouache", 0xFF1F2B48U, 24.0, 448.0, 340.0, 448.0);
+    drawSeg(findPreset("gouache-round"), smoothIllustrationPaper(), "gouache", 0xFFF2C12EU, 120.0, 420.0, 240.0, 476.0);
+    drawSeg(findPreset("gouache-round"), texturedIllustrationPaper(), "gouache", 0xFF1F2B48U, 400.0, 448.0, 720.0, 448.0);
+    drawSeg(findPreset("gouache-round"), texturedIllustrationPaper(), "gouache", 0xFFE6533CU, 500.0, 420.0, 620.0, 476.0);
+
+    std::ofstream ppm("/tmp/komapaint_stage6_sheet.ppm", std::ios::binary);
+    CHECK(ppm.is_open());
+    ppm << "P6\n" << W << " " << H << "\n255\n";
+    std::vector<std::uint8_t> rgb(static_cast<std::size_t>(W) * static_cast<std::size_t>(H) * 3U, 248);
+    std::vector<std::uint32_t> tilePixels;
+    for (int ty = 0; ty < H / 64; ++ty) {
+        const SurfaceProfile* rowSurf = &coldPressedPaper();
+        if (ty == 2 || ty == 3) rowSurf = &roughPaper();
+        else if (ty >= 6) rowSurf = &smoothIllustrationPaper();
+        for (int tx = 0; tx < W / 64; ++tx) {
+            if (sheet.tileEntries({tx, ty}).empty()) continue;
+            CHECK(renderer.renderTile(sheet, {tx, ty}, {}, watercolourProfile(), *rowSurf, &tilePixels));
+            for (int ly = 0; ly < 64; ++ly) {
+                for (int lx = 0; lx < 64; ++lx) {
+                    const std::uint32_t px = tilePixels[static_cast<std::size_t>(ly) * 64 + static_cast<std::size_t>(lx)];
+                    const std::uint32_t a = px >> 24U;
+                    if (a == 0) continue;
+                    const std::uint32_t inv = 255U - a;
+                    const std::uint8_t r = static_cast<std::uint8_t>(std::min<std::uint32_t>(255U, ((px >> 16U) & 255U) + (248U * inv + 127U) / 255U));
+                    const std::uint8_t g = static_cast<std::uint8_t>(std::min<std::uint32_t>(255U, ((px >> 8U) & 255U) + (248U * inv + 127U) / 255U));
+                    const std::uint8_t b = static_cast<std::uint8_t>(std::min<std::uint32_t>(255U, (px & 255U) + (248U * inv + 127U) / 255U));
+                    const std::size_t idx = (static_cast<std::size_t>(ty * 64 + ly) * W + static_cast<std::size_t>(tx * 64 + lx)) * 3U;
+                    rgb[idx] = r; rgb[idx + 1] = g; rgb[idx + 2] = b;
+                }
+            }
+        }
+    }
+    ppm.write(reinterpret_cast<const char*>(rgb.data()), static_cast<std::streamsize>(rgb.size()));
+    CHECK(ppm.good());
+}
 }
 
 int main()
@@ -918,6 +1357,12 @@ int main()
     materialStrokeAutoReloadsCleanMixtureAndScalesBySize();
     gouacheRoundCoversOpaquelyDepletesSizeIndependentlyAndReworks();
     brushPropertiesIndependentlyAffectMaterialSimulation();
+    stage6SubstrateProfilesAndWetOnWetVsWetOnDry();
+    stage6AllSixWatercolourBrushesBehaveDistinctly();
+    stage6CleanWaterRewetsAndRedistributesWithoutPigment();
+    stage6PaintLiftingRespectsWetDrySubstrateAndStaining();
+    stage6MediumSeparationSparsePerformanceAndMetrics();
+    stage6RenderReproducibleTestSheet();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "material engine checks passed\n";
     return EXIT_SUCCESS;

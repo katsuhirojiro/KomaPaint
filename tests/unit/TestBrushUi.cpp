@@ -779,7 +779,7 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QVERIFY(clickNamed(app, QStringLiteral("tool_brush")));  // the list is the brush's
     auto* list = item(app, QStringLiteral("subToolList"));
     QVERIFY(list && list->isVisible());
-    QTRY_COMPARE(list->property("count").toInt(), 4);       // Round, Soft, Dry, Gouache Round
+    QTRY_COMPARE(list->property("count").toInt(), 12);      // Round, Soft, Dry, Gouache Round + 8 Watercolour presets
     // Preset rows are list delegates: they take their geometry together with the
     // model, so wait for the row itself rather than assuming a settled layout.
     auto* softRow = item(app, QStringLiteral("subTool1"));
@@ -789,9 +789,29 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QVERIFY(clickNamed(app, QStringLiteral("subTool3")));  // Gouache Round
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Gouache Round"));
     QVERIFY(brush->traditionalMedia());
+    QCOMPARE(brush->mediumId(), QStringLiteral("gouache"));
     QVERIFY(!brush->persistentReservoir());
     auto* loadSlider = item(app, QStringLiteral("brushPaintLoadSlider"));
     QVERIFY(loadSlider && loadSlider->isVisible());
+
+    ws.subTools()->select(4); // Watercolour Round
+    QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Watercolour Round"));
+    QCOMPARE(brush->mediumId(), QStringLiteral("watercolour"));
+    QCOMPARE(brush->materialPresetId(), QStringLiteral("watercolour-round"));
+    auto* wcPaper = item(app, QStringLiteral("watercolourPaperChoice"));
+    QVERIFY(wcPaper && wcPaper->isVisible());
+    const QPoint roughPt = wcPaper->mapToScene(QPointF(wcPaper->width() * 0.85, wcPaper->height() / 2)).toPoint();
+    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, roughPt);
+    QTRY_COMPARE(ws.document()->surfaceId(), QStringLiteral("rough-paper"));
+    QVERIFY(setSlider(app, QStringLiteral("paperWetnessSlider"), 0.5));
+    QVERIFY(ws.document()->surfaceWetness() >= 45 && ws.document()->surfaceWetness() <= 55);
+
+    ws.subTools()->select(10); // Clean Water
+    QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Clean Water"));
+    QCOMPARE(brush->materialPresetId(), QStringLiteral("clean-water"));
+    ws.subTools()->select(11); // Paint Lifting
+    QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Paint Lifting"));
+    QCOMPARE(brush->materialPresetId(), QStringLiteral("paint-lifting"));
 
     QVERIFY(clickNamed(app, QStringLiteral("subTool1")));  // Soft brush
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Soft brush"));

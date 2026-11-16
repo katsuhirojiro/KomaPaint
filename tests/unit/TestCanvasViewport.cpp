@@ -40,6 +40,7 @@ private slots:
     void blendModeChangesInvalidateComposite();
     void brushInputAndLayerRules();
     void traditionalMediaStrokeRendersAndUsesMaterialHistory();
+    void watercolourCleanWaterAndPaintLiftingInViewport();
     void strokeFailureDiagnostics();
     void compositeCacheAccounting();
     void qmlMouseStroke();
@@ -497,6 +498,63 @@ void TestCanvasViewport::actualWindowShortcuts()
     QTest::keyClick(window, Qt::Key_Z, Qt::ControlModifier);
     QCOMPARE(tiles.pixel(pixel).value(), painted); // text undo must not undo artwork
     delete object;
+}
+
+void TestCanvasViewport::watercolourCleanWaterAndPaintLiftingInViewport()
+{
+    CanvasDocument doc;
+    doc.setSize(QSize(256, 256));
+    doc.setSurfaceId(QStringLiteral("cold-press"));
+    UndoStack history;
+    BrushSettings brush;
+    brush.setTraditionalMedia(true);
+    brush.setMediumId(QStringLiteral("watercolour"));
+    brush.setMaterialPresetId(QStringLiteral("watercolour-round"));
+    brush.setSize(20);
+    brush.setWaterAmount(78);
+    brush.setPigmentConcentration(50);
+
+    CanvasViewport viewport;
+    viewport.setWidth(256);
+    viewport.setHeight(256);
+    viewport.setDocument(&doc);
+    viewport.setHistory(&history);
+    viewport.setBrush(&brush);
+    viewport.setColor(QColor(QStringLiteral("#1f5da8")));
+    viewport.setZoom(1.0);
+    viewport.setPan(QPointF(0, 0));
+
+    QVERIFY(viewport.beginStroke(60.0, 128.0, 0.85, 0.0, 0.0));
+    viewport.moveStroke(128.0, 128.0, 0.85, 0.0, 0.0);
+    viewport.moveStroke(196.0, 128.0, 0.85, 0.0, 0.0);
+    viewport.endStroke();
+
+    Layer* layer = doc.layers()->layerAt(0);
+    QVERIFY(layer);
+    const auto paintedBatch = layer->materialTiles().batchAt({128, 128});
+    QVERIFY(paintedBatch && paintedBatch->mediumId == "watercolour");
+    const double initialPigment = paintedBatch->pigmentMass();
+    QVERIFY(initialPigment > 0.0);
+
+    // Clean Water never introduces primary color pigment even when brush color is red.
+    brush.setMaterialPresetId(QStringLiteral("clean-water"));
+    brush.setSize(20);
+    viewport.setColor(QColor(QStringLiteral("#e6192e")));
+    QVERIFY(viewport.beginStroke(60.0, 60.0, 0.8, 0.0, 0.0));
+    viewport.endStroke();
+    const auto cleanSpot = layer->materialTiles().batchAt({60, 60});
+    QVERIFY(cleanSpot && cleanSpot->water > 0.0);
+    QCOMPARE(cleanSpot->pigmentMass(), 0.0);
+
+    // Paint Lifting reduces existing pigment mass cleanly without erasing via digital plane.
+    brush.setMaterialPresetId(QStringLiteral("paint-lifting"));
+    brush.setPickup(72);
+    QVERIFY(viewport.beginStroke(128.0, 118.0, 0.85, 0.0, 0.0));
+    viewport.moveStroke(128.0, 138.0, 0.85, 0.0, 0.0);
+    viewport.endStroke();
+    const auto liftedSpot = layer->materialTiles().batchAt({128, 128});
+    QVERIFY(liftedSpot && liftedSpot->pigmentMass() < initialPigment);
+    QCOMPARE(layer->tiles().allocatedTiles(), std::size_t(0));
 }
 
 QTEST_MAIN(TestCanvasViewport)

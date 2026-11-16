@@ -945,12 +945,14 @@ bool MaterialRenderer::renderTile(const MaterialTileStore& material, TilePoint t
         output->assign(tilePixels, 0U);
         if (!digitalBase.empty()) std::copy(digitalBase.begin(), digitalBase.end(), output->begin());
         const auto entries = material.tileEntries(tile);
+        const auto tileSize = static_cast<std::size_t>(material.geometry().tileSize());
         for (const auto& entry : entries) {
             const MaterialCell& cell = entry.cell;
-            const auto batch = material.batchAt({tile.x * material.geometry().tileSize()
-                    + static_cast<std::int64_t>(entry.localIndex % static_cast<std::size_t>(material.geometry().tileSize())),
-                tile.y * material.geometry().tileSize()
-                    + static_cast<std::int64_t>(entry.localIndex / static_cast<std::size_t>(material.geometry().tileSize()))});
+            const std::int64_t docX = tile.x * material.geometry().tileSize()
+                + static_cast<std::int64_t>(entry.localIndex % tileSize);
+            const std::int64_t docY = tile.y * material.geometry().tileSize()
+                + static_cast<std::int64_t>(entry.localIndex / tileSize);
+            const auto batch = material.batchAt({docX, docY});
             if (!batch || !batch->valid()) return false;
             const MediumProfile* profile = &defaultMedium;
             if (batch->mediumId == gouacheProfile().id) profile = &gouacheProfile();
@@ -961,7 +963,12 @@ bool MaterialRenderer::renderTile(const MaterialTileStore& material, TilePoint t
             // by the shared reference unit so optical depth matches direct
             // batch evaluation without letting water inflate opacity.
             constexpr double ReferenceBatchPixels = 16384.0;
-            const double toothContact = 0.84 + 0.16 * static_cast<double>(cell.consistency);
+            const double toothHeight = surfaceToothHeightAt(docX, docY, surface);
+            const double valley = 1.0 - toothHeight;
+            const double opticalGran = m_engine.opticalResult(*batch, *profile, surface, ReferenceBatchPixels).granulation;
+            const double granulationBias = 1.0 + opticalGran * (0.25 + 0.75 * double(cell.settling)) * (valley - 0.5) * 0.45;
+            const double toothContact = (0.86 + 0.14 * std::clamp(0.45 * toothHeight + 0.55 * double(cell.consistency), 0.0, 1.0))
+                * std::clamp(granulationBias, 0.72, 1.28);
             (*output)[entry.localIndex] = m_engine.composite((*output)[entry.localIndex], *batch,
                 *profile, surface, 1.0, ReferenceBatchPixels, toothContact);
         }

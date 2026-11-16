@@ -1,8 +1,10 @@
 #include "Layer.h"
 
 #include <QImage>
+#include <QMetaType>
 #include <QPainter>
 #include <QRectF>
+#include <QVariant>
 #include <algorithm>
 #include <new>
 #include <stdexcept>
@@ -61,8 +63,19 @@ QVariantList Layer::thumbnailPixels(int side) const
                 std::vector<std::uint32_t> materialOutput;
                 std::span<const std::uint32_t> pixels = digitalPixels;
                 if (!m_materialTiles.tileEntries(tile).empty()) {
+                    material::SurfaceProfile surface = material::coldPressedPaper();
+                    for (QObject* ancestor = parent(); ancestor; ancestor = ancestor->parent()) {
+                        const QVariant idVar = ancestor->property("surfaceId");
+                        if (idVar.isValid() && idVar.typeId() == QMetaType::QString) {
+                            const QByteArray bytes = idVar.toString().toUtf8();
+                            if (const auto* found = material::findSurfaceProfile(
+                                    std::string(bytes.constData(), static_cast<std::size_t>(bytes.size()))))
+                                surface = *found;
+                            break;
+                        }
+                    }
                     if (!layerMaterialRenderer().renderTile(m_materialTiles, tile, digitalPixels,
-                            material::gouacheProfile(), material::absorbentPaper(), &materialOutput)) return {};
+                            material::gouacheProfile(), surface, &materialOutput)) return {};
                     pixels = materialOutput;
                 }
                 if (pixels.empty()) continue;
