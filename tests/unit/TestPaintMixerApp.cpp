@@ -142,15 +142,16 @@ void TestPaintMixerApp::brushReservoirReloadAndNonContamination()
     }
 
     // Even with persistentReservoir ON, explicitly loading a new mixture resets
-    // the reservoir for the next stroke via mixtureRevision.
+    // the reservoir for the next stroke via mixtureRevision. Paint well away from
+    // stroke 3 at (180, 180) so pickup-before-deposit does not touch stroke 3's puddle.
     brush.setPersistentReservoir(true);
     const QString umberWell = mixer.addPigmentAsNewDeposit(QStringLiteral("PBr7"), 1.0);
     QVERIFY(!umberWell.isEmpty());
     QVERIFY(mixer.loadActiveIntoBrush());
-    const QPointF p4 = view.documentToViewport(210, 210);
+    const QPointF p4 = view.documentToViewport(40, 210);
     QVERIFY(view.beginStroke(p4.x(), p4.y(), 1.0, &brush, QColor(Qt::black)));
     view.endStroke(p4.x(), p4.y(), 1.0);
-    const auto batch4 = layer->materialTiles().batchAt({210, 210});
+    const auto batch4 = layer->materialTiles().batchAt({40, 210});
     QVERIFY(batch4.has_value());
     QCOMPARE(batch4->pigments.size(), std::size_t(1));
     QCOMPARE(batch4->pigments.front().pigmentId, std::string("PBr7"));

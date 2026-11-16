@@ -9,14 +9,14 @@ class PaintMixerController;
 
 class MixerSurfaceItem : public QQuickPaintedItem {
     Q_OBJECT
-    Q_PROPERTY(komapaint::PaintMixerController* mixer READ mixer WRITE setMixer NOTIFY mixerChanged)
+    Q_PROPERTY(QObject* mixer READ mixer WRITE setMixer NOTIFY mixerChanged)
     Q_PROPERTY(QString hoverDepositId READ hoverDepositId NOTIFY hoverChanged)
 
 public:
     explicit MixerSurfaceItem(QQuickItem* parent = nullptr);
 
-    PaintMixerController* mixer() const { return m_mixer; }
-    void setMixer(PaintMixerController* mixer);
+    QObject* mixer() const;
+    void setMixer(QObject* mixer);
     QString hoverDepositId() const { return m_hoverDepositId; }
 
     void paint(QPainter* painter) override;

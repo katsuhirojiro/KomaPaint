@@ -628,7 +628,7 @@ Rectangle {
                             objectName: "pigmentSearchField"
                             Layout.fillWidth: true
                             height: KP.controlHeightSmall + 2
-                            placeholderText: qsTr("Search pigment ID or name…")
+                            placeholder: qsTr("Search pigment ID or name…")
                             text: root.pigmentSearch
                             onTextChanged: root.pigmentSearch = text
                         }
@@ -760,7 +760,7 @@ Rectangle {
                             objectName: "mixerSaveNameField"
                             Layout.fillWidth: true
                             height: KP.controlHeightSmall + 2
-                            placeholderText: qsTr("Name current mixture…")
+                            placeholder: qsTr("Name current mixture…")
                         }
                         KpButton {
                             objectName: "mixerSaveButton"

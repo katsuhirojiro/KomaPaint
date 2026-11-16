@@ -18,8 +18,14 @@ MixerSurfaceItem::MixerSurfaceItem(QQuickItem* parent)
     setAntialiasing(true);
 }
 
-void MixerSurfaceItem::setMixer(PaintMixerController* mixer)
+QObject* MixerSurfaceItem::mixer() const
 {
+    return m_mixer.data();
+}
+
+void MixerSurfaceItem::setMixer(QObject* mixerObj)
+{
+    auto* mixer = qobject_cast<PaintMixerController*>(mixerObj);
     if (m_mixer == mixer) return;
     if (m_mixer) disconnect(m_mixer, nullptr, this, nullptr);
     m_mixer = mixer;
