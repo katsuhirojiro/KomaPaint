@@ -123,23 +123,50 @@ Rectangle {
                     contentBottomMargin: KP.gapS
                     Item {
                         width: parent.width
-                        height: mediumChoice.height
-                        SegmentedChoice {
-                            id: mediumChoice
-                            objectName: "paintingMediumChoice"
+                        height: mediumColumn.height
+                        Column {
+                            id: mediumColumn
                             width: parent.width
-                            options: [qsTr("Digital"), qsTr("Gouache"), qsTr("Watercolour")]
-                            currentIndex: !panel.brush.traditionalMedia ? 0
-                                : (panel.brush.mediumId === "watercolour" ? 2 : 1)
-                            onChosen: function(index) {
-                                if (index === 0) {
-                                    panel.brush.traditionalMedia = false
-                                } else if (index === 1) {
-                                    panel.brush.mediumId = "gouache"
-                                    panel.brush.traditionalMedia = true
-                                } else {
-                                    panel.brush.mediumId = "watercolour"
-                                    panel.brush.traditionalMedia = true
+                            spacing: KP.gapXS
+                            SegmentedChoice {
+                                id: mediumChoice
+                                objectName: "paintingMediumChoice"
+                                width: parent.width
+                                options: [qsTr("Digital"), qsTr("Gouache"), qsTr("Watercolour")]
+                                currentIndex: !panel.brush.traditionalMedia ? 0
+                                    : (panel.brush.mediumId === "watercolour" ? 2 : 1)
+                                onChosen: function(index) {
+                                    if (index === 0) {
+                                        panel.brush.traditionalMedia = false
+                                    } else if (index === 1) {
+                                        panel.brush.mediumId = "gouache"
+                                        panel.brush.traditionalMedia = true
+                                    } else {
+                                        panel.brush.mediumId = "watercolour"
+                                        panel.brush.traditionalMedia = true
+                                    }
+                                }
+                            }
+                            RowLayout {
+                                width: parent.width
+                                visible: panel.brush.traditionalMedia
+                                         && Object.keys(panel.brush.materialMixture).length > 0
+                                spacing: KP.gapXS
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Mixer mixture loaded (auto-reload %1)")
+                                        .arg(panel.brush.persistentReservoir ? qsTr("OFF") : qsTr("ON"))
+                                    color: KP.textMuted
+                                    font.family: KP.fontUi
+                                    font.pixelSize: KP.fontMicro
+                                    elide: Text.ElideRight
+                                }
+                                KpButton {
+                                    objectName: "clearBrushMixtureButton"
+                                    small: true
+                                    label: qsTr("Clear")
+                                    tip: qsTr("Return brush to active Color Wheel colour")
+                                    onClicked: panel.brush.clearMaterialMixture()
                                 }
                             }
                         }

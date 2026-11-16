@@ -528,11 +528,20 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             const QByteArray requestedPreset = brush->materialPresetId().toUtf8();
             const std::string requestedMedium = brush->mediumId().toStdString();
             auto preset = std::find_if(presets.begin(), presets.end(),
-                [mixerPaintLoaded, &mixerPaint, &requestedPreset, &requestedMedium](const auto& item) {
+                [mixerPaintLoaded, &mixerPaint, &requestedPreset](const auto& item) {
                     if (!mixerPaintLoaded) return item.id == requestedPreset.constData();
-                    return item.mediumId == mixerPaint.mediumId
-                        && item.tip == material::TipGeometry::Round;
+                    return item.id == requestedPreset.constData()
+                        && item.mediumId == mixerPaint.mediumId
+                        && !item.initialPaint.pigments.empty();
                 });
+            if (mixerPaintLoaded && preset == presets.end()) {
+                preset = std::find_if(presets.begin(), presets.end(),
+                    [&mixerPaint](const auto& item) {
+                        return item.mediumId == mixerPaint.mediumId
+                            && item.tip == material::TipGeometry::Round
+                            && !item.initialPaint.pigments.empty();
+                    });
+            }
             if (!mixerPaintLoaded && preset != presets.end()
                 && preset->mediumId != requestedMedium) {
                 const std::string fallbackId = requestedMedium == "watercolour"
@@ -629,7 +638,9 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                     }
                 }
             }
-            if (!m_materialReservoir || !brush->persistentReservoir()
+            const bool mixtureUpdated = mixerPaintLoaded
+                && brush->mixtureRevision() != m_loadedMixtureRevision;
+            if (!m_materialReservoir || !brush->persistentReservoir() || mixtureUpdated
                 || m_materialReservoir->capacity() != definition.reservoirCapacity) {
                 m_materialReservoir = std::make_unique<material::BrushReservoir>(definition.reservoirCapacity);
                 if (!brush->erase()
@@ -639,6 +650,7 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                     emit strokeError(QStringLiteral("The selected colour could not be loaded into the material brush."));
                     return false;
                 }
+                if (mixerPaintLoaded) m_loadedMixtureRevision = brush->mixtureRevision();
             }
             m_materialStroke = std::make_unique<material::MaterialStroke>(layer->materialTiles(),
                 std::move(definition), *m_materialReservoir, canvasMaterialEngine(),

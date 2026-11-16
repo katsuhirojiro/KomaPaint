@@ -136,14 +136,17 @@ public:
     Q_INVOKABLE bool loadMaterialMixture(const QVariantMap& mixture) {
         if (mixture.isEmpty()) return false;
         m_materialMixture = mixture;
+        ++m_mixtureRevision;
         emit materialMixtureChanged();
         return true;
     }
     Q_INVOKABLE void clearMaterialMixture() {
         if (m_materialMixture.isEmpty()) return;
         m_materialMixture.clear();
+        ++m_mixtureRevision;
         emit materialMixtureChanged();
     }
+    quint64 mixtureRevision() const { return m_mixtureRevision; }
 signals:
     void changed();
     void materialMixtureChanged();
@@ -172,5 +175,6 @@ private:
     int m_pressureToAmount = 62;
     int m_pressureToContact = 35;
     QVariantMap m_materialMixture;
+    quint64 m_mixtureRevision = 0;
 };
 }

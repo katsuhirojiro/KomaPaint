@@ -30,6 +30,7 @@
 #include "app/BrushSettings.h"
 #include "app/CanvasViewport.h"
 #include "app/DockModel.h"
+#include "app/MixerSurfaceItem.h"
 #include "app/PanelManager.h"
 #include "app/SubToolLibrary.h"
 #include "app/WorkspaceState.h"
@@ -243,6 +244,7 @@ void collectWarnings(QtMsgType type, const QMessageLogContext& context, const QS
         QStringLiteral("ToolPropertyPanel.qml"), QStringLiteral("BrushSizePanel.qml"), QStringLiteral("LayersPanel.qml"),
         QStringLiteral("NewProjectDialog.qml"), QStringLiteral("CanvasWorkspace.qml"), QStringLiteral("MainToolbar.qml"),
         QStringLiteral("PreferencesDialog.qml"), QStringLiteral("KomaSettingsDialog.qml"), QStringLiteral("KomaTheme.qml"),
+        QStringLiteral("ColorPanel.qml"), QStringLiteral("PaintMixerView.qml"),
         QStringLiteral("qrc:/icons/")};
     if (g_warnings && type == QtWarningMsg) {
         bool relevant = message.contains(QStringLiteral("ReferenceError")) || message.contains(QStringLiteral("TypeError"));
@@ -273,6 +275,7 @@ private slots:
     void colorSelectorShapeDefaultsFollowTheme();
     void spectralMixerProducesPaintLikeColours();
     void mixerMaterialMixtureLoadsIntoBrushWithoutLosingFractions();
+    void colorPanelTabsPreserveWheelAndMixerState();
     void newProjectDialogShowsTheProjectTypeIcons();
     void iconsFollowTheTheme();
     void preferencesDialogStoresThemeAndIconColours();
@@ -287,6 +290,7 @@ void TestBrushUi::initTestCase()
 {
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
+    qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
     g_previousHandler = qInstallMessageHandler(collectWarnings);
     const QByteArray font = qgetenv("KOMAPAINT_TEST_FONT");
     if (!font.isEmpty()) {
@@ -1079,6 +1083,62 @@ void TestBrushUi::mixerMaterialMixtureLoadsIntoBrushWithoutLosingFractions()
     brush.clearMaterialMixture();
     QVERIFY(brush.materialMixture().isEmpty());
     QCOMPARE(changed.count(), 2);
+}
+
+void TestBrushUi::colorPanelTabsPreserveWheelAndMixerState()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiColorPanelTabs")));
+    auto* colorPanel = item(app, QStringLiteral("colorPanel"));
+    auto* wheelTabBtn = item(app, QStringLiteral("colorPanelTab_wheel"));
+    auto* mixerTabBtn = item(app, QStringLiteral("colorPanelTab_mixer"));
+    auto* wheel = item(app, QStringLiteral("colorWheel"));
+    auto* addToMixerBtn = item(app, QStringLiteral("addToPaintMixerButton"));
+    QVERIFY(colorPanel && wheelTabBtn && mixerTabBtn && wheel && addToMixerBtn);
+
+    // Choose a distinct arbitrary RGB colour in the Color Wheel, add it to the Paint Mixer.
+    const QColor picked(QStringLiteral("#7A42F4"));
+    app.workspace.colors()->setForeground(picked);
+    QTRY_COMPARE(app.workspace.colors()->foreground(), picked);
+    QVERIFY(clickNamed(app, QStringLiteral("addToPaintMixerButton")));
+
+    auto* mixer = app.workspace.mixer();
+    QVERIFY(mixer != nullptr);
+    QTRY_COMPARE(mixer->deposits().size(), 1);
+    QVERIFY(mixer->activeDeposit().value(QStringLiteral("containsDigitalImport")).toBool());
+    QVERIFY(!app.workspace.document()->isModified());
+
+    // Switch to the Paint Mixer tab in-place inside Colors panel.
+    QVERIFY(clickNamed(app, QStringLiteral("colorPanelTab_mixer")));
+    QTRY_COMPARE(colorPanel->property("activeTab").toInt(), 1);
+    auto* mixerSurface = item(app, QStringLiteral("mixerSurface"));
+    QVERIFY(mixerSurface && mixerSurface->isVisible());
+
+    // Add PY3 pigment to the active deposit, mix, and load into brush via UI buttons.
+    QVERIFY(clickNamed(app, QStringLiteral("pigmentAdd_PY3")));
+    QTRY_COMPARE(mixer->activeDeposit().value(QStringLiteral("components")).toList().size(), 2);
+    QVERIFY(clickNamed(app, QStringLiteral("mixerLoadBrushButton")));
+    QTRY_VERIFY(app.workspace.brush()->traditionalMedia());
+    QVERIFY(!app.workspace.brush()->materialMixture().isEmpty());
+
+    // Switch back to Color Wheel tab -> wheel colour & state preserved; mixer state preserved.
+    QVERIFY(clickNamed(app, QStringLiteral("colorPanelTab_wheel")));
+    QTRY_COMPARE(colorPanel->property("activeTab").toInt(), 0);
+    QCOMPARE(app.workspace.colors()->foreground(), picked);
+
+    // Switch back to Paint Mixer -> send resulting mixed colour back to Color Wheel.
+    QVERIFY(clickNamed(app, QStringLiteral("colorPanelTab_mixer")));
+    QTRY_COMPARE(colorPanel->property("activeTab").toInt(), 1);
+    QVERIFY(clickNamed(app, QStringLiteral("mixerToColorWheelButton")));
+    QVERIFY(app.workspace.colors()->foreground() != picked);
+
+    // Mixer undo works decoupled from document undo stack.
+    QVERIFY(!app.workspace.history()->canUndo());
+    QVERIFY(clickNamed(app, QStringLiteral("mixerUndoButton")));
+    QTRY_COMPARE(mixer->activeDeposit().value(QStringLiteral("components")).toList().size(), 1);
+    QVERIFY(!app.workspace.document()->isModified());
+
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 
 // --------------------------------------------------------------- new project

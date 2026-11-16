@@ -13,6 +13,12 @@ add_library(komapaint_app STATIC
     FileAssociation.h
     KomaPaintApp.cpp
     KomaPaintApp.h
+    MixerSurfaceItem.cpp
+    MixerSurfaceItem.h
+    PaintMixerController.cpp
+    PaintMixerController.h
+    PaintMixerStore.cpp
+    PaintMixerStore.h
     PanelManager.cpp
     PanelManager.h
     ProjectCreationService.cpp

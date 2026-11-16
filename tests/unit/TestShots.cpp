@@ -35,6 +35,7 @@ void collectMessage(QtMsgType type, const QMessageLogContext& context, const QSt
 
 #include "app/CanvasViewport.h"
 #include "app/DockModel.h"
+#include "app/MixerSurfaceItem.h"
 #include "app/PanelManager.h"
 #include "app/WorkspaceState.h"
 #include "core/ApplicationConfig.h"
@@ -76,6 +77,7 @@ void TestShots::capture()
     g_previous = qInstallMessageHandler(collectMessage);
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
+    qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
 
     const QString dir = qEnvironmentVariable("SHOT_DIR", QStringLiteral("/tmp/shots"));
     const int width = qEnvironmentVariableIntValue("SHOT_W") > 0 ? qEnvironmentVariableIntValue("SHOT_W") : 1280;

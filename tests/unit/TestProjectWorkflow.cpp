@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 #include "app/CanvasViewport.h"
 #include "app/DockModel.h"
+#include "app/MixerSurfaceItem.h"
 #include "app/PanelManager.h"
 #include "app/WorkspaceState.h"
 #include "core/ApplicationConfig.h"
@@ -29,6 +30,7 @@ void TestProjectWorkflow::initTestCase()
 {
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
+    qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
 }
 
 void TestProjectWorkflow::createAndPaint()

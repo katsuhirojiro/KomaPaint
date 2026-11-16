@@ -7,6 +7,7 @@ NewProjectDialog 1.0 NewProjectDialog.qml
 KpIcon 1.0 KpIcon.qml
 IconButton 1.0 IconButton.qml
 ColorWheel 1.0 ColorWheel.qml
+PaintMixerView 1.0 PaintMixerView.qml
 PropertySlider 1.0 PropertySlider.qml
 SegmentedChoice 1.0 SegmentedChoice.qml
 PreferencesDialog 1.0 PreferencesDialog.qml

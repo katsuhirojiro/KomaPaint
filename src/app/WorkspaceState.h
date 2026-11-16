@@ -7,6 +7,7 @@
 #include "../history/UndoStack.h"
 #include "../layers/LayerModel.h"
 #include "DocumentRecovery.h"
+#include "PaintMixerController.h"
 #include "ProjectCreationService.h"
 #include "SessionStore.h"
 #include "SubToolLibrary.h"
@@ -52,6 +53,7 @@ class WorkspaceState : public QObject
     Q_PROPERTY(LayerModel*     layers    READ layers    NOTIFY documentChanged)
     Q_PROPERTY(TimelineState*  timeline  READ timeline  CONSTANT)
     Q_PROPERTY(ColorPalette*   colors    READ colors    CONSTANT)
+    Q_PROPERTY(PaintMixerController* mixer READ mixer   CONSTANT)
     Q_PROPERTY(UndoStack*      history   READ history   NOTIFY documentChanged)
     Q_PROPERTY(QVariantList projectTabs READ projectTabs NOTIFY tabsChanged)
     Q_PROPERTY(int activeTab READ activeTab NOTIFY tabsChanged)
@@ -72,6 +74,7 @@ public:
     LayerModel*     layers()   const { return m_document ? m_document->layers() : m_emptyLayers; }
     TimelineState*  timeline() const { return m_timeline; }
     ColorPalette*   colors()   const { return m_colors; }
+    PaintMixerController* mixer() const { return m_mixer; }
     UndoStack*      history()  const { return m_history; }
 
     QString activeTool() const { return m_activeTool; }
@@ -275,6 +278,7 @@ private:
     CanvasDocument* m_document = nullptr;
     TimelineState*  m_timeline = nullptr;
     ColorPalette*   m_colors = nullptr;
+    PaintMixerController* m_mixer = nullptr;
     UndoStack*      m_history = nullptr;
     ProjectCreationService* m_creationService;
     QString         m_activeTool = QStringLiteral("brush");

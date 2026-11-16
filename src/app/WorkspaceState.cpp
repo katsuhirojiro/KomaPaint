@@ -161,6 +161,7 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     m_emptyLayers = new LayerModel(this, false);
     m_timeline = new TimelineState(this);
     m_colors   = new ColorPalette(this);
+    m_mixer    = new PaintMixerController(m_brush, m_colors, this);
     m_creationService = new ProjectCreationService(this);
     // A fresh installation starts with no document and no project tab. The
     // detached empty layer model only keeps existing panel bindings safe.
@@ -1080,6 +1081,10 @@ bool WorkspaceState::initializeSession(const QString& filePath)
 {
     if (filePath.isEmpty()) return false;
     m_sessionPath = QFileInfo(filePath).absoluteFilePath();
+    if (m_mixer) {
+        m_mixer->initializePersistence(
+            QFileInfo(m_sessionPath).dir().filePath(QStringLiteral("mixtures.json")));
+    }
     m_session = {};
     QString error;
     const auto result = SessionStore::load(m_sessionPath, &m_session, &error);

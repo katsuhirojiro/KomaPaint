@@ -1,5 +1,6 @@
 #include <QtTest/QtTest>
 #include "app/CanvasViewport.h"
+#include "app/MixerSurfaceItem.h"
 #include "app/WorkspaceState.h"
 #include "app/DockModel.h"
 #include "app/PanelManager.h"
@@ -384,6 +385,7 @@ void TestCanvasViewport::qmlMouseStroke()
 {
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
+    qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
     WorkspaceState workspace;
     QVERIFY(workspace.newDocument(256, 256, false, QColor(Qt::white)));
     QQmlEngine engine;

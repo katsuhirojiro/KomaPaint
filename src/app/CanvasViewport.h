@@ -103,6 +103,7 @@ private:
     std::unique_ptr<BrushStroke> m_stroke;
     std::unique_ptr<material::MaterialStroke> m_materialStroke;
     std::unique_ptr<material::BrushReservoir> m_materialReservoir;
+    quint64 m_loadedMixtureRevision = 0;
     QTimer* m_materialTimer = nullptr;
     QElapsedTimer m_materialClock;
     qint64 m_lastMaterialTick = 0;

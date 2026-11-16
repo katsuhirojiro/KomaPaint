@@ -39,6 +39,32 @@ Rectangle {
     // scrolling at the default window size. Anything taller scrolls.
     readonly property int preferredHeight: 288
 
+    // Extensible internal tool tabs inside the Colors panel; state in each tab
+    // stays alive inside the StackLayout across tab switches.
+    readonly property var colorTabs: [
+        { id: "wheel", label: qsTr("Color Wheel") },
+        { id: "mixer", label: qsTr("Paint Mixer") }
+    ]
+    property int activeTab: Math.max(0, Math.min(colorTabs.length - 1,
+                            Number(Workspace.sessionValue("ui.color.activeTab", 0))))
+    property string lastMixerAddNote: ""
+
+    function switchTab(index) {
+        if (index < 0 || index >= colorTabs.length) return
+        activeTab = index
+        Workspace.setSessionValue("ui.color.activeTab", index)
+    }
+
+    function sendCurrentColorToMixer() {
+        if (!Workspace.mixer) return
+        const res = Workspace.mixer.addFromColorWheel(Workspace.colors.foreground, true, true)
+        if (res && res.ok) {
+            lastMixerAddNote = res.matchedKnownPigment
+                ? qsTr("Added %1 (%2) to Mixer").arg(res.hex).arg(res.matchedPigmentId)
+                : qsTr("Added %1 (Digital) to Mixer").arg(res.hex)
+        }
+    }
+
     function componentOf(c) {
         function h(v) { return Math.round(v * 255).toString(16).padStart(2, "0") }
         return "#" + h(c.r) + h(c.g) + h(c.b)
@@ -73,6 +99,104 @@ Rectangle {
             panel.pushRecent(Workspace.colors.foreground)
         }
     }
+
+    // ---- Browser-style internal tab bar (Color Wheel | Paint Mixer)
+    Rectangle {
+        id: tabBar
+        objectName: "colorPanelTabBar"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: 28
+        color: KP.paneHeaderBg
+
+        Row {
+            anchors.fill: parent
+            anchors.leftMargin: KP.gapS
+            anchors.rightMargin: KP.gapS
+            anchors.topMargin: 3
+            spacing: 2
+
+            Repeater {
+                model: panel.colorTabs
+                AbstractButton {
+                    id: tabBtn
+                    required property int index
+                    required property var modelData
+                    readonly property bool selected: panel.activeTab === index
+                    objectName: "colorPanelTab_" + modelData.id
+                    height: parent.height
+                    width: Math.max(82, tabText.implicitWidth + 18)
+                    hoverEnabled: true
+                    focusPolicy: Qt.TabFocus
+                    onClicked: panel.switchTab(index)
+
+                    background: Rectangle {
+                        color: tabBtn.selected ? KP.paneBg
+                             : tabBtn.hovered ? KP.hoverOverlay : "transparent"
+                        border.width: tabBtn.selected ? 1 : 0
+                        border.color: KP.hairline
+                        radius: KP.radiusXS
+
+                        // Top accent line on active browser tab
+                        Rectangle {
+                            visible: tabBtn.selected
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: 2
+                            color: KP.accent
+                        }
+                        // Blend bottom seam into panel body for active tab
+                        Rectangle {
+                            visible: tabBtn.selected
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.leftMargin: 1
+                            anchors.rightMargin: 1
+                            height: 2
+                            color: KP.paneBg
+                        }
+                    }
+
+                    contentItem: Text {
+                        id: tabText
+                        text: modelData.label
+                        color: tabBtn.selected ? KP.text : (tabBtn.hovered ? KP.text : KP.textMuted)
+                        font.family: KP.fontUi
+                        font.pixelSize: KP.fontXS
+                        font.weight: tabBtn.selected ? KP.weightBold : KP.weightRegular
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 1
+            color: KP.hairline
+            z: -1
+        }
+    }
+
+    StackLayout {
+        id: tabStack
+        objectName: "colorPanelStack"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: tabBar.bottom
+        anchors.bottom: parent.bottom
+        currentIndex: panel.activeTab
+
+    Item {
+        id: wheelTab
+        Layout.fillWidth: true
+        Layout.fillHeight: true
 
     Flickable {
         id: scroller
@@ -187,6 +311,35 @@ Rectangle {
                         hexField.text = Qt.binding(function() { return panel.componentOf(Workspace.colors.foreground).toUpperCase() })
                     }
                 }
+            }
+
+            KpButton {
+                objectName: "addToPaintMixerButton"
+                small: true
+                label: qsTr("Add to Mixer")
+                tip: qsTr("Add the selected colour to the Paint Mixer as a paint deposit")
+                onClicked: panel.sendCurrentColorToMixer()
+            }
+        }
+
+        RowLayout {
+            objectName: "addedToMixerNotice"
+            visible: panel.lastMixerAddNote.length > 0
+            Layout.fillWidth: true
+            spacing: KP.gapS
+            Text {
+                Layout.fillWidth: true
+                text: panel.lastMixerAddNote
+                color: KP.textMuted
+                font.family: KP.fontUi
+                font.pixelSize: KP.fontMicro
+                elide: Text.ElideRight
+            }
+            KpButton {
+                objectName: "openMixerAfterAddButton"
+                small: true
+                label: qsTr("Open Mixer")
+                onClicked: panel.switchTab(1)
             }
         }
 
@@ -358,4 +511,13 @@ Rectangle {
             GradientStop { position: 1.0; color: KP.paneBg }
         }
     }
+    } // wheelTab
+
+    PaintMixerView {
+        id: paintMixerView
+        objectName: "paintMixerView"
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+    }
+    } // StackLayout
 }

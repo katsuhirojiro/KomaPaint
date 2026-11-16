@@ -17,6 +17,7 @@
         <file alias="components/IconButton.qml">../ui/components/IconButton.qml</file>
         <file alias="components/SpectralMix.js">../ui/components/SpectralMix.js</file>
         <file alias="components/ColorWheel.qml">../ui/components/ColorWheel.qml</file>
+        <file alias="components/PaintMixerView.qml">../ui/components/PaintMixerView.qml</file>
         <file alias="components/PropertySlider.qml">../ui/components/PropertySlider.qml</file>
         <file alias="components/SegmentedChoice.qml">../ui/components/SegmentedChoice.qml</file>
         <file alias="components/PreferencesDialog.qml">../ui/components/PreferencesDialog.qml</file>

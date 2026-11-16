@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,9 @@ struct PigmentDefinition {
     double liftability = 0.5;
     double settling = 0.0;
     std::vector<std::string> media;
+    std::string colorFamily;
+    bool verifiedMeasurement = false;
+    std::string provenance = "Engine spectral estimate";
 };
 
 class PigmentLibrary {
@@ -265,6 +269,20 @@ public:
 private:
     const PigmentLibrary& m_pigments;
 };
+
+// Computes an optical sRGB preview swatch (0xAARRGGBB, opaque RGB over neutral
+// studio ground) for a single pigment on the non-absorbent mixing palette.
+std::uint32_t pigmentPreviewArgb(const MaterialEngine& engine,
+                                 const PigmentDefinition& pigment,
+                                 const std::string& mediumId = "gouache") noexcept;
+
+// Finds a medium-compatible named pigment whose optical swatch closely matches
+// straightArgb (all RGB channels within maxChannelDelta). Arbitrary RGB values
+// outside that tolerance return std::nullopt rather than inventing a recipe.
+std::optional<std::string> matchKnownPigmentForRgb(const MaterialEngine& engine,
+                                                   std::uint32_t straightArgb,
+                                                   const std::string& mediumId = "gouache",
+                                                   double maxChannelDelta = 10.0) noexcept;
 
 // A real material dab: transfer consumes the reservoir, computes optical
 // pigment output from its current composition, responds to medium/substrate,

@@ -18,6 +18,7 @@
 
 #include "app/CanvasViewport.h"
 #include "app/DockModel.h"
+#include "app/MixerSurfaceItem.h"
 #include "app/PanelManager.h"
 #include "app/WorkspaceState.h"
 #include "core/ApplicationConfig.h"
@@ -135,6 +136,7 @@ void TestWorkspaceUi::initTestCase()
 {
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
+    qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
 }
 
 bool TestWorkspaceUi::start(Running& app, const QString& settingsName, const QString& recovery, const QString& session,

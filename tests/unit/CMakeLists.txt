@@ -96,6 +96,14 @@ add_executable(test_material_engine TestMaterialEngine.cpp)
 target_link_libraries(test_material_engine PRIVATE komapaint::material)
 set_target_properties(test_material_engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_material_engine COMMAND test_material_engine)
+
+add_executable(test_paint_mixer TestPaintMixer.cpp)
+target_link_libraries(test_paint_mixer PRIVATE komapaint::material)
+set_target_properties(test_paint_mixer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_paint_mixer COMMAND test_paint_mixer)
+
+komapaint_add_test(test_paint_mixer_app TestPaintMixerApp.cpp)
+target_link_libraries(test_paint_mixer_app PRIVATE komapaint::app komapaint::files Qt6::Widgets Qt6::Quick)
 komapaint_add_test(test_material_document TestMaterialDocument.cpp)
 target_link_libraries(test_material_document PRIVATE komapaint::drawing)
 

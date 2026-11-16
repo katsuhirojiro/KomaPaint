@@ -1,5 +1,7 @@
 #include "KomaPaintApp.h"
 #include "CanvasViewport.h"
+#include "MixerSurfaceItem.h"
+#include "PaintMixerController.h"
 #include "core/Version.h"
 
 #include <QApplication>
@@ -38,7 +40,9 @@ void KomaPaintApp::registerTypes()
 {
     qRegisterMetaType<PanelManager*>();
     qRegisterMetaType<DockModel*>();
+    qRegisterMetaType<PaintMixerController*>();
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
+    qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
 }
 
 void KomaPaintApp::loadStyles() {}

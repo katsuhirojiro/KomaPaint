@@ -220,7 +220,10 @@ PigmentDefinition pigmentFromReflectance(std::string id, std::string name,
                                          double tint, double transparency,
                                          double granulation, double staining,
                                          double liftability, double settling,
-                                         std::vector<std::string> media)
+                                         std::vector<std::string> media,
+                                         std::string colorFamily,
+                                         bool verifiedMeasurement,
+                                         std::string provenance)
 {
     PigmentDefinition p;
     p.id = std::move(id);
@@ -234,6 +237,9 @@ PigmentDefinition pigmentFromReflectance(std::string id, std::string name,
     p.liftability = liftability;
     p.settling = settling;
     p.media = std::move(media);
+    p.colorFamily = std::move(colorFamily);
+    p.verifiedMeasurement = verifiedMeasurement;
+    p.provenance = std::move(provenance);
     for (std::size_t i = 0; i < SpectralBands; ++i) {
         const double r = std::clamp(reflectance[i], 0.015, 0.985);
         const double ratio = (1.0 - r) * (1.0 - r) / (2.0 * r);
@@ -245,6 +251,49 @@ PigmentDefinition pigmentFromReflectance(std::string id, std::string name,
         p.absorption[i] = ratio * scatter * std::max(0.1, tint);
     }
     return p;
+}
+
+Spectrum yellowOchreSpectrum() noexcept
+{
+    Spectrum s{};
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        const double w = Wavelengths[i];
+        s[i] = clamp01(0.035 + 0.62 / (1.0 + std::exp(-(w - 524.0) / 18.0))
+                       + 0.04 * gaussian(w, 575.0, 35.0));
+    }
+    return s;
+}
+
+Spectrum redOxideSpectrum() noexcept
+{
+    Spectrum s{};
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        const double w = Wavelengths[i];
+        s[i] = clamp01(0.028 + 0.52 / (1.0 + std::exp(-(w - 574.0) / 16.0)));
+    }
+    return s;
+}
+
+Spectrum ultramarineSpectrum() noexcept
+{
+    Spectrum s{};
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        const double w = Wavelengths[i];
+        s[i] = clamp01(0.025 + 0.80 / (1.0 + std::exp((w - 470.0) / 15.0))
+                       + 0.14 / (1.0 + std::exp(-(w - 650.0) / 15.0)));
+    }
+    return s;
+}
+
+Spectrum phthaloGreenSpectrum() noexcept
+{
+    Spectrum s{};
+    for (std::size_t i = 0; i < s.size(); ++i) {
+        const double w = Wavelengths[i];
+        s[i] = clamp01(0.022 + 0.72 * gaussian(w, 515.0, 32.0)
+                       + 0.12 * gaussian(w, 468.0, 24.0));
+    }
+    return s;
 }
 
 Spectrum yellowSpectrum() noexcept
@@ -417,18 +466,38 @@ void refreshBatchState(PaintBatch& batch) noexcept
 PigmentLibrary::PigmentLibrary()
 {
     const std::vector<std::string> paintMedia{"gouache", "watercolour", "ink"};
+    const std::string engineEstimate = "Engine spectral estimate (not lab-measured)";
+    const std::string provisionalEstimate = "Provisional estimate (not lab-measured)";
     m_pigments.push_back(pigmentFromReflectance("PY3", "Primary Yellow", yellowSpectrum(),
-                                                0.55, 1.45, 1.0, 0.30, 0.12, 0.52, 0.62, 0.16, paintMedia));
-    m_pigments.push_back(pigmentFromReflectance("PB15", "Phthalo Blue", blueSpectrum(),
-                                                0.08, 1.62, 1.25, 0.72, 0.18, 0.94, 0.18, 0.11, paintMedia));
+                                                0.55, 1.45, 1.0, 0.30, 0.12, 0.52, 0.62, 0.16,
+                                                paintMedia, "Yellows", false, engineEstimate));
+    m_pigments.push_back(pigmentFromReflectance("PY42", "Yellow Ochre", yellowOchreSpectrum(),
+                                                2.4, 3.2, 0.78, 0.18, 0.64, 0.34, 0.72, 0.58,
+                                                {"gouache", "watercolour"}, "Earths", false, provisionalEstimate));
     m_pigments.push_back(pigmentFromReflectance("PR122", "Quinacridone Magenta", redSpectrum(),
-                                                0.12, 1.42, 0.95, 0.70, 0.08, 0.78, 0.30, 0.14, paintMedia));
-    m_pigments.push_back(pigmentFromReflectance("PW6", "Titanium White", whiteSpectrum(),
-                                                0.28, 4.10, 0.85, 0.02, 0.0, 0.28, 0.84, 0.48, {"gouache"}));
-    m_pigments.push_back(pigmentFromReflectance("PBk7", "Carbon Black", blackSpectrum(),
-                                                0.035, 1.80, 1.10, 0.12, 0.0, 0.90, 0.15, 0.18, paintMedia));
+                                                0.12, 1.42, 0.95, 0.70, 0.08, 0.78, 0.30, 0.14,
+                                                paintMedia, "Reds", false, engineEstimate));
+    m_pigments.push_back(pigmentFromReflectance("PR101", "Red Iron Oxide", redOxideSpectrum(),
+                                                2.1, 3.6, 0.88, 0.12, 0.56, 0.42, 0.68, 0.62,
+                                                {"gouache", "watercolour"}, "Earths", false, provisionalEstimate));
+    m_pigments.push_back(pigmentFromReflectance("PB15", "Phthalo Blue", blueSpectrum(),
+                                                0.08, 1.62, 1.25, 0.72, 0.18, 0.94, 0.18, 0.11,
+                                                paintMedia, "Blues", false, engineEstimate));
+    m_pigments.push_back(pigmentFromReflectance("PB29", "Ultramarine Blue", ultramarineSpectrum(),
+                                                1.8, 2.35, 0.90, 0.56, 0.82, 0.38, 0.76, 0.68,
+                                                {"gouache", "watercolour"}, "Blues", false, provisionalEstimate));
+    m_pigments.push_back(pigmentFromReflectance("PG7", "Phthalo Green", phthaloGreenSpectrum(),
+                                                0.09, 1.58, 1.20, 0.74, 0.10, 0.92, 0.20, 0.12,
+                                                {"gouache", "watercolour"}, "Greens", false, provisionalEstimate));
     m_pigments.push_back(pigmentFromReflectance("PBr7", "Raw Umber", earthSpectrum(),
-                                                4.8, 3.4, 0.72, 0.40, 0.92, 0.24, 0.82, 0.78, paintMedia));
+                                                4.8, 3.4, 0.72, 0.40, 0.92, 0.24, 0.82, 0.78,
+                                                paintMedia, "Earths", false, engineEstimate));
+    m_pigments.push_back(pigmentFromReflectance("PW6", "Titanium White", whiteSpectrum(),
+                                                0.28, 4.10, 0.85, 0.02, 0.0, 0.28, 0.84, 0.48,
+                                                {"gouache"}, "Neutrals", false, engineEstimate));
+    m_pigments.push_back(pigmentFromReflectance("PBk7", "Carbon Black", blackSpectrum(),
+                                                0.035, 1.80, 1.10, 0.12, 0.0, 0.90, 0.15, 0.18,
+                                                paintMedia, "Neutrals", false, engineEstimate));
 }
 
 const PigmentDefinition* PigmentLibrary::find(const std::string& id) const noexcept
@@ -1684,6 +1753,64 @@ bool MaterialStroke::end(MaterialSample sample)
     if (!stamp(sample)) return false;
     m_started = false;
     return true;
+}
+
+std::uint32_t pigmentPreviewArgb(const MaterialEngine& engine,
+                                 const PigmentDefinition& pigment,
+                                 const std::string& mediumId) noexcept
+{
+    const MediumProfile* medium = findMediumProfile(mediumId);
+    if (!medium) medium = &gouacheProfile();
+    PaintBatch batch;
+    batch.mediumId = medium->id;
+    batch.addPigment(pigment.id, 1.0);
+    if (medium->id == "watercolour") {
+        batch.water = 1.2;
+        batch.binder = 0.10;
+    } else {
+        batch.water = 0.45;
+        batch.binder = 0.42;
+        batch.filler = 0.04;
+    }
+    refreshBatchState(batch);
+    const OpticalResult optical = engine.opticalResult(batch, *medium, nonAbsorbentPalette(), 1.0);
+    // Composite over clean porcelain white (#FAF8F4) so transparent pigments show
+    // true tint over white mixing plate.
+    constexpr std::uint32_t porcelainPremul = 0xfffaf8f4U;
+    return blendPremultiplied(porcelainPremul, optical.straightArgb, optical.alpha);
+}
+
+std::optional<std::string> matchKnownPigmentForRgb(const MaterialEngine& engine,
+                                                   std::uint32_t straightArgb,
+                                                   const std::string& mediumId,
+                                                   double maxChannelDelta) noexcept
+{
+    if (!std::isfinite(maxChannelDelta) || maxChannelDelta < 0.0) return std::nullopt;
+    const MediumProfile* medium = findMediumProfile(mediumId);
+    const std::string activeMedium = medium ? medium->id : std::string("gouache");
+    const int targetR = static_cast<int>((straightArgb >> 16U) & 0xffU);
+    const int targetG = static_cast<int>((straightArgb >> 8U) & 0xffU);
+    const int targetB = static_cast<int>(straightArgb & 0xffU);
+
+    double bestScore = std::numeric_limits<double>::infinity();
+    std::optional<std::string> bestId;
+    for (const auto& pigment : engine.pigments().pigments()) {
+        if (std::find(pigment.media.begin(), pigment.media.end(), activeMedium) == pigment.media.end())
+            continue;
+        const std::uint32_t preview = pigmentPreviewArgb(engine, pigment, activeMedium);
+        const int dr = std::abs(targetR - static_cast<int>((preview >> 16U) & 0xffU));
+        const int dg = std::abs(targetG - static_cast<int>((preview >> 8U) & 0xffU));
+        const int db = std::abs(targetB - static_cast<int>(preview & 0xffU));
+        const int maxD = std::max({dr, dg, db});
+        if (double(maxD) <= maxChannelDelta) {
+            const double score = double(dr * dr + dg * dg + db * db);
+            if (score < bestScore) {
+                bestScore = score;
+                bestId = pigment.id;
+            }
+        }
+    }
+    return bestId;
 }
 
 } // namespace komapaint::material
