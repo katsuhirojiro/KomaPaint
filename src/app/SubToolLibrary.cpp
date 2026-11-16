@@ -31,6 +31,22 @@ bool readInteger(const QJsonObject& object, const char* key, int minimum, int ma
     return true;
 }
 
+bool readOptionalInteger(const QJsonObject& object, const char* key, int minimum, int maximum, int* result)
+{
+    const QJsonValue value = object.value(QLatin1String(key));
+    if (value.isUndefined()) return true;
+    return readInteger(object, key, minimum, maximum, result);
+}
+
+bool readOptionalBool(const QJsonObject& object, const char* key, bool* result)
+{
+    const QJsonValue value = object.value(QLatin1String(key));
+    if (value.isUndefined()) return true;
+    if (!value.isBool()) return false;
+    *result = value.toBool();
+    return true;
+}
+
 bool parseValues(const QJsonObject& object, SubToolLibrary::Values* values)
 {
     if (!values) return false;
@@ -43,9 +59,29 @@ bool parseValues(const QJsonObject& object, SubToolLibrary::Values* values)
         || !readInteger(object, "stabilization", 0, 100, &v.stabilization)
         || !object.value(QStringLiteral("textured")).isBool()) return false;
     v.textured = object.value(QStringLiteral("textured")).toBool();
-    const QJsonValue traditionalMedia = object.value(QStringLiteral("traditionalMedia"));
-    if (!traditionalMedia.isUndefined() && !traditionalMedia.isBool()) return false;
-    v.traditionalMedia = traditionalMedia.toBool(false);
+    if (!readOptionalBool(object, "traditionalMedia", &v.traditionalMedia)
+        || !readOptionalBool(object, "persistentReservoir", &v.persistentReservoir)
+        || !readOptionalInteger(object, "paintLoad", 10, 100, &v.paintLoad)
+        || !readOptionalInteger(object, "pigmentConcentration", 10, 100, &v.pigmentConcentration)
+        || !readOptionalInteger(object, "waterAmount", 0, 100, &v.waterAmount)
+        || !readOptionalInteger(object, "paintBody", 0, 100, &v.paintBody)
+        || !readOptionalInteger(object, "pickup", 0, 100, &v.pickup)
+        || !readOptionalInteger(object, "aspectRatio", 100, 400, &v.aspectRatio)
+        || !readOptionalInteger(object, "tipAngle", -180, 180, &v.tipAngle)
+        || !readOptionalBool(object, "followDirection", &v.followDirection)
+        || !readOptionalInteger(object, "depletion", 0, 200, &v.depletion)
+        || !readOptionalInteger(object, "edgeAccumulation", 0, 100, &v.edgeAccumulation)
+        || !readOptionalInteger(object, "toothResponse", 0, 100, &v.toothResponse)
+        || !readOptionalInteger(object, "granulation", 0, 100, &v.granulation)
+        || !readOptionalInteger(object, "dryingSpeed", 25, 200, &v.dryingSpeed)
+        || !readOptionalInteger(object, "pressureToAmount", 0, 100, &v.pressureToAmount)
+        || !readOptionalInteger(object, "pressureToContact", 0, 100, &v.pressureToContact))
+        return false;
+    const QJsonValue presetId = object.value(QStringLiteral("materialPresetId"));
+    if (!presetId.isUndefined()) {
+        if (!presetId.isString() || presetId.toString().trimmed().isEmpty()) return false;
+        v.materialPresetId = presetId.toString().trimmed();
+    }
     return true;
 }
 
@@ -203,6 +239,23 @@ void SubToolLibrary::apply()
     m_brush->setStabilization(values.stabilization);
     m_brush->setTextured(values.textured);
     m_brush->setTraditionalMedia(values.traditionalMedia);
+    m_brush->setPersistentReservoir(values.persistentReservoir);
+    m_brush->setMaterialPresetId(values.materialPresetId);
+    m_brush->setPaintLoad(values.paintLoad);
+    m_brush->setPigmentConcentration(values.pigmentConcentration);
+    m_brush->setWaterAmount(values.waterAmount);
+    m_brush->setPaintBody(values.paintBody);
+    m_brush->setPickup(values.pickup);
+    m_brush->setAspectRatio(values.aspectRatio);
+    m_brush->setTipAngle(values.tipAngle);
+    m_brush->setFollowDirection(values.followDirection);
+    m_brush->setDepletion(values.depletion);
+    m_brush->setEdgeAccumulation(values.edgeAccumulation);
+    m_brush->setToothResponse(values.toothResponse);
+    m_brush->setGranulation(values.granulation);
+    m_brush->setDryingSpeed(values.dryingSpeed);
+    m_brush->setPressureToAmount(values.pressureToAmount);
+    m_brush->setPressureToContact(values.pressureToContact);
     m_brush->setErase(group.erase);
     m_applying = false;
 }
@@ -220,6 +273,23 @@ void SubToolLibrary::capture()
     values.stabilization = m_brush->stabilization();
     values.textured = m_brush->textured();
     values.traditionalMedia = m_brush->traditionalMedia();
+    values.persistentReservoir = m_brush->persistentReservoir();
+    values.materialPresetId = m_brush->materialPresetId();
+    values.paintLoad = m_brush->paintLoad();
+    values.pigmentConcentration = m_brush->pigmentConcentration();
+    values.waterAmount = m_brush->waterAmount();
+    values.paintBody = m_brush->paintBody();
+    values.pickup = m_brush->pickup();
+    values.aspectRatio = m_brush->aspectRatio();
+    values.tipAngle = m_brush->tipAngle();
+    values.followDirection = m_brush->followDirection();
+    values.depletion = m_brush->depletion();
+    values.edgeAccumulation = m_brush->edgeAccumulation();
+    values.toothResponse = m_brush->toothResponse();
+    values.granulation = m_brush->granulation();
+    values.dryingSpeed = m_brush->dryingSpeed();
+    values.pressureToAmount = m_brush->pressureToAmount();
+    values.pressureToContact = m_brush->pressureToContact();
 }
 
 QVariantList SubToolLibrary::subTools() const

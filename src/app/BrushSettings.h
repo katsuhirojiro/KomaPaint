@@ -1,5 +1,6 @@
 #pragma once
 #include <QObject>
+#include <QString>
 #include <QVariantMap>
 
 namespace komapaint {
@@ -23,6 +24,23 @@ class BrushSettings : public QObject {
     // of the configured colour/mixture. True keeps remaining paint across
     // strokes as an optional advanced workflow.
     Q_PROPERTY(bool persistentReservoir READ persistentReservoir WRITE setPersistentReservoir NOTIFY changed)
+    // Traditional material brush properties (also stored per preset in SubToolLibrary).
+    Q_PROPERTY(QString materialPresetId READ materialPresetId WRITE setMaterialPresetId NOTIFY changed)
+    Q_PROPERTY(int paintLoad READ paintLoad WRITE setPaintLoad NOTIFY changed)
+    Q_PROPERTY(int pigmentConcentration READ pigmentConcentration WRITE setPigmentConcentration NOTIFY changed)
+    Q_PROPERTY(int waterAmount READ waterAmount WRITE setWaterAmount NOTIFY changed)
+    Q_PROPERTY(int paintBody READ paintBody WRITE setPaintBody NOTIFY changed)
+    Q_PROPERTY(int pickup READ pickup WRITE setPickup NOTIFY changed)
+    Q_PROPERTY(int aspectRatio READ aspectRatio WRITE setAspectRatio NOTIFY changed)
+    Q_PROPERTY(int tipAngle READ tipAngle WRITE setTipAngle NOTIFY changed)
+    Q_PROPERTY(bool followDirection READ followDirection WRITE setFollowDirection NOTIFY changed)
+    Q_PROPERTY(int depletion READ depletion WRITE setDepletion NOTIFY changed)
+    Q_PROPERTY(int edgeAccumulation READ edgeAccumulation WRITE setEdgeAccumulation NOTIFY changed)
+    Q_PROPERTY(int toothResponse READ toothResponse WRITE setToothResponse NOTIFY changed)
+    Q_PROPERTY(int granulation READ granulation WRITE setGranulation NOTIFY changed)
+    Q_PROPERTY(int dryingSpeed READ dryingSpeed WRITE setDryingSpeed NOTIFY changed)
+    Q_PROPERTY(int pressureToAmount READ pressureToAmount WRITE setPressureToAmount NOTIFY changed)
+    Q_PROPERTY(int pressureToContact READ pressureToContact WRITE setPressureToContact NOTIFY changed)
     // Full material batch supplied by the mixer. The component masses and
     // residual identities are kept verbatim until a material stroke loads it.
     Q_PROPERTY(QVariantMap materialMixture READ materialMixture NOTIFY materialMixtureChanged)
@@ -44,6 +62,22 @@ public:
     bool erase() const { return m_erase; }
     bool traditionalMedia() const { return m_traditionalMedia; }
     bool persistentReservoir() const { return m_persistentReservoir; }
+    QString materialPresetId() const { return m_materialPresetId; }
+    int paintLoad() const { return m_paintLoad; }
+    int pigmentConcentration() const { return m_pigmentConcentration; }
+    int waterAmount() const { return m_waterAmount; }
+    int paintBody() const { return m_paintBody; }
+    int pickup() const { return m_pickup; }
+    int aspectRatio() const { return m_aspectRatio; }
+    int tipAngle() const { return m_tipAngle; }
+    bool followDirection() const { return m_followDirection; }
+    int depletion() const { return m_depletion; }
+    int edgeAccumulation() const { return m_edgeAccumulation; }
+    int toothResponse() const { return m_toothResponse; }
+    int granulation() const { return m_granulation; }
+    int dryingSpeed() const { return m_dryingSpeed; }
+    int pressureToAmount() const { return m_pressureToAmount; }
+    int pressureToContact() const { return m_pressureToContact; }
     QVariantMap materialMixture() const { return m_materialMixture; }
     int minimumSize() const { return MinSize; }
     int maximumSize() const { return MaxSize; }
@@ -59,6 +93,25 @@ public:
     void setErase(bool v) { if (m_erase != v) { m_erase = v; emit changed(); } }
     void setTraditionalMedia(bool v) { if (m_traditionalMedia != v) { m_traditionalMedia = v; emit changed(); } }
     void setPersistentReservoir(bool v) { if (m_persistentReservoir != v) { m_persistentReservoir = v; emit changed(); } }
+    void setMaterialPresetId(const QString& v) {
+        const QString normalized = v.trimmed().isEmpty() ? QStringLiteral("gouache-round") : v.trimmed();
+        if (m_materialPresetId != normalized) { m_materialPresetId = normalized; emit changed(); }
+    }
+    void setPaintLoad(int v) { v = qBound(10, v, 100); if (m_paintLoad != v) { m_paintLoad = v; emit changed(); } }
+    void setPigmentConcentration(int v) { v = qBound(10, v, 100); if (m_pigmentConcentration != v) { m_pigmentConcentration = v; emit changed(); } }
+    void setWaterAmount(int v) { v = qBound(0, v, 100); if (m_waterAmount != v) { m_waterAmount = v; emit changed(); } }
+    void setPaintBody(int v) { v = qBound(0, v, 100); if (m_paintBody != v) { m_paintBody = v; emit changed(); } }
+    void setPickup(int v) { v = qBound(0, v, 100); if (m_pickup != v) { m_pickup = v; emit changed(); } }
+    void setAspectRatio(int v) { v = qBound(100, v, 400); if (m_aspectRatio != v) { m_aspectRatio = v; emit changed(); } }
+    void setTipAngle(int v) { v = qBound(-180, v, 180); if (m_tipAngle != v) { m_tipAngle = v; emit changed(); } }
+    void setFollowDirection(bool v) { if (m_followDirection != v) { m_followDirection = v; emit changed(); } }
+    void setDepletion(int v) { v = qBound(0, v, 200); if (m_depletion != v) { m_depletion = v; emit changed(); } }
+    void setEdgeAccumulation(int v) { v = qBound(0, v, 100); if (m_edgeAccumulation != v) { m_edgeAccumulation = v; emit changed(); } }
+    void setToothResponse(int v) { v = qBound(0, v, 100); if (m_toothResponse != v) { m_toothResponse = v; emit changed(); } }
+    void setGranulation(int v) { v = qBound(0, v, 100); if (m_granulation != v) { m_granulation = v; emit changed(); } }
+    void setDryingSpeed(int v) { v = qBound(25, v, 200); if (m_dryingSpeed != v) { m_dryingSpeed = v; emit changed(); } }
+    void setPressureToAmount(int v) { v = qBound(0, v, 100); if (m_pressureToAmount != v) { m_pressureToAmount = v; emit changed(); } }
+    void setPressureToContact(int v) { v = qBound(0, v, 100); if (m_pressureToContact != v) { m_pressureToContact = v; emit changed(); } }
     Q_INVOKABLE bool loadMaterialMixture(const QVariantMap& mixture) {
         if (mixture.isEmpty()) return false;
         m_materialMixture = mixture;
@@ -80,6 +133,22 @@ private:
     bool m_erase = false;
     bool m_traditionalMedia = false;
     bool m_persistentReservoir = false;
+    QString m_materialPresetId = QStringLiteral("gouache-round");
+    int m_paintLoad = 88;
+    int m_pigmentConcentration = 82;
+    int m_waterAmount = 22;
+    int m_paintBody = 78;
+    int m_pickup = 16;
+    int m_aspectRatio = 100;
+    int m_tipAngle = 0;
+    bool m_followDirection = false;
+    int m_depletion = 100;
+    int m_edgeAccumulation = 8;
+    int m_toothResponse = 18;
+    int m_granulation = 5;
+    int m_dryingSpeed = 115;
+    int m_pressureToAmount = 62;
+    int m_pressureToContact = 35;
     QVariantMap m_materialMixture;
 };
 }

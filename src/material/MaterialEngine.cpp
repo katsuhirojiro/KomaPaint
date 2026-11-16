@@ -109,6 +109,54 @@ std::array<double, 3> spectrumToLinearRgb(const Spectrum& spectrum) noexcept
     return rgb;
 }
 
+struct DabContactResult {
+    double contact = 0.0;
+    double radial = 1.0;
+};
+
+DabContactResult dabContactAt(const BrushDefinition& brush,
+                              std::int64_t x, std::int64_t y,
+                              double centerX, double centerY,
+                              double ca, double sa, double rx, double ry,
+                              double contactFirmness) noexcept
+{
+    const double dx = double(x) + 0.5 - centerX;
+    const double dy = double(y) + 0.5 - centerY;
+    const double u = (ca * dx + sa * dy) / std::max(0.5, rx);
+    const double v = (-sa * dx + ca * dy) / std::max(0.5, ry);
+    const double radial = u * u + v * v;
+    if (radial > 1.0) return {};
+    double contact = clamp01(1.0 - radial);
+    if (brush.tip == TipGeometry::Flat || brush.tip == TipGeometry::Spatula) {
+        contact = clamp01((1.0 - std::abs(v)) * 2.0) * clamp01((1.1 - std::abs(u)) * 2.0);
+    } else if (brush.tip == TipGeometry::Bristle && brush.bristleCount > 0) {
+        const double bristleSpacing = 2.0 / double(brush.bristleCount);
+        const double nearest = std::abs(std::remainder(u + 1.0, bristleSpacing));
+        const double bristleWidth = std::max(0.02, bristleSpacing * (0.32 + brush.bristleSpread * 0.4));
+        contact *= nearest < bristleWidth ? clamp01(1.0 - nearest / bristleWidth * 0.2) : 0.08;
+    } else if (brush.tip == TipGeometry::Mop) {
+        contact = std::sqrt(std::max(0.0, contact));
+    }
+    if (brush.hardness >= 1.0) {
+        contact = contact > 0.0 ? 1.0 : 0.0;
+    } else {
+        const double h = clamp01(brush.hardness);
+        const double profile = radial <= h ? 1.0 : clamp01((1.0 - radial) / std::max(1e-6, 1.0 - h));
+        if (brush.tip == TipGeometry::Round) contact = profile;
+        else contact *= profile;
+    }
+    if (brush.textureStrength > 0.0) {
+        std::uint32_t n = static_cast<std::uint32_t>(x) * 0x8da6b343U ^ static_cast<std::uint32_t>(y) * 0xd8163841U;
+        n ^= n >> 13;
+        n *= 0x85ebca6bU;
+        n ^= n >> 16;
+        const double grain = 0.30 + 0.70 * double(n & 255U) / 255.0;
+        contact *= 1.0 - clamp01(brush.textureStrength) * (1.0 - grain);
+    }
+    contact *= contactFirmness;
+    return {clamp01(contact), radial};
+}
+
 Spectrum rgbToReflectance(std::uint32_t argb) noexcept
 {
     const auto rgb = unpackLinear(argb);
@@ -499,6 +547,12 @@ double SensorCurve::evaluate(double input) const noexcept
     return clamp01(a + (b - a) * t);
 }
 
+double BrushDefinition::effectiveReservoirCapacity() const noexcept
+{
+    const double base = std::max(1.0, nominalSize);
+    return reservoirCapacity * std::max(0.25, size / base);
+}
+
 bool BrushDefinition::valid() const noexcept
 {
     const auto unit = [](double v) { return std::isfinite(v) && v >= 0 && v <= 1; };
@@ -506,15 +560,21 @@ bool BrushDefinition::valid() const noexcept
         return std::all_of(curve.points.begin(), curve.points.end(), unit);
     };
     return !id.empty() && !name.empty() && std::isfinite(size) && size >= 1 && size <= 4096
+        && std::isfinite(nominalSize) && nominalSize >= 1 && nominalSize <= 4096
         && unit(spacingRatio) && spacingRatio > 0 && unit(hardness) && std::isfinite(aspect) && aspect > 0 && aspect <= 8
-        && std::isfinite(rotationRadians) && unit(bristleSpread) && finiteNonnegative(reservoirCapacity)
+        && std::isfinite(rotationRadians) && unit(bristleSpread) && unit(textureStrength)
+        && finiteNonnegative(reservoirCapacity)
         && reservoirCapacity > 0 && unit(initialLoad) && unit(releaseRate)
-        && unit(depletionRate) && unit(pickupRate) && unit(reloadThreshold)
-        && unit(pressureTransfer) && unit(speedTransfer) && unit(tiltTransfer)
+        && finiteNonnegative(depletionRate) && depletionRate <= 4.0
+        && unit(pickupRate) && unit(reloadThreshold)
+        && unit(pressureTransfer) && unit(contactPressureScale) && unit(speedTransfer)
+        && unit(tiltTransfer) && unit(tiltFlattening)
         && unit(contactTransfer) && unit(waterSpread) && unit(pigmentDiffusion)
+        && unit(paintBody) && std::isfinite(dryingRate) && dryingRate >= 0.05 && dryingRate <= 10.0
         && unit(toothResponse) && unit(edgeAccumulation) && unit(granulationResponse)
         && unit(paintLiftability) && unit(staining) && unit(rewetting)
-        && curveValid(pressureCurve) && curveValid(speedCurve) && curveValid(tiltCurve)
+        && curveValid(pressureCurve) && curveValid(contactPressureCurve)
+        && curveValid(speedCurve) && curveValid(tiltCurve)
         && initialPaint.valid() && initialPaint.mediumId == mediumId;
 }
 
@@ -931,10 +991,16 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
     const double ca = std::cos(angle), sa = std::sin(angle);
     const double carriedMass = reservoir.batch().totalMass();
     const double waterFraction = carriedMass > 0 ? reservoir.batch().water / carriedMass : 0.0;
-    const double spread = 1.0 + clamp01(m_medium.waterSpread)
+    const double bodyDamping = 1.0 - 0.55 * clamp01(brush.paintBody) * (0.35 + 0.65 * clamp01(m_medium.viscosity));
+    const double spread = 1.0 + clamp01(m_medium.waterSpread) * bodyDamping
         * waterFraction * (0.15 + brush.waterSpread + brush.pigmentDiffusion * 0.5);
-    const double rx = brush.size * 0.5 * spread;
-    const double ry = rx / brush.aspect;
+    const double contactCurve = brush.contactPressureCurve.evaluate(input.pressure);
+    const double contactRadiusScale = 1.0 - clamp01(brush.contactPressureScale) * 0.55 * (1.0 - contactCurve);
+    const double contactFirmness = 1.0 - clamp01(brush.contactPressureScale) * 0.40 * (1.0 - contactCurve);
+    const double tiltFactor = brush.tiltCurve.evaluate(input.tilt);
+    const double rxBase = brush.size * 0.5 * spread * contactRadiusScale;
+    const double rx = rxBase * (1.0 + clamp01(brush.tiltFlattening) * tiltFactor * 0.6);
+    const double ry = rxBase / brush.aspect;
     const double bound = std::max(rx, ry) + 1.0;
     const auto left = static_cast<std::int64_t>(std::max(0.0, std::floor(centerX - bound)));
     const auto top = static_cast<std::int64_t>(std::max(0.0, std::floor(centerY - bound)));
@@ -943,33 +1009,15 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
     if (left >= right || top >= bottom) return Result::Unchanged;
 
     double contactWeight = 0.0;
-    for (auto y = top; y < bottom; ++y) {
-        for (auto x = left; x < right; ++x) {
-            const double dx = double(x) + 0.5 - centerX;
-            const double dy = double(y) + 0.5 - centerY;
-            const double u = (ca * dx + sa * dy) / std::max(0.5, rx);
-            const double v = (-sa * dx + ca * dy) / std::max(0.5, ry);
-            const double radial = u * u + v * v;
-            if (radial > 1.0) continue;
-            double contact = clamp01(1.0 - radial);
-            if (brush.tip == TipGeometry::Flat || brush.tip == TipGeometry::Spatula)
-                contact = clamp01((1.0 - std::abs(v)) * 2.0) * clamp01((1.1 - std::abs(u)) * 2.0);
-            else if (brush.tip == TipGeometry::Bristle && brush.bristleCount > 0) {
-                const double spacing = 2.0 / double(brush.bristleCount);
-                const double nearest = std::abs(std::remainder(u + 1.0, spacing));
-                const double bristleWidth = std::max(0.02, spacing * (0.32 + brush.bristleSpread * 0.4));
-                contact *= nearest < bristleWidth ? clamp01(1.0 - nearest / bristleWidth * 0.2) : 0.08;
-            } else if (brush.tip == TipGeometry::Mop) {
-                contact = std::sqrt(std::max(0.0, contact));
-            }
-            contactWeight += contact;
-        }
-    }
+    for (auto y = top; y < bottom; ++y)
+        for (auto x = left; x < right; ++x)
+            contactWeight += dabContactAt(brush, x, y, centerX, centerY, ca, sa, rx, ry, contactFirmness).contact;
     if (contactWeight <= 0) return Result::Unchanged;
     constexpr double kPi = 3.14159265358979323846;
     const double ellipseArea = std::max(1.0, kPi * rx * ry);
-    const double normalizedArea = (contactWeight / ellipseArea)
-        * 1.8 * std::sqrt(std::max(1.0, brush.size) / 18.0);
+    const double fillFraction = contactWeight / ellipseArea;
+    const double sizeScale = std::max(1.0, brush.size) / 18.0;
+    const double normalizedArea = fillFraction * 0.52 * sizeScale * sizeScale;
     const double requested = reservoir.transferredAmount(brush, input, normalizedArea);
     if (requested <= 0) return Result::Unchanged;
     PaintBatch transferred = reservoir.withdraw(requested);
@@ -980,23 +1028,7 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
     const double particleGranulation = m_engine.opticalResult(transferred, m_medium, m_surface).granulation;
     for (auto y = top; y < bottom; ++y) {
         for (auto x = left; x < right; ++x) {
-            const double dx = double(x) + 0.5 - centerX;
-            const double dy = double(y) + 0.5 - centerY;
-            const double u = (ca * dx + sa * dy) / std::max(0.5, rx);
-            const double v = (-sa * dx + ca * dy) / std::max(0.5, ry);
-            const double radial = u * u + v * v;
-            if (radial > 1.0) continue;
-            double contact = clamp01(1.0 - radial);
-            if (brush.tip == TipGeometry::Flat || brush.tip == TipGeometry::Spatula)
-                contact = clamp01((1.0 - std::abs(v)) * 2.0) * clamp01((1.1 - std::abs(u)) * 2.0);
-            else if (brush.tip == TipGeometry::Bristle && brush.bristleCount > 0) {
-                const double spacing = 2.0 / double(brush.bristleCount);
-                const double nearest = std::abs(std::remainder(u + 1.0, spacing));
-                const double bristleWidth = std::max(0.02, spacing * (0.32 + brush.bristleSpread * 0.4));
-                contact *= nearest < bristleWidth ? clamp01(1.0 - nearest / bristleWidth * 0.2) : 0.08;
-            } else if (brush.tip == TipGeometry::Mop) {
-                contact = std::sqrt(std::max(0.0, contact));
-            }
+            const auto [contact, radial] = dabContactAt(brush, x, y, centerX, centerY, ca, sa, rx, ry, contactFirmness);
             if (contact <= 0) continue;
             // Tooth acts through a deterministic surface profile. Granulation
             // magnitude is calculated from pigment particle data, not noise.
@@ -1009,9 +1041,9 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
             const double edge = 1.0 + brush.edgeAccumulation * std::exp(-std::pow((1.0 - radial) * brush.size, 2.0) / 3.0);
             const double diffusion = 1.0 + brush.pigmentDiffusion * m_medium.waterSpread * waterFraction;
             // Local deposited share of the transferred batch at this pixel,
-            // scaled to the 64x64 tile pixel reference unit so optical depth
-            // matches MaterialTileStore + MaterialRenderer.
-            constexpr double ReferenceBatchPixels = 4096.0;
+            // scaled to the shared reference unit so optical depth matches
+            // MaterialTileStore + MaterialRenderer.
+            constexpr double ReferenceBatchPixels = 16384.0;
             const double depositShare = ReferenceBatchPixels * contact * edge * diffusion / contactWeight;
             const auto old = store.pixel({x, y}).value_or(0U);
             const auto next = m_engine.composite(old, transferred, m_medium, m_surface,
@@ -1043,10 +1075,16 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
     const double ca = std::cos(angle), sa = std::sin(angle);
     const double carriedMass = reservoir.batch().totalMass();
     const double waterFraction = carriedMass > 0 ? reservoir.batch().water / carriedMass : 0.0;
-    const double spread = 1.0 + clamp01(m_medium.waterSpread)
+    const double bodyDamping = 1.0 - 0.55 * clamp01(brush.paintBody) * (0.35 + 0.65 * clamp01(m_medium.viscosity));
+    const double spread = 1.0 + clamp01(m_medium.waterSpread) * bodyDamping
         * waterFraction * (0.15 + brush.waterSpread + brush.pigmentDiffusion * 0.5);
-    const double rx = brush.size * 0.5 * spread;
-    const double ry = rx / brush.aspect;
+    const double contactCurve = brush.contactPressureCurve.evaluate(input.pressure);
+    const double contactRadiusScale = 1.0 - clamp01(brush.contactPressureScale) * 0.55 * (1.0 - contactCurve);
+    const double contactFirmness = 1.0 - clamp01(brush.contactPressureScale) * 0.40 * (1.0 - contactCurve);
+    const double tiltFactor = brush.tiltCurve.evaluate(input.tilt);
+    const double rxBase = brush.size * 0.5 * spread * contactRadiusScale;
+    const double rx = rxBase * (1.0 + clamp01(brush.tiltFlattening) * tiltFactor * 0.6);
+    const double ry = rxBase / brush.aspect;
     const double bound = std::max(rx, ry) + 1.0;
     const auto left = static_cast<std::int64_t>(std::max(0.0, std::floor(centerX - bound)));
     const auto top = static_cast<std::int64_t>(std::max(0.0, std::floor(centerY - bound)));
@@ -1054,32 +1092,10 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
     const auto bottom = static_cast<std::int64_t>(std::min(double(geometry.height()), std::ceil(centerY + bound)));
     if (left >= right || top >= bottom) return Result::Unchanged;
 
-    const auto contactAt = [&](std::int64_t x, std::int64_t y) {
-        const double dx = double(x) + 0.5 - centerX;
-        const double dy = double(y) + 0.5 - centerY;
-        const double u = (ca * dx + sa * dy) / std::max(0.5, rx);
-        const double v = (-sa * dx + ca * dy) / std::max(0.5, ry);
-        const double radial = u * u + v * v;
-        if (radial > 1.0) return std::pair<double, double>{0.0, radial};
-        double contact = clamp01(1.0 - radial);
-        if (brush.tip == TipGeometry::Flat || brush.tip == TipGeometry::Spatula)
-            contact = clamp01((1.0 - std::abs(v)) * 2.0) * clamp01((1.1 - std::abs(u)) * 2.0);
-        else if (brush.tip == TipGeometry::Bristle && brush.bristleCount > 0) {
-            const double bristleSpacing = 2.0 / double(brush.bristleCount);
-            const double nearest = std::abs(std::remainder(u + 1.0, bristleSpacing));
-            const double bristleWidth = std::max(0.02, bristleSpacing * (0.32 + brush.bristleSpread * 0.4));
-            contact *= nearest < bristleWidth ? clamp01(1.0 - nearest / bristleWidth * 0.2) : 0.08;
-        } else if (brush.tip == TipGeometry::Mop) {
-            contact = std::sqrt(std::max(0.0, contact));
-        }
-        if (brush.hardness >= 1.0) contact = contact > 0.0 ? 1.0 : 0.0;
-        else contact = clamp01((contact - brush.hardness) / (1.0 - brush.hardness));
-        return std::pair<double, double>{contact, radial};
-    };
-
     double contactWeight = 0.0;
     for (auto y = top; y < bottom; ++y)
-        for (auto x = left; x < right; ++x) contactWeight += contactAt(x, y).first;
+        for (auto x = left; x < right; ++x)
+            contactWeight += dabContactAt(brush, x, y, centerX, centerY, ca, sa, rx, ry, contactFirmness).contact;
     if (contactWeight <= 0.0) return Result::Unchanged;
     store.beginBatch();
     struct BatchEnd { MaterialTileStore& store; ~BatchEnd() { store.endBatch(); } } batchEnd{store};
@@ -1092,23 +1108,7 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
         double distributed = 0.0;
         for (auto y = top; y < bottom; ++y) {
             for (auto x = left; x < right; ++x) {
-                const double dx = double(x) + 0.5 - centerX;
-                const double dy = double(y) + 0.5 - centerY;
-                const double u = (ca * dx + sa * dy) / std::max(0.5, rx);
-                const double v = (-sa * dx + ca * dy) / std::max(0.5, ry);
-                const double radial = u * u + v * v;
-                if (radial > 1.0) continue;
-                double contact = clamp01(1.0 - radial);
-                if (brush.tip == TipGeometry::Flat || brush.tip == TipGeometry::Spatula)
-                    contact = clamp01((1.0 - std::abs(v)) * 2.0) * clamp01((1.1 - std::abs(u)) * 2.0);
-                else if (brush.tip == TipGeometry::Bristle && brush.bristleCount > 0) {
-                    const double spacing = 2.0 / double(brush.bristleCount);
-                    const double nearest = std::abs(std::remainder(u + 1.0, spacing));
-                    const double bristleWidth = std::max(0.02, spacing * (0.32 + brush.bristleSpread * 0.4));
-                    contact *= nearest < bristleWidth ? clamp01(1.0 - nearest / bristleWidth * 0.2) : 0.08;
-                } else if (brush.tip == TipGeometry::Mop) {
-                    contact = std::sqrt(std::max(0.0, contact));
-                }
+                const double contact = dabContactAt(brush, x, y, centerX, centerY, ca, sa, rx, ry, contactFirmness).contact;
                 if (contact <= 0.0) continue;
                 const TilePoint point{static_cast<std::int64_t>(x), static_cast<std::int64_t>(y)};
                 const auto prior = store.batchAt(point);
@@ -1156,8 +1156,9 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
 
     constexpr double kPi = 3.14159265358979323846;
     const double ellipseArea = std::max(1.0, kPi * rx * ry);
-    const double normalizedArea = (contactWeight / ellipseArea)
-        * 1.8 * std::sqrt(std::max(1.0, brush.size) / 18.0);
+    const double fillFraction = contactWeight / ellipseArea;
+    const double sizeScale = std::max(1.0, brush.size) / 18.0;
+    const double normalizedArea = fillFraction * 0.52 * sizeScale * sizeScale;
     const double requested = reservoir.transferredAmount(brush, input, normalizedArea);
     if (requested <= 0.0) return pickedUp ? Result::Changed : Result::Unchanged;
     PaintBatch transferred = reservoir.withdraw(requested);
@@ -1180,7 +1181,7 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
     };
     double totalWeight = 0.0;
     for (auto y = top; y < bottom; ++y) for (auto x = left; x < right; ++x) {
-        const auto [contact, radial] = contactAt(x, y);
+        const auto [contact, radial] = dabContactAt(brush, x, y, centerX, centerY, ca, sa, rx, ry, contactFirmness);
         totalWeight += weightAt(x, y, contact, radial);
     }
     if (!(totalWeight > 0.0) || !std::isfinite(totalWeight)) {
@@ -1192,7 +1193,7 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
     Result failure = Result::Unchanged;
     for (auto y = top; y < bottom; ++y) {
         for (auto x = left; x < right; ++x) {
-            const auto [contact, radial] = contactAt(x, y);
+            const auto [contact, radial] = dabContactAt(brush, x, y, centerX, centerY, ca, sa, rx, ry, contactFirmness);
             const double weight = weightAt(x, y, contact, radial);
             if (weight <= 0.0) continue;
             PaintBatch part = transferred;
@@ -1202,12 +1203,14 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
             // remains in the material cell.
             const double absorption = clamp01(m_surface.absorbency)
                 * clamp01(m_surface.porosity) * clamp01(m_medium.absorption);
-            part.water *= clamp01(m_surface.waterRetention) * (1.0 - 0.45 * absorption);
+            const double dryingAccel = clamp01((brush.dryingRate - 1.0) * 0.25);
+            part.water *= clamp01(m_surface.waterRetention) * (1.0 - 0.45 * absorption) * (1.0 - 0.35 * dryingAccel);
             const double pigmentRetained = clamp01(m_surface.pigmentRetention)
                 * (1.0 - clamp01(m_surface.porosity) * 0.08);
             for (auto& pigment : part.pigments) pigment.mass *= pigmentRetained;
             part.binder *= clamp01(m_surface.binderRetention);
             part.filler *= clamp01(m_surface.pigmentRetention);
+            part.drying = clamp01(part.drying + (brush.dryingRate - 1.0) * 0.12);
             refreshBatchState(part);
             const TilePoint point{static_cast<std::int64_t>(x), static_cast<std::int64_t>(y)};
             const auto prior = store.cellAt(point);
@@ -1305,25 +1308,8 @@ SparseTileStore::WriteResult MaterialStroke::eraseMaterialDab(MaterialSample sam
     Result failure = Result::Unchanged;
     for (auto y = top; y < bottom && failure == Result::Unchanged; ++y) {
         for (auto x = left; x < right; ++x) {
-            const double dx = double(x) + 0.5 - sample.x;
-            const double dy = double(y) + 0.5 - sample.y;
-            const double u = (ca * dx + sa * dy) / std::max(0.5, rx);
-            const double v = (-sa * dx + ca * dy) / std::max(0.5, ry);
-            const double radial = u * u + v * v;
-            if (radial > 1.0) continue;
-            double contact = clamp01(1.0 - radial);
-            if (m_brush.tip == TipGeometry::Flat || m_brush.tip == TipGeometry::Spatula)
-                contact = clamp01((1.0 - std::abs(v)) * 2.0) * clamp01((1.1 - std::abs(u)) * 2.0);
-            else if (m_brush.tip == TipGeometry::Bristle && m_brush.bristleCount > 0) {
-                const double spacing = 2.0 / double(m_brush.bristleCount);
-                const double nearest = std::abs(std::remainder(u + 1.0, spacing));
-                const double bristleWidth = std::max(0.02, spacing * (0.32 + m_brush.bristleSpread * 0.4));
-                contact *= nearest < bristleWidth ? clamp01(1.0 - nearest / bristleWidth * 0.2) : 0.08;
-            } else if (m_brush.tip == TipGeometry::Mop) {
-                contact = std::sqrt(std::max(0.0, contact));
-            }
-            if (m_brush.hardness >= 1.0) contact = contact > 0.0 ? 1.0 : 0.0;
-            else contact = clamp01((contact - m_brush.hardness) / (1.0 - m_brush.hardness));
+            const double contact = dabContactAt(m_brush, x, y, sample.x, sample.y, ca, sa, rx, ry, 1.0).contact;
+            if (contact <= 0.0) continue;
             const double coverage = clamp01(contact * sample.input.pressure * m_brush.contactTransfer);
             if (coverage <= 0.0) continue;
             const auto result = store.scaleCell({x, y}, 1.0 - coverage);
@@ -1425,10 +1411,13 @@ bool MaterialStroke::extend(MaterialSample sample)
     }
     const double firstDistance = std::max(m_remaining, enter * length);
     const double lastDistance = leave * length;
+    const double tangentAngle = std::atan2(dy, dx);
     double distance = firstDistance;
     while (distance <= lastDistance) {
         const double t = distance / length;
-        if (!stamp(interpolate(m_previous, sample, t))) return false;
+        MaterialSample dabSample = interpolate(m_previous, sample, t);
+        if (m_brush.followDirection) dabSample.input.rotationRadians += tangentAngle;
+        if (!stamp(dabSample)) return false;
         distance += m_spacing;
     }
     m_remaining = distance - length;

@@ -30,6 +30,12 @@ Stabilize the traditional material engine starting with Stage 2 (Pigment System 
    - Added `BrushSettings::persistentReservoir` (default `false`) and wired it in `CanvasViewport::beginStroke()` / `endStroke()` / `cancelStroke()` / `setDocument()`, plus `reclaimUnreferenced()` on stroke commit.
    - Normalized `MaterialDab::apply()` area transfer by `(contactWeight / ellipseArea) * 1.8 * sqrt(brush.size / 18.0)` so large brushes (e.g. `watercolour-mop`, size `72`) sustain long strokes smoothly without collapsing in a few dabs, and light pressure (`0.08`) remains visible.
 
+4. **Stage 5 — Complete Brush Property Architecture & Gouache Round (`src/material/*`, `src/app/{BrushSettings.h,SubToolLibrary.*,CanvasViewport.cpp}`, `resources/brush-presets.json`, `ui/panels/ToolPropertyPanel.qml`)**:
+   - Extended `BrushDefinition` with `nominalSize`, `followDirection`, `textureStrength`, `contactPressureScale`, `tiltFlattening`, `paintBody`, `dryingRate`, `contactPressureCurve`, and `effectiveReservoirCapacity()` so capacity scales quadratically with `size / nominalSize` and stroke depletion stays consistent across brush sizes.
+   - Extracted shared `dabContactAt()` in `src/material/MaterialEngine.cpp` (fixing outer-rim `hardness` falloff without shrinking dab radius, deterministic `textureStrength` grain, `contactFirmness`, and replacing duplicated pickup/erase contact loops), wired `paintBody`/`viscosity` spread damping, independent `contactPressureCurve`/`contactPressureScale`, `tiltFlattening`, `dryingRate`, `followDirection` tangent rotation in `MaterialStroke::extend()`, and calibrated `normalizedArea = fillFraction * 0.52 * (size / 18.0)^2` with `ReferenceBatchPixels = 16384.0`.
+   - Tuned `gouache-round` (`size=18, cap=8.5, rel=0.055, body=0.78, hardness=0.72, dryingRate=1.15`), `watercolour-round` (`cap=7.5, rel=0.11`), and `watercolour-mop` (`cap=32.0, rel=0.10`) in `src/material/BrushPresets.cpp`, and set `nominalSize` on all 10 presets.
+   - Wired Stage 5 traditional properties across `BrushSettings`, `SubToolLibrary` (preset-stored and resettable), `resources/brush-presets.json` (adding `"Gouache Round"` under `"category": "Traditional"`), `CanvasViewport::beginStroke()` (preserving real gouache filler, binder, pigment concentration, water, and size-scaled capacity), and `ui/panels/ToolPropertyPanel.qml` (beginner `"Material paint"` section + collapsible `"Advanced material"` section).
+
 ## Verification status
 
 ### Local pure-C++ test suites (verified)
@@ -43,13 +49,14 @@ The sandbox has `g++` (no CMake/Ninja/Qt SDK locally), so Qt/QML targets require
 - `tests/unit/TestBrushEngine.cpp` -> `Brush engine tests passed`
 - `tests/unit/TestStrokeStabilizer.cpp` -> `Stroke stabilizer tests passed`
 - `tests/unit/TestDocumentMemoryBudget.cpp` -> `Document pixel budget tests passed`
-- `tests/unit/TestMaterialEngine.cpp` -> `material engine checks passed` (15 test suites including PR122/PB15/tint optics, drying composition reclamation with undo pins, auto-reload without pickup carry-over, mop stroke endurance, and light-pressure visibility)
+- `tests/unit/TestMaterialEngine.cpp` -> `material engine checks passed` (17 test suites including Stage 2–4 checks plus `gouacheRoundCoversOpaquelyDepletesSizeIndependentlyAndReworks` and `brushPropertiesIndependentlyAffectMaterialSimulation`)
 
-### Qt / QML / Windows CI (inspected, pending CI run)
+### Qt / QML / Windows CI (verified at `8cd2330`, Stage 5 pending CI run)
 
-- `tests/unit/TestMaterialDocument.cpp` (`reclamationRespectsUndoPinsAndDenseSaveAfterHoles`) and `tests/unit/TestCanvasViewport.cpp` (`persistentReservoir` default auto-reload check) were updated and inspected; full Qt build & test execution is verified via Windows CI after push.
+- Prior commit `8cd2330` passed Windows CI run `43748765704` (`33/33` unit tests + GUI smoke launch).
+- Stage 5 updates in `tests/unit/TestCanvasViewport.cpp` and `tests/unit/TestBrushUi.cpp` are ready for Windows CI verification upon push.
 
 ## Immediate next steps
 
-1. Verify the Windows CI run on `origin/arena/6c086365-komapaint` passes build + all unit tests + smoke/packaging checks.
-2. Continue through Stage 5+ (brush properties/presets refinement, medium profiles & surface selection UI, physical Paint Mixer panel integration, benchmarks).
+1. Verify the Stage 5 Windows CI run on `origin/arena/6c086365-komapaint` passes build + all 33/33 unit tests + smoke/packaging checks.
+2. Continue through Stage 6+ (medium profiles & surface selection UI, physical Paint Mixer panel integration, benchmarks).

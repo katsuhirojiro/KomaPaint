@@ -40,6 +40,13 @@ public:
         int size = 16, opacity = 100, flow = 100, spacing = 15, hardness = 100, stabilization = 0;
         bool textured = false;
         bool traditionalMedia = false;
+        bool persistentReservoir = false;
+        QString materialPresetId = QStringLiteral("gouache-round");
+        int paintLoad = 88, pigmentConcentration = 82, waterAmount = 22, paintBody = 78, pickup = 16;
+        int aspectRatio = 100, tipAngle = 0;
+        bool followDirection = false;
+        int depletion = 100, edgeAccumulation = 8, toothResponse = 18, granulation = 5, dryingSpeed = 115;
+        int pressureToAmount = 62, pressureToContact = 35;
         bool operator==(const Values&) const = default;
     };
     explicit SubToolLibrary(BrushSettings* brush, QObject* parent = nullptr);

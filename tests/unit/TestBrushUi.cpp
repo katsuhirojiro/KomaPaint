@@ -420,6 +420,21 @@ void TestBrushUi::subToolLibraryLoadsRemembersAndResets()
     library.setSearchText(QString());
     library.setCategoryFilter(QStringLiteral("Paint"));
     QCOMPARE(library.subTools().size(), 3);
+    library.setCategoryFilter(QStringLiteral("Traditional"));
+    QCOMPARE(library.subTools().size(), 1);
+    QCOMPARE(library.subTools().first().toMap().value(QStringLiteral("name")).toString(),
+             QStringLiteral("Gouache Round"));
+    library.select(library.subTools().first().toMap().value(QStringLiteral("index")).toInt());
+    QVERIFY(brush.traditionalMedia());
+    QVERIFY(!brush.persistentReservoir());
+    QCOMPARE(brush.materialPresetId(), QStringLiteral("gouache-round"));
+    QCOMPARE(brush.paintLoad(), 88);
+    QCOMPARE(brush.paintBody(), 78);
+    brush.setWaterAmount(64);
+    QVERIFY(library.isModified());
+    library.resetCurrent();
+    QCOMPARE(brush.waterAmount(), 22);
+    QVERIFY(!library.isModified());
     library.setCategoryFilter(QString());
     library.select(0);
 

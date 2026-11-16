@@ -519,9 +519,10 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                 }
                 mixerPaintLoaded = true;
             }
+            const QByteArray requestedPreset = brush->materialPresetId().toUtf8();
             auto preset = std::find_if(presets.begin(), presets.end(),
-                [mixerPaintLoaded, &mixerPaint](const auto& item) {
-                    if (!mixerPaintLoaded) return item.id == "gouache-round";
+                [mixerPaintLoaded, &mixerPaint, &requestedPreset](const auto& item) {
+                    if (!mixerPaintLoaded) return item.id == requestedPreset.constData();
                     return item.mediumId == mixerPaint.mediumId
                         && item.tip == material::TipGeometry::Round;
                 });
@@ -546,9 +547,27 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                 emit strokeError(QStringLiteral("The selected material medium is unavailable."));
                 return false;
             }
+            constexpr double kPi = 3.14159265358979323846;
             definition.size = brush->size();
+            definition.reservoirCapacity = definition.effectiveReservoirCapacity();
             definition.hardness = brush->hardness() / 100.0;
             definition.spacingRatio = brush->spacing() / 100.0;
+            definition.aspect = brush->aspectRatio() / 100.0;
+            definition.rotationRadians = brush->tipAngle() * (kPi / 180.0);
+            definition.followDirection = brush->followDirection();
+            definition.initialLoad = brush->paintLoad() / 100.0;
+            definition.depletionRate = brush->depletion() / 100.0;
+            definition.pressureTransfer = brush->pressureToAmount() / 100.0;
+            definition.contactPressureScale = brush->pressureToContact() / 100.0;
+            definition.paintBody = brush->paintBody() / 100.0;
+            definition.dryingRate = brush->dryingSpeed() / 100.0;
+            definition.edgeAccumulation = brush->edgeAccumulation() / 100.0;
+            definition.toothResponse = brush->toothResponse() / 100.0;
+            definition.granulationResponse = brush->granulation() / 100.0;
+            const double pickupFactor = brush->pickup() / 100.0;
+            definition.pickupRate = pickupFactor;
+            definition.paintLiftability = std::clamp(0.15 + pickupFactor * 0.85, 0.0, 1.0);
+            definition.rewetting = pickupFactor * 0.9;
             definition.releaseRate *= brush->flow() / 100.0;
             definition.contactTransfer *= brush->opacity() / 100.0
                 * (brush->erase() ? brush->flow() / 100.0 : 1.0);
@@ -557,17 +576,26 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                 definition.tip = material::TipGeometry::Bristle;
                 definition.bristleCount = 13;
                 definition.bristleSpread = 0.55;
+                definition.textureStrength = std::max(definition.textureStrength, 0.45);
             }
             if (!brush->erase() && !mixerPaintLoaded) {
-                const double alpha = color.alphaF();
+                const double alpha = std::max(0.05, color.alphaF());
+                const double concentration = brush->pigmentConcentration() / 100.0;
+                const double waterRatio = brush->waterAmount() / 100.0;
+                const double bodyRatio = brush->paintBody() / 100.0;
+                const double pigmentMass = alpha * (0.35 + 1.25 * concentration);
+                const double binderMass = alpha * (0.12 + 0.45 * bodyRatio);
+                const double waterMass = alpha * (0.08 + 1.60 * waterRatio);
                 definition.initialPaint = material::makeResidualPaint(
-                    color.rgba(), alpha, 0.3 * alpha, 0.2 * alpha, definition.mediumId);
+                    color.rgba(), pigmentMass, waterMass, binderMass, definition.mediumId);
+                if (bodyRatio > 0.0 && definition.mediumId == "gouache")
+                    definition.initialPaint.addFiller(alpha * 0.22 * bodyRatio);
             }
             if (!m_materialReservoir || !brush->persistentReservoir()
                 || m_materialReservoir->capacity() != definition.reservoirCapacity) {
                 m_materialReservoir = std::make_unique<material::BrushReservoir>(definition.reservoirCapacity);
                 if (!brush->erase()
-                    && !m_materialReservoir->load(definition.initialPaint, definition.initialPaint.totalMass())) {
+                    && !m_materialReservoir->reload(definition)) {
                     m_materialReservoir.reset();
                     m_history->cancelStroke();
                     emit strokeError(QStringLiteral("The selected colour could not be loaded into the material brush."));

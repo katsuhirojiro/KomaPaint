@@ -24,7 +24,8 @@
       "presets": [
         { "name": "Round brush", "category": "Paint", "size": 16, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 100, "stabilization": 0, "textured": false },
         { "name": "Soft brush", "category": "Paint", "size": 40, "opacity": 100, "flow": 35, "spacing": 10, "hardness": 30, "stabilization": 0, "textured": false },
-        { "name": "Dry brush", "category": "Paint", "size": 32, "opacity": 90, "flow": 55, "spacing": 15, "hardness": 90, "stabilization": 0, "textured": true }
+        { "name": "Dry brush", "category": "Paint", "size": 32, "opacity": 90, "flow": 55, "spacing": 15, "hardness": 90, "stabilization": 0, "textured": true },
+        { "name": "Gouache Round", "category": "Traditional", "size": 18, "opacity": 100, "flow": 100, "spacing": 15, "hardness": 72, "stabilization": 0, "textured": false, "traditionalMedia": true, "persistentReservoir": false, "materialPresetId": "gouache-round", "paintLoad": 88, "pigmentConcentration": 82, "waterAmount": 22, "paintBody": 78, "pickup": 16, "aspectRatio": 100, "tipAngle": 0, "followDirection": false, "depletion": 100, "edgeAccumulation": 8, "toothResponse": 18, "granulation": 5, "dryingSpeed": 115, "pressureToAmount": 62, "pressureToContact": 35 }
       ]
     },
     {

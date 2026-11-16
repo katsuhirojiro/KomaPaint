@@ -232,6 +232,220 @@ Rectangle {
 
                 PanelSection {
                     width: parent.width
+                    title: qsTr("Material paint")
+                    hint: qsTr("load · pigment · water · body")
+                    visible: panel.brush.traditionalMedia && !panel.brush.erase
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+
+                    Item {
+                        width: parent.width
+                        height: materialColumn.height
+                        Column {
+                            id: materialColumn
+                            width: parent.width
+                            spacing: KP.gapXS
+                            PropertySlider {
+                                objectName: "brushPaintLoadSlider"
+                                width: parent.width
+                                label: qsTr("Paint load")
+                                unit: "%"
+                                from: 10
+                                to: 100
+                                value: panel.brush.paintLoad
+                                onEdited: function(v) { panel.brush.paintLoad = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushPigmentSlider"
+                                width: parent.width
+                                label: qsTr("Concentration")
+                                unit: "%"
+                                from: 10
+                                to: 100
+                                value: panel.brush.pigmentConcentration
+                                onEdited: function(v) { panel.brush.pigmentConcentration = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushWaterSlider"
+                                width: parent.width
+                                label: qsTr("Water")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.waterAmount
+                                onEdited: function(v) { panel.brush.waterAmount = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushBodySlider"
+                                width: parent.width
+                                label: qsTr("Paint body")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.paintBody
+                                onEdited: function(v) { panel.brush.paintBody = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushPickupSlider"
+                                width: parent.width
+                                label: qsTr("Pickup")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.pickup
+                                onEdited: function(v) { panel.brush.pickup = v }
+                            }
+                        }
+                    }
+                }
+
+                PanelSection {
+                    width: parent.width
+                    title: qsTr("Advanced material")
+                    hint: panel.brush.persistentReservoir ? qsTr("persistent") : qsTr("auto-reload")
+                    visible: panel.brush.traditionalMedia
+                    collapsible: true
+                    expanded: false
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+
+                    Item {
+                        width: parent.width
+                        height: advancedColumn.height
+                        Column {
+                            id: advancedColumn
+                            width: parent.width
+                            spacing: KP.gapXS
+                            PropertySlider {
+                                objectName: "brushPressureAmountSlider"
+                                width: parent.width
+                                label: qsTr("Pressure → Amount")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.pressureToAmount
+                                onEdited: function(v) { panel.brush.pressureToAmount = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushPressureContactSlider"
+                                width: parent.width
+                                label: qsTr("Pressure → Contact")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.pressureToContact
+                                onEdited: function(v) { panel.brush.pressureToContact = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushAspectSlider"
+                                width: parent.width
+                                label: qsTr("Aspect")
+                                unit: "%"
+                                from: 100
+                                to: 400
+                                value: panel.brush.aspectRatio
+                                onEdited: function(v) { panel.brush.aspectRatio = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushAngleSlider"
+                                width: parent.width
+                                label: qsTr("Angle")
+                                unit: "°"
+                                from: -180
+                                to: 180
+                                value: panel.brush.tipAngle
+                                onEdited: function(v) { panel.brush.tipAngle = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushDepletionSlider"
+                                width: parent.width
+                                label: qsTr("Depletion")
+                                unit: "%"
+                                from: 0
+                                to: 200
+                                value: panel.brush.depletion
+                                onEdited: function(v) { panel.brush.depletion = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushToothSlider"
+                                width: parent.width
+                                label: qsTr("Paper tooth")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.toothResponse
+                                onEdited: function(v) { panel.brush.toothResponse = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushEdgeSlider"
+                                width: parent.width
+                                label: qsTr("Edge")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.edgeAccumulation
+                                onEdited: function(v) { panel.brush.edgeAccumulation = v }
+                            }
+                            PropertySlider {
+                                objectName: "brushDryingSpeedSlider"
+                                width: parent.width
+                                label: qsTr("Drying speed")
+                                unit: "%"
+                                from: 25
+                                to: 200
+                                value: panel.brush.dryingSpeed
+                                onEdited: function(v) { panel.brush.dryingSpeed = v }
+                            }
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                spacing: KP.gapM
+                                Text {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Layout.fillWidth: true
+                                    text: qsTr("Follow direction")
+                                    color: KP.text
+                                    font.pixelSize: KP.fontS + 1
+                                    elide: Text.ElideRight
+                                }
+                                SegmentedChoice {
+                                    objectName: "brushFollowDirectionChoice"
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Layout.preferredWidth: 112
+                                    width: 112
+                                    options: [qsTr("Off"), qsTr("On")]
+                                    currentIndex: panel.brush.followDirection ? 1 : 0
+                                    onChosen: function(index) { panel.brush.followDirection = index === 1 }
+                                }
+                            }
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                spacing: KP.gapM
+                                Text {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Layout.fillWidth: true
+                                    text: qsTr("Reservoir")
+                                    color: KP.text
+                                    font.pixelSize: KP.fontS + 1
+                                    elide: Text.ElideRight
+                                }
+                                SegmentedChoice {
+                                    objectName: "brushReservoirModeChoice"
+                                    Layout.alignment: Qt.AlignVCenter
+                                    Layout.preferredWidth: 148
+                                    width: 148
+                                    options: [qsTr("Auto"), qsTr("Persistent")]
+                                    currentIndex: panel.brush.persistentReservoir ? 1 : 0
+                                    onChosen: function(index) { panel.brush.persistentReservoir = index === 1 }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                PanelSection {
+                    width: parent.width
                     title: qsTr("Correction")
                     hint: qsTr("stabilisation")
                     contentTopMargin: KP.gapS

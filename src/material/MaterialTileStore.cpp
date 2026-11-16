@@ -958,9 +958,9 @@ bool MaterialRenderer::renderTile(const MaterialTileStore& material, TilePoint t
             else if (batch->mediumId == inkProfile().id) profile = &inkProfile();
             else if (batch->mediumId != defaultMedium.id) return false;
             // MaterialDab deposits a local fraction of a batch per pixel; scale
-            // by the 64x64 tile pixel reference unit so optical depth matches
-            // direct batch evaluation without letting water inflate opacity.
-            constexpr double ReferenceBatchPixels = 4096.0;
+            // by the shared reference unit so optical depth matches direct
+            // batch evaluation without letting water inflate opacity.
+            constexpr double ReferenceBatchPixels = 16384.0;
             const double toothContact = 0.84 + 0.16 * static_cast<double>(cell.consistency);
             (*output)[entry.localIndex] = m_engine.composite((*output)[entry.localIndex], *batch,
                 *profile, surface, 1.0, ReferenceBatchPixels, toothContact);

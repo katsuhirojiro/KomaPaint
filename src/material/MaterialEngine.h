@@ -117,12 +117,15 @@ struct BrushDefinition {
     std::string name;
     TipGeometry tip = TipGeometry::Round;
     double size = 16.0;
+    double nominalSize = 16.0;
     double spacingRatio = 0.15;
     double hardness = 0.0;
     double aspect = 1.0;
     double rotationRadians = 0.0;
+    bool followDirection = false;
     std::uint32_t bristleCount = 0;
     double bristleSpread = 0.0;
+    double textureStrength = 0.0;
     double reservoirCapacity = 1.0;
     double initialLoad = 0.75;
     double releaseRate = 0.1;
@@ -130,11 +133,15 @@ struct BrushDefinition {
     double pickupRate = 0.0;
     double reloadThreshold = 0.0;
     double pressureTransfer = 0.5;
+    double contactPressureScale = 0.35;
     double speedTransfer = 0.0;
     double tiltTransfer = 0.0;
+    double tiltFlattening = 0.35;
     double contactTransfer = 1.0;
     double waterSpread = 0.0;
     double pigmentDiffusion = 0.0;
+    double paintBody = 0.5;
+    double dryingRate = 1.0;
     double toothResponse = 0.0;
     double edgeAccumulation = 0.0;
     double granulationResponse = 0.0;
@@ -142,12 +149,14 @@ struct BrushDefinition {
     double staining = 0.5;
     double rewetting = 0.0;
     SensorCurve pressureCurve{};
+    SensorCurve contactPressureCurve{};
     SensorCurve speedCurve{{1.0, 0.5, 0.0}};
     SensorCurve tiltCurve{};
     PaintBatch initialPaint;
     std::string mediumId = "gouache";
     bool autoReloadOnStroke = true;
 
+    double effectiveReservoirCapacity() const noexcept;
     bool valid() const noexcept;
 };
 

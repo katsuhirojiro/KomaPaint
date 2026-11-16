@@ -676,6 +676,227 @@ void materialStrokeAutoReloadsCleanMixtureAndScalesBySize()
     const std::uint32_t centerPixel = rendered[32 * 64 + 32];
     CHECK((centerPixel >> 24U) >= 15U);
 }
+
+void gouacheRoundCoversOpaquelyDepletesSizeIndependentlyAndReworks()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    MaterialRenderer renderer(engine);
+    auto presets = defaultBrushDefinitions();
+    const auto gouacheIt = std::find_if(presets.begin(), presets.end(), [](const auto& b) {
+        return b.id == "gouache-round";
+    });
+    CHECK(gouacheIt != presets.end());
+    if (gouacheIt == presets.end()) return;
+
+    // 1. Gouache Round produces opaque matte coverage over an underlying colour
+    //    and auto-reloads cleanly on every new stroke.
+    BrushDefinition gouache = *gouacheIt;
+    CHECK(gouache.autoReloadOnStroke);
+    CHECK(gouache.paintBody > 0.6);
+    MaterialTileStore store(512, 128, 64);
+    BrushReservoir reservoir(gouache.effectiveReservoirCapacity());
+    MaterialStroke stroke(store, gouache, reservoir, engine, gouacheProfile(), coldPressedPaper());
+    CHECK(stroke.begin({20.0, 32.0, {1.0, 0.1, 0.0, 0.0}}));
+    CHECK(stroke.extend({60.0, 32.0, {1.0, 0.1, 0.0, 0.0}}));
+    CHECK(stroke.end({60.0, 32.0, {1.0, 0.1, 0.0, 0.0}}));
+
+    std::vector<std::uint32_t> digitalUnder(64 * 64, 0xff102080U);
+    std::vector<std::uint32_t> composited;
+    CHECK(renderer.renderTile(store, {0, 0}, digitalUnder, gouacheProfile(), coldPressedPaper(), &composited));
+    const std::uint32_t paintedPx = composited[32 * 64 + 40];
+    const unsigned r = (paintedPx >> 16U) & 255U;
+    const unsigned g = (paintedPx >> 8U) & 255U;
+    const unsigned b = paintedPx & 255U;
+    CHECK((paintedPx >> 24U) == 255U);
+    // Underlying dark blue (#102080) is covered by warm PY3+PW6 gouache.
+    CHECK(r > 150U && g > 150U && b < 120U);
+
+    // 2. Brush-size-independent depletion over equal 400px strokes (sizes 8, 18, 54).
+    std::vector<double> finalFillRatios;
+    for (double testSize : {8.0, 18.0, 54.0}) {
+        BrushDefinition sized = *gouacheIt;
+        sized.size = testSize;
+        MaterialTileStore sizedStore(512, 128, 64);
+        BrushReservoir sizedRes(sized.effectiveReservoirCapacity());
+        MaterialStroke sizedStroke(sizedStore, sized, sizedRes, engine, gouacheProfile(), coldPressedPaper());
+        CHECK(sizedStroke.begin({40.0, 64.0, {0.85, 0.1, 0.0, 0.0}}));
+        CHECK(sizedStroke.extend({240.0, 64.0, {0.85, 0.1, 0.0, 0.0}}));
+        CHECK(sizedStroke.end({440.0, 64.0, {0.85, 0.1, 0.0, 0.0}}));
+        const double fill = sizedRes.fillRatio();
+        CHECK(fill > 0.10 && fill < 0.75);
+        finalFillRatios.push_back(fill);
+        const auto sampleBatch = sizedStore.batchAt({240, 64});
+        CHECK(sampleBatch && sampleBatch->pigmentMass() > 0.0);
+    }
+    const auto [minFill, maxFill] = std::minmax_element(finalFillRatios.begin(), finalFillRatios.end());
+    CHECK(*maxFill - *minFill < 0.12);
+
+    // 3. Reworking & pickup on an existing wet/rewettable surface, followed by
+    //    automatic clean mixture reload on the next stroke without carry-over.
+    MaterialTileStore reworkStore(256, 128, 64);
+    PaintBatch blueSurface;
+    blueSurface.mediumId = "gouache";
+    blueSurface.addPigment("PB15", 1.2);
+    blueSurface.addWater(1.2);
+    blueSurface.addBinder(0.3);
+    for (int y = 26; y <= 38; ++y)
+        for (int x = 26; x <= 38; ++x)
+            CHECK(reworkStore.setBatch({x, y}, blueSurface) == MaterialTileStore::Result::Changed);
+    BrushDefinition pickupGouache = *gouacheIt;
+    pickupGouache.pickupRate = 0.65;
+    pickupGouache.rewetting = 0.65;
+    pickupGouache.paintLiftability = 0.75;
+    pickupGouache.autoReloadOnStroke = true;
+    BrushReservoir reworkRes(pickupGouache.effectiveReservoirCapacity());
+    MaterialStroke pickStroke(reworkStore, pickupGouache, reworkRes, engine, gouacheProfile(), coldPressedPaper());
+    CHECK(pickStroke.begin({32.0, 32.0, {0.9, 0.0, 0.0, 0.0}}));
+    CHECK(pickStroke.end({34.0, 32.0, {0.9, 0.0, 0.0, 0.0}}));
+    CHECK(std::any_of(reworkRes.batch().pigments.begin(), reworkRes.batch().pigments.end(),
+        [](const auto& p) { return p.pigmentId == "PB15"; }));
+
+    MaterialStroke cleanStroke(reworkStore, pickupGouache, reworkRes, engine, gouacheProfile(), coldPressedPaper());
+    CHECK(cleanStroke.begin({180.0, 64.0, {0.9, 0.0, 0.0, 0.0}}));
+    CHECK(cleanStroke.end({180.0, 64.0, {0.9, 0.0, 0.0, 0.0}}));
+    const auto reloadedBatch = reworkStore.batchAt({180, 64});
+    CHECK(reloadedBatch && !std::any_of(reloadedBatch->pigments.begin(), reloadedBatch->pigments.end(),
+        [](const auto& p) { return p.pigmentId == "PB15"; }));
+    CHECK(std::abs(reworkRes.fillRatio() - pickupGouache.initialLoad) < 0.08);
+}
+
+void brushPropertiesIndependentlyAffectMaterialSimulation()
+{
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    auto presets = defaultBrushDefinitions();
+    const auto gouacheIt = std::find_if(presets.begin(), presets.end(), [](const auto& b) {
+        return b.id == "gouache-round";
+    });
+    CHECK(gouacheIt != presets.end());
+    if (gouacheIt == presets.end()) return;
+
+    // 1. Pressure-to-amount and pressure-to-contact act independently.
+    BrushDefinition amountOnly = *gouacheIt;
+    amountOnly.size = 20.0;
+    amountOnly.hardness = 0.0;
+    amountOnly.pressureTransfer = 0.90;
+    amountOnly.contactPressureScale = 0.0;
+    MaterialTileStore amtLowStore(64, 64, 64), amtHighStore(64, 64, 64);
+    BrushReservoir amtLowRes(amountOnly.effectiveReservoirCapacity()), amtHighRes(amountOnly.effectiveReservoirCapacity());
+    CHECK(amtLowRes.reload(amountOnly) && amtHighRes.reload(amountOnly));
+    MaterialDab dab(engine, gouacheProfile(), coldPressedPaper());
+    CHECK(dab.apply(amtLowStore, amountOnly, amtLowRes, 32.0, 32.0, {0.15, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    CHECK(dab.apply(amtHighStore, amountOnly, amtHighRes, 32.0, 32.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    const auto amtLowCenter = amtLowStore.batchAt({32, 32});
+    const auto amtHighCenter = amtHighStore.batchAt({32, 32});
+    CHECK(amtLowCenter && amtHighCenter && amtHighCenter->pigmentMass() > amtLowCenter->pigmentMass() * 1.3);
+    // Same contact footprint when contactPressureScale == 0.
+    CHECK(amtLowStore.batchAt({41, 32})->totalMass() > 0.0 && amtHighStore.batchAt({41, 32})->totalMass() > 0.0);
+
+    BrushDefinition contactOnly = *gouacheIt;
+    contactOnly.size = 20.0;
+    contactOnly.hardness = 0.0;
+    contactOnly.pressureTransfer = 0.0;
+    contactOnly.contactPressureScale = 1.0;
+    MaterialTileStore cntLowStore(64, 64, 64), cntHighStore(64, 64, 64);
+    BrushReservoir cntLowRes(contactOnly.effectiveReservoirCapacity()), cntHighRes(contactOnly.effectiveReservoirCapacity());
+    CHECK(cntLowRes.reload(contactOnly) && cntHighRes.reload(contactOnly));
+    CHECK(dab.apply(cntLowStore, contactOnly, cntLowRes, 32.0, 32.0, {0.10, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    CHECK(dab.apply(cntHighStore, contactOnly, cntHighRes, 32.0, 32.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    // Low pressure shrinks contact radius, leaving outer ring untouched while high pressure covers it.
+    CHECK(cntLowStore.batchAt({40, 32})->totalMass() == 0.0);
+    CHECK(cntHighStore.batchAt({40, 32})->totalMass() > 0.0);
+
+    // 2. Hardness does not shrink brush radius.
+    BrushDefinition hardBrush = *gouacheIt;
+    hardBrush.size = 20.0;
+    hardBrush.hardness = 0.90;
+    MaterialTileStore hardStore(64, 64, 64);
+    BrushReservoir hardRes(hardBrush.effectiveReservoirCapacity());
+    CHECK(hardRes.reload(hardBrush));
+    CHECK(dab.apply(hardStore, hardBrush, hardRes, 32.0, 32.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    CHECK(hardStore.batchAt({40, 32})->totalMass() > 0.0);
+
+    // 3. Follow-direction rotates elliptical tip along stroke axis.
+    BrushDefinition dirBrush = *gouacheIt;
+    dirBrush.size = 24.0;
+    dirBrush.aspect = 2.5;
+    dirBrush.followDirection = true;
+    MaterialTileStore horizStore(128, 128, 64), vertStore(128, 128, 64);
+    BrushReservoir horizRes(dirBrush.effectiveReservoirCapacity()), vertRes(dirBrush.effectiveReservoirCapacity());
+    MaterialStroke horizStroke(horizStore, dirBrush, horizRes, engine, gouacheProfile(), coldPressedPaper());
+    CHECK(horizStroke.begin({64.0, 64.0, {1.0, 0.0, 0.0, 0.0}}));
+    CHECK(horizStroke.end({84.0, 64.0, {1.0, 0.0, 0.0, 0.0}}));
+    MaterialStroke vertStroke(vertStore, dirBrush, vertRes, engine, gouacheProfile(), coldPressedPaper());
+    CHECK(vertStroke.begin({64.0, 64.0, {1.0, 0.0, 0.0, 0.0}}));
+    CHECK(vertStroke.end({64.0, 84.0, {1.0, 0.0, 0.0, 0.0}}));
+    // Vertical stroke stretches along Y (`{64, 84}` has wide X reach of ry=4.8 vs horizontal reach rx=12).
+    CHECK(horizStore.batchAt({84, 72})->totalMass() == 0.0);
+    CHECK(vertStore.batchAt({72, 84})->totalMass() > 0.0);
+
+    // 4. Texture strength, tilt flattening, paintBody spread damping, and dryingRate
+    //    each alter actual deposited MaterialTileStore state.
+    BrushDefinition textured = *gouacheIt;
+    textured.size = 18.0;
+    textured.hardness = 1.0;
+    textured.textureStrength = 0.9;
+    MaterialTileStore texStore(64, 64, 64);
+    BrushReservoir texRes(textured.effectiveReservoirCapacity());
+    CHECK(texRes.reload(textured));
+    CHECK(dab.apply(texStore, textured, texRes, 32.0, 32.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    CHECK(texStore.batchAt({32, 32})->pigmentMass() != texStore.batchAt({33, 32})->pigmentMass());
+
+    BrushDefinition tilted = *gouacheIt;
+    tilted.size = 18.0;
+    tilted.tiltFlattening = 0.85;
+    MaterialTileStore noTiltStore(64, 64, 64), tiltStore(64, 64, 64);
+    BrushReservoir noTiltRes(tilted.effectiveReservoirCapacity()), tiltRes(tilted.effectiveReservoirCapacity());
+    CHECK(noTiltRes.reload(tilted) && tiltRes.reload(tilted));
+    CHECK(dab.apply(noTiltStore, tilted, noTiltRes, 32.0, 32.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    CHECK(dab.apply(tiltStore, tilted, tiltRes, 32.0, 32.0, {1.0, 0.0, 0.9, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    CHECK(noTiltStore.batchAt({44, 32})->totalMass() == 0.0);
+    CHECK(tiltStore.batchAt({44, 32})->totalMass() > 0.0);
+
+    BrushDefinition fluid = *gouacheIt;
+    fluid.mediumId = "watercolour";
+    fluid.initialPaint.mediumId = "watercolour";
+    fluid.initialPaint.addWater(3.0);
+    fluid.waterSpread = 0.9;
+    fluid.paintBody = 0.0;
+    BrushDefinition stiff = fluid;
+    stiff.paintBody = 1.0;
+    MaterialTileStore fluidStore(64, 64, 64), stiffStore(64, 64, 64);
+    BrushReservoir fluidRes(fluid.effectiveReservoirCapacity()), stiffRes(stiff.effectiveReservoirCapacity());
+    CHECK(fluidRes.reload(fluid) && stiffRes.reload(stiff));
+    MaterialDab wcDab(engine, watercolourProfile(), coldPressedPaper());
+    CHECK(wcDab.apply(fluidStore, fluid, fluidRes, 32.0, 32.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    CHECK(wcDab.apply(stiffStore, stiff, stiffRes, 32.0, 32.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    // Low-body paint spreads further outward than high-body stiff paint.
+    CHECK(fluidStore.batchAt({45, 32})->totalMass() > 0.0);
+    CHECK(stiffStore.batchAt({45, 32})->totalMass() == 0.0);
+
+    BrushDefinition slowDry = *gouacheIt;
+    BrushDefinition fastDry = *gouacheIt;
+    fastDry.dryingRate = 2.5;
+    MaterialTileStore slowDryStore(64, 64, 64), fastDryStore(64, 64, 64);
+    BrushReservoir slowDryRes(slowDry.effectiveReservoirCapacity()), fastDryRes(fastDry.effectiveReservoirCapacity());
+    CHECK(slowDryRes.reload(slowDry) && fastDryRes.reload(fastDry));
+    CHECK(dab.apply(slowDryStore, slowDry, slowDryRes, 32.0, 32.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    CHECK(dab.apply(fastDryStore, fastDry, fastDryRes, 32.0, 32.0, {1.0, 0.0, 0.0, 0.0})
+          == SparseTileStore::WriteResult::Changed);
+    CHECK(fastDryStore.batchAt({32, 32})->drying > slowDryStore.batchAt({32, 32})->drying);
+}
 }
 
 int main()
@@ -695,6 +916,8 @@ int main()
     spectralPigmentsMatchMagentaPurpleAndPreserveTintAlpha();
     dryingReclaimsCompositionsAndRespectsUndoPins();
     materialStrokeAutoReloadsCleanMixtureAndScalesBySize();
+    gouacheRoundCoversOpaquelyDepletesSizeIndependentlyAndReworks();
+    brushPropertiesIndependentlyAffectMaterialSimulation();
     if (failures != 0) return EXIT_FAILURE;
     std::cout << "material engine checks passed\n";
     return EXIT_SUCCESS;

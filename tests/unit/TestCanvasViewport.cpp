@@ -294,6 +294,33 @@ void TestCanvasViewport::traditionalMediaStrokeRendersAndUsesMaterialHistory()
     const auto cleanSecondStroke = layer->materialTiles().batchAt({240, 240});
     QVERIFY(cleanSecondStroke && cleanSecondStroke->pigments.size() == 1);
     QCOMPARE(cleanSecondStroke->pigments.front().pigmentId, std::string("PR122"));
+
+    // Gouache Round settings (concentration, water, paint body, filler) control
+    // actual stored PaintBatch composition and cover opaquely without touching Digital tiles.
+    BrushSettings gouacheSettings;
+    gouacheSettings.setTraditionalMedia(true);
+    gouacheSettings.setSize(18);
+    gouacheSettings.setHardness(72);
+    gouacheSettings.setPaintBody(85);
+    gouacheSettings.setWaterAmount(15);
+    gouacheSettings.setPigmentConcentration(90);
+    const QPointF gStart = view.documentToViewport(40, 40);
+    const QPointF gEnd = view.documentToViewport(80, 40);
+    QVERIFY(view.beginStroke(gStart.x(), gStart.y(), 1.0, &gouacheSettings, QColor(215, 165, 25)));
+    view.continueStroke(gEnd.x(), gEnd.y(), 1.0);
+    view.endStroke(gEnd.x(), gEnd.y(), 1.0);
+    const auto gouacheCell = layer->materialTiles().batchAt({60, 40});
+    QVERIFY(gouacheCell && gouacheCell->mediumId == "gouache");
+    QVERIFY(gouacheCell->filler > 0.0);
+    QVERIFY(gouacheCell->pigmentMass() > gouacheCell->water);
+
+    gouacheSettings.setWaterAmount(95);
+    gouacheSettings.setPaintBody(10);
+    const QPointF wPt = view.documentToViewport(40, 80);
+    QVERIFY(view.beginStroke(wPt.x(), wPt.y(), 1.0, &gouacheSettings, QColor(215, 165, 25)));
+    view.endStroke(wPt.x(), wPt.y(), 1.0);
+    const auto dilutedCell = layer->materialTiles().batchAt({40, 80});
+    QVERIFY(dilutedCell && dilutedCell->water / dilutedCell->totalMass() > gouacheCell->water / gouacheCell->totalMass());
 }
 
 void TestCanvasViewport::strokeFailureDiagnostics()

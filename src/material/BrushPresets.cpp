@@ -14,6 +14,7 @@ BrushDefinition brush(std::string id, std::string name, TipGeometry tip,
     result.name = std::move(name);
     result.tip = tip;
     result.size = size;
+    result.nominalSize = size;
     result.reservoirCapacity = capacity;
     result.initialLoad = load;
     result.initialPaint = paint;
@@ -72,21 +73,34 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     std::vector<BrushDefinition> result;
     result.reserve(9);
     auto round = brush("gouache-round", "Gouache Round", TipGeometry::Round,
-                       18, 4.6, 0.84, gouache, "gouache");
-    round.releaseRate = 0.075;
+                       18, 8.5, 0.88, gouache, "gouache");
+    round.hardness = 0.72;
+    round.releaseRate = 0.055;
     round.pressureTransfer = 0.62;
+    round.contactPressureScale = 0.35;
     round.waterSpread = 0.14;
-    round.pickupRate = 0.08;
-    round.paintLiftability = 0.24;
-    round.rewetting = 0.18;
-    round.toothResponse = 0.12;
+    round.pigmentDiffusion = 0.08;
+    round.paintBody = 0.78;
+    round.dryingRate = 1.15;
+    round.pickupRate = 0.14;
+    round.paintLiftability = 0.28;
+    round.rewetting = 0.24;
+    round.staining = 0.35;
+    round.toothResponse = 0.18;
+    round.edgeAccumulation = 0.08;
+    round.textureStrength = 0.08;
+    round.autoReloadOnStroke = true;
     result.push_back(round);
 
     auto dry = brush("dry-gouache", "Dry Gouache", TipGeometry::Bristle,
-                     24, 3.8, 0.68, dryGouache, "gouache");
+                     24, 6.4, 0.68, dryGouache, "gouache");
     dry.bristleCount = 13;
     dry.bristleSpread = 0.72;
-    dry.releaseRate = 0.034;
+    dry.followDirection = true;
+    dry.textureStrength = 0.45;
+    dry.paintBody = 0.92;
+    dry.dryingRate = 1.35;
+    dry.releaseRate = 0.042;
     dry.pressureTransfer = 0.78;
     dry.waterSpread = 0.04;
     dry.pickupRate = 0.025;
@@ -95,8 +109,10 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     result.push_back(dry);
 
     auto tiny = brush("tiny-gouache", "Tiny Gouache", TipGeometry::Round,
-                      4, 1.0, 0.60, gouache, "gouache");
-    tiny.releaseRate = 0.028;
+                      4, 1.8, 0.80, gouache, "gouache");
+    tiny.hardness = 0.85;
+    tiny.paintBody = 0.75;
+    tiny.releaseRate = 0.045;
     tiny.pressureTransfer = 0.82;
     tiny.waterSpread = 0.08;
     tiny.pickupRate = 0.05;
@@ -106,9 +122,12 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     result.push_back(tiny);
 
     auto watercolorRound = brush("watercolour-round", "Watercolour Round", TipGeometry::Round,
-                                 14, 6.0, 0.88, watercolor, "watercolour");
-    watercolorRound.releaseRate = 0.075;
+                                 14, 7.5, 0.88, watercolor, "watercolour");
+    watercolorRound.releaseRate = 0.11;
     watercolorRound.pressureTransfer = 0.68;
+    watercolorRound.contactPressureScale = 0.45;
+    watercolorRound.paintBody = 0.18;
+    watercolorRound.dryingRate = 0.85;
     watercolorRound.waterSpread = 0.82;
     watercolorRound.pigmentDiffusion = 0.74;
     watercolorRound.pickupRate = 0.18;
@@ -119,10 +138,13 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     result.push_back(watercolorRound);
 
     auto mop = brush("watercolour-mop", "Watercolour Mop", TipGeometry::Mop,
-                     72, 16.0, 0.95, mopPaint, "watercolour");
+                     72, 32.0, 0.95, mopPaint, "watercolour");
     mop.aspect = 1.32;
-    mop.releaseRate = 0.14;
+    mop.releaseRate = 0.10;
     mop.pressureTransfer = 0.55;
+    mop.contactPressureScale = 0.50;
+    mop.paintBody = 0.12;
+    mop.dryingRate = 0.75;
     mop.waterSpread = 0.95;
     mop.pigmentDiffusion = 0.90;
     mop.pickupRate = 0.18;
@@ -131,8 +153,10 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     result.push_back(mop);
 
     auto granulatingBrush = brush("granulating-watercolour", "Granulating Watercolour",
-                                  TipGeometry::Round, 18, 7.5, 0.9, granulating, "watercolour");
-    granulatingBrush.releaseRate = 0.07;
+                                  TipGeometry::Round, 18, 9.0, 0.9, granulating, "watercolour");
+    granulatingBrush.releaseRate = 0.095;
+    granulatingBrush.paintBody = 0.16;
+    granulatingBrush.dryingRate = 0.80;
     granulatingBrush.waterSpread = 0.88;
     granulatingBrush.pigmentDiffusion = 0.82;
     granulatingBrush.granulationResponse = 0.92;
@@ -143,11 +167,14 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     result.push_back(granulatingBrush);
 
     auto dryWatercolourBrush = brush("watercolour-dry-brush", "Watercolour Dry Brush",
-                                     TipGeometry::Bristle, 28, 2.6, 0.62,
+                                     TipGeometry::Bristle, 28, 4.5, 0.62,
                                      dryWatercolor, "watercolour");
     dryWatercolourBrush.bristleCount = 15;
     dryWatercolourBrush.bristleSpread = 0.80;
-    dryWatercolourBrush.releaseRate = 0.025;
+    dryWatercolourBrush.followDirection = true;
+    dryWatercolourBrush.textureStrength = 0.55;
+    dryWatercolourBrush.paintBody = 0.45;
+    dryWatercolourBrush.releaseRate = 0.045;
     dryWatercolourBrush.pressureTransfer = 0.88;
     dryWatercolourBrush.waterSpread = 0.04;
     dryWatercolourBrush.toothResponse = 0.94;
@@ -155,7 +182,9 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     result.push_back(dryWatercolourBrush);
 
     auto clean = brush("clean-water", "Clean Water Brush", TipGeometry::Round,
-                       24, 6.0, 0.8, cleanWater, "watercolour");
+                       24, 9.0, 0.8, cleanWater, "watercolour");
+    clean.paintBody = 0.0;
+    clean.dryingRate = 0.70;
     clean.releaseRate = 0.10;
     clean.waterSpread = 0.95;
     clean.pigmentDiffusion = 0.90;
@@ -163,7 +192,8 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     result.push_back(clean);
 
     auto lift = brush("paint-lifting", "Paint Lifting Brush", TipGeometry::Round,
-                      20, 5.0, 0.7, liftingWater, "watercolour");
+                      20, 7.5, 0.7, liftingWater, "watercolour");
+    lift.paintBody = 0.05;
     lift.releaseRate = 0.02;
     lift.pickupRate = 0.65;
     lift.paintLiftability = 0.92;
@@ -173,8 +203,11 @@ std::vector<BrushDefinition> defaultBrushDefinitions()
     result.push_back(lift);
 
     auto spatula = brush("paint-mixing-spatula", "Paint Mixing Brush / Spatula",
-                         TipGeometry::Spatula, 30, 8.5, 0.6, spatulaPaint, "gouache");
-    spatula.releaseRate = 0.008;
+                         TipGeometry::Spatula, 30, 12.0, 0.6, spatulaPaint, "gouache");
+    spatula.aspect = 1.8;
+    spatula.followDirection = true;
+    spatula.paintBody = 0.88;
+    spatula.releaseRate = 0.015;
     spatula.pickupRate = 0.95;
     spatula.paintLiftability = 0.8;
     spatula.staining = 0.25;
