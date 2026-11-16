@@ -60,7 +60,7 @@ Rectangle {
         anchors.fill: parent
         clip: true
         contentWidth: width
-        contentHeight: mainColumn.height + 2 * KP.panelInset
+        contentHeight: Math.max(mainColumn.height, mainColumn.implicitHeight) + 2 * KP.panelInset
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: KpScrollBar {
             policy: scroller.contentHeight > scroller.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff

@@ -1113,9 +1113,15 @@ void TestBrushUi::colorPanelTabsPreserveWheelAndMixerState()
     QTRY_COMPARE(colorPanel->property("activeTab").toInt(), 1);
     auto* mixerSurface = item(app, QStringLiteral("mixerSurface"));
     QVERIFY(mixerSurface && mixerSurface->isVisible());
+    // Allow StackLayout polish + PanelSection height animation to settle before scrolling to library rows.
+    QTest::qWait(220);
 
     // Add PY3 pigment to the active deposit, mix, and load into brush via UI buttons.
-    QVERIFY(clickNamed(app, QStringLiteral("pigmentAdd_PY3")));
+    auto* addPy3 = item(app, QStringLiteral("pigmentAdd_PY3"));
+    QVERIFY(addPy3 && addPy3->isVisible() && addPy3->height() > 0);
+    QVERIFY(scrollIntoView(addPy3));
+    QTest::qWait(30);
+    click(app, addPy3);
     QTRY_COMPARE(mixer->activeDeposit().value(QStringLiteral("components")).toList().size(), 2);
     QVERIFY(clickNamed(app, QStringLiteral("mixerLoadBrushButton")));
     QTRY_VERIFY(app.workspace.brush()->traditionalMedia());
@@ -1129,8 +1135,9 @@ void TestBrushUi::colorPanelTabsPreserveWheelAndMixerState()
     // Switch back to Paint Mixer -> send resulting mixed colour back to Color Wheel.
     QVERIFY(clickNamed(app, QStringLiteral("colorPanelTab_mixer")));
     QTRY_COMPARE(colorPanel->property("activeTab").toInt(), 1);
+    QTest::qWait(100);
     QVERIFY(clickNamed(app, QStringLiteral("mixerToColorWheelButton")));
-    QVERIFY(app.workspace.colors()->foreground() != picked);
+    QTRY_VERIFY(app.workspace.colors()->foreground() != picked);
 
     // Mixer undo works decoupled from document undo stack.
     QVERIFY(!app.workspace.history()->canUndo());
