@@ -212,7 +212,7 @@ void TestPaintMixerApp::komaCompatibilityWithMixerPaintedStrokes()
     PaintMixerController mixer(&brush, &colors);
     mixer.setActiveMediumId(QStringLiteral("gouache"));
     QVERIFY(mixer.addPigmentToActive(QStringLiteral("PY42"), 1.0));
-    QVERIFY(mixer.addColorFromWheel(QColor(QStringLiteral("#7A42F4")), true, false).value(QStringLiteral("ok")).toBool());
+    QVERIFY(mixer.addFromColorWheel(QColor(QStringLiteral("#7A42F4")), true, false).value(QStringLiteral("ok")).toBool());
     QVERIFY(mixer.loadActiveIntoBrush());
 
     const QPointF pt = view.documentToViewport(64, 64);
@@ -220,9 +220,9 @@ void TestPaintMixerApp::komaCompatibilityWithMixerPaintedStrokes()
     view.endStroke(pt.x(), pt.y(), 1.0);
 
     QString error;
-    QVERIFY2(DocumentFile::save(&doc, komaPath, &error), qPrintable(error));
+    QVERIFY2(DocumentFile::save(doc, komaPath, &error), qPrintable(error));
 
-    auto loaded = std::unique_ptr<CanvasDocument>(DocumentFile::load(komaPath, &error));
+    auto loaded = std::unique_ptr<CanvasDocument>(DocumentFile::open(komaPath, &error));
     QVERIFY2(loaded != nullptr, qPrintable(error));
     const auto cell = loaded->layers()->layerAt(0)->materialTiles().batchAt({64, 64});
     QVERIFY(cell.has_value());
