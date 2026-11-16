@@ -10,6 +10,10 @@ Menu {
 
     padding: KP.gapS
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    Component.onCompleted: {
+        if (typeof popupType !== "undefined" && typeof Popup.Item !== "undefined")
+            popupType = Popup.Item
+    }
 
     enter: Transition {
         NumberAnimation { property: "opacity"; from: 0; to: 1; duration: KP.durationFast; easing.type: KP.easingCurve }
