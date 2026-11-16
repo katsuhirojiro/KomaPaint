@@ -889,6 +889,12 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QCOMPARE(brush->materialPresetId(), QStringLiteral("paint-lifting"));
 
     ws.setBrushEngine(QStringLiteral("digital"));
+    QTRY_VERIFY(subToolWarning->isVisible());
+    QTest::qWait(50);
+    QCoreApplication::processEvents();
+    auto* softAgain = item(app, QStringLiteral("subTool1"));
+    QVERIFY(softAgain);
+    QTRY_VERIFY(softAgain->isVisible() && softAgain->width() > 0 && softAgain->height() > 0);
     QVERIFY(clickNamed(app, QStringLiteral("subTool1")));  // Soft brush
     QTRY_COMPARE(ws.subTools()->currentName(), QStringLiteral("Soft brush"));
     QCOMPARE(brush->size(), 40); QCOMPARE(brush->hardness(), 30); QCOMPARE(brush->flow(), 35);
