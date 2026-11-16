@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -1306,7 +1307,8 @@ void stage6RenderReproducibleTestSheet()
     drawSeg(findPreset("gouache-round"), texturedIllustrationPaper(), "gouache", 0xFF1F2B48U, 400.0, 448.0, 720.0, 448.0);
     drawSeg(findPreset("gouache-round"), texturedIllustrationPaper(), "gouache", 0xFFE6533CU, 500.0, 420.0, 620.0, 476.0);
 
-    std::ofstream ppm("/tmp/komapaint_stage6_sheet.ppm", std::ios::binary);
+    const auto ppmPath = std::filesystem::temp_directory_path() / "komapaint_stage6_sheet.ppm";
+    std::ofstream ppm(ppmPath, std::ios::binary);
     CHECK(ppm.is_open());
     ppm << "P6\n" << W << " " << H << "\n255\n";
     std::vector<std::uint8_t> rgb(static_cast<std::size_t>(W) * static_cast<std::size_t>(H) * 3U, 248);

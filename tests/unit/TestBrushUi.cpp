@@ -628,12 +628,26 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
     // The medium choice changes the setting consumed by CanvasViewport.
     auto* medium = item(app, QStringLiteral("paintingMediumChoice"));
     QVERIFY(medium && medium->isVisible());
+    scrollIntoView(medium);
     QVERIFY(!brush->traditionalMedia());
-    QPoint mediumPoint = medium->mapToScene(QPointF(medium->width() * 0.75, medium->height() / 2)).toPoint();
-    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, mediumPoint);
+    auto clickSegment = [&](QQuickItem* segmented, int index) {
+        scrollIntoView(segmented);
+        QCoreApplication::processEvents();
+        QList<QQuickItem*> buttons;
+        for (auto* child : segmented->childItems()) {
+            if (child->width() > 0 && child->height() > 0 && child->metaObject()->inherits(&QQuickItem::staticMetaObject)) {
+                if (QString::fromLatin1(child->metaObject()->className()).contains(QStringLiteral("AbstractButton")))
+                    buttons.append(child);
+            }
+        }
+        QVERIFY2(index >= 0 && index < buttons.size(), qPrintable(QString::number(buttons.size())));
+        scrollIntoView(buttons[index]);
+        click(app, buttons[index]);
+    };
+    clickSegment(medium, 2); // Watercolour
     QTRY_VERIFY(brush->traditionalMedia());
-    mediumPoint = medium->mapToScene(QPointF(medium->width() * 0.25, medium->height() / 2)).toPoint();
-    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, mediumPoint);
+    QCOMPARE(brush->mediumId(), QStringLiteral("watercolour"));
+    clickSegment(medium, 0); // Digital
     QTRY_VERIFY(!brush->traditionalMedia());
 
     // Tip shape.
@@ -799,9 +813,20 @@ void TestBrushUi::subToolsLoadAndKeepTheirSettings()
     QCOMPARE(brush->mediumId(), QStringLiteral("watercolour"));
     QCOMPARE(brush->materialPresetId(), QStringLiteral("watercolour-round"));
     auto* wcPaper = item(app, QStringLiteral("watercolourPaperChoice"));
-    QVERIFY(wcPaper && wcPaper->isVisible());
-    const QPoint roughPt = wcPaper->mapToScene(QPointF(wcPaper->width() * 0.85, wcPaper->height() / 2)).toPoint();
-    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, roughPt);
+    QVERIFY(wcPaper);
+    QTRY_VERIFY(wcPaper->isVisible() && wcPaper->height() > 0
+        && wcPaper->parentItem()->parentItem()->parentItem()->height() >= wcPaper->height() + 4);
+    scrollIntoView(wcPaper);
+    QCoreApplication::processEvents();
+    QList<QQuickItem*> paperSegments;
+    for (auto* child : wcPaper->childItems()) {
+        if (child->width() > 0 && child->height() > 0
+            && QString::fromLatin1(child->metaObject()->className()).contains(QStringLiteral("AbstractButton")))
+            paperSegments.append(child);
+    }
+    QCOMPARE(paperSegments.size(), 3);
+    scrollIntoView(paperSegments[2]);
+    click(app, paperSegments[2]);
     QTRY_COMPARE(ws.document()->surfaceId(), QStringLiteral("rough-paper"));
     QVERIFY(setSlider(app, QStringLiteral("paperWetnessSlider"), 0.5));
     QVERIFY(ws.document()->surfaceWetness() >= 45 && ws.document()->surfaceWetness() <= 55);

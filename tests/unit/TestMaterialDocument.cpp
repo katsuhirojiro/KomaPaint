@@ -247,7 +247,8 @@ void TestMaterialDocument::substrateMetadataPersistsAcrossSaveOpenAndDigitalIsol
 
     reopened->resetSurfaceSettings();
     QCOMPARE(reopened->surfaceWetness(), 0);
-    QCOMPARE(reopened->surfaceTooth(), 86);
+    QCOMPARE(reopened->surfaceTooth(), 92);
+    QCOMPARE(reopened->surfaceRoughness(), 86);
 }
 
 QTEST_GUILESS_MAIN(TestMaterialDocument)
