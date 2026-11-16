@@ -39,8 +39,8 @@ Rectangle {
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: KP.panelInset
-                anchors.rightMargin: KP.gapM
-                spacing: KP.gapM
+                anchors.rightMargin: KP.gapS
+                spacing: KP.gapS
 
                 KpIcon {
                     name: "tools/" + Workspace.activeTool
@@ -66,6 +66,13 @@ Rectangle {
                         elide: Text.ElideRight
                     }
                 }
+                KpButton {
+                    objectName: "subToolEngineSettingsButton"
+                    small: true
+                    label: panel.realisticEngine ? qsTr("Realistic") : qsTr("Digital")
+                    tip: qsTr("Active Brush Engine — click to open Settings → Brush Engine")
+                    onClicked: Workspace.openBrushEngineSettings()
+                }
                 IconButton {
                     objectName: "resetSubToolButton"
                     glyph: "reset"
@@ -86,49 +93,6 @@ Rectangle {
             }
         }
 
-        // ---- Brush engine status & Realistic-only preset guard
-        Rectangle {
-            objectName: "subToolEngineBar"
-            Layout.fillWidth: true
-            implicitHeight: engineBarRow.implicitHeight + 2 * KP.gapXS
-            visible: panel.painting
-            color: KP.paneBgAlt
-
-            RowLayout {
-                id: engineBarRow
-                anchors.fill: parent
-                anchors.leftMargin: KP.panelInset
-                anchors.rightMargin: KP.gapS
-                anchors.topMargin: KP.gapXS
-                anchors.bottomMargin: KP.gapXS
-                spacing: KP.gapS
-
-                Text {
-                    objectName: "subToolEngineLabel"
-                    Layout.fillWidth: true
-                    text: panel.realisticEngine ? qsTr("Engine: Realistic") : qsTr("Engine: Digital")
-                    color: panel.realisticEngine ? KP.textAccent : KP.textMuted
-                    font.pixelSize: KP.fontXS
-                    font.weight: Font.Medium
-                    elide: Text.ElideRight
-                }
-                KpButton {
-                    objectName: "subToolEngineSettingsButton"
-                    small: true
-                    label: qsTr("Engine…")
-                    tip: qsTr("Open Settings → Brush Engine")
-                    onClicked: Workspace.openBrushEngineSettings()
-                }
-            }
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: 1
-                color: KP.hairline
-            }
-        }
-
         Rectangle {
             objectName: "subToolRealisticWarning"
             Layout.fillWidth: true
@@ -136,29 +100,31 @@ Rectangle {
             Layout.rightMargin: KP.gapS
             Layout.topMargin: KP.gapXS
             visible: panel.painting && !panel.realisticEngine && panel.brush.blockedByDigitalEngine
-            implicitHeight: visible ? warningCol.implicitHeight + 2 * KP.gapS : 0
+            implicitHeight: visible ? 26 : 0
             radius: KP.radiusS
             color: KP.rowSelected
             border.width: 1
             border.color: KP.ember
 
-            ColumnLayout {
-                id: warningCol
+            RowLayout {
                 anchors.fill: parent
-                anchors.margins: KP.gapS
+                anchors.leftMargin: KP.gapS
+                anchors.rightMargin: KP.gapXS
                 spacing: KP.gapXS
                 Text {
                     Layout.fillWidth: true
-                    text: qsTr("\"%1\" requires the Realistic brush engine. Select Realistic in Settings → Brush Engine to paint with it.")
-                        .arg(panel.library.currentName)
+                    text: qsTr("Requires Realistic engine")
                     color: KP.text
-                    font.pixelSize: KP.fontXS
-                    wrapMode: Text.WordWrap
+                    font.pixelSize: KP.fontMicro
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                    ToolTip.visible: false
                 }
                 KpButton {
                     objectName: "subToolSwitchEngineButton"
                     small: true
-                    label: qsTr("Open Brush Engine Settings…")
+                    label: qsTr("Switch…")
+                    tip: qsTr("Select the Realistic brush engine in Settings → Brush Engine")
                     onClicked: Workspace.openBrushEngineSettings()
                 }
             }
