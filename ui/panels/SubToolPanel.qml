@@ -49,6 +49,19 @@ Rectangle {
         return preset.textured ? qsTr("textured") : qsTr("round")
     }
 
+    function openTabContextMenu(anchorItem, tabId, tabName, brushCount) {
+        targetTabId = tabId
+        targetTabName = tabName
+        targetTabBrushCount = brushCount
+        if (anchorItem) {
+            const pt = anchorItem.mapToItem(panel, 0, anchorItem.height)
+            tabContextMenu.x = Math.max(4, Math.min(panel.width - tabContextMenu.implicitWidth - 4,
+                                                    pt.x - tabContextMenu.implicitWidth + anchorItem.width))
+            tabContextMenu.y = pt.y
+        }
+        tabContextMenu.open()
+    }
+
     function openCreateTabDialog() {
         tabDialogMode = "create"
         targetTabId = ""
@@ -367,12 +380,7 @@ Rectangle {
 
                         TapHandler {
                             acceptedButtons: Qt.RightButton
-                            onTapped: {
-                                panel.targetTabId = colTab.modelData.id
-                                panel.targetTabName = colTab.modelData.name
-                                panel.targetTabBrushCount = colTab.modelData.brushCount
-                                tabContextMenu.popup()
-                            }
+                            onTapped: panel.openTabContextMenu(colTab, colTab.modelData.id, colTab.modelData.name, colTab.modelData.brushCount)
                         }
 
                         background: Rectangle {
@@ -425,10 +433,7 @@ Rectangle {
                         const tabs = panel.library.engineTabs
                         const idx = panel.library.currentTabIndex
                         if (idx >= 0 && idx < tabs.length) {
-                            panel.targetTabId = tabs[idx].id
-                            panel.targetTabName = tabs[idx].name
-                            panel.targetTabBrushCount = tabs[idx].brushCount
-                            tabContextMenu.popup(tabOptionsBtn, 0, tabOptionsBtn.height)
+                            panel.openTabContextMenu(tabOptionsBtn, tabs[idx].id, tabs[idx].name, tabs[idx].brushCount)
                         }
                     }
                 }
