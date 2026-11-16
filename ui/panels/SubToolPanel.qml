@@ -335,6 +335,7 @@ Rectangle {
             Layout.fillWidth: true
             implicitHeight: visible ? 26 : 0
             visible: panel.painting && panel.isBrushTool
+            clip: true
             color: KP.paneBg
 
             RowLayout {
@@ -347,6 +348,7 @@ Rectangle {
                     id: tabStrip
                     objectName: "collectionTabStrip"
                     Layout.fillWidth: true
+                    Layout.preferredWidth: 0
                     Layout.minimumWidth: 40
                     Layout.fillHeight: true
                     orientation: ListView.Horizontal
