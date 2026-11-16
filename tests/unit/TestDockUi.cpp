@@ -6,6 +6,7 @@
 #include <QtTest/QtTest>
 
 #include <QGuiApplication>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QQmlComponent>
@@ -473,8 +474,14 @@ void TestDockUi::areaStateAndHiddenPanelsSurviveARestart()
         QVERIFY(dock->setAreaCollapsed(QStringLiteral("left"), true));
         dock->hidePanel(QStringLiteral("brushsize"));
         QVERIFY(!dock->isVisible(QStringLiteral("brushsize")));
-        QTRY_VERIFY_WITH_TIMEOUT(!app.settings->value(QStringLiteral("workspace/layout")).toString().isEmpty(),
-                                 3000);
+        // Wait specifically for the post-mutation save (start(app) may have already
+        // flushed buildDefault()'s 350 ms save timer, which also contains "collapsedAreas":[]).
+        QTRY_VERIFY_WITH_TIMEOUT([&] {
+            const QString s = app.settings->value(QStringLiteral("workspace/layout")).toString();
+            const QJsonObject obj = QJsonDocument::fromJson(s.toUtf8()).object();
+            return obj.value(QStringLiteral("collapsedAreas")).toArray().contains(QStringLiteral("left"))
+                && obj.value(QStringLiteral("hidden")).toArray().contains(QStringLiteral("brushsize"));
+        }(), 3000);
         stored = app.settings->value(QStringLiteral("workspace/layout")).toString();
         QVERIFY(stored.contains(QStringLiteral("collapsedAreas")));
     }
