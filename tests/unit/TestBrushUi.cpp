@@ -19,6 +19,7 @@
 #include <QJSEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QSignalSpy>
 #include <QWheelEvent>
 #include <QSGRendererInterface>
 #include <QTemporaryDir>
@@ -1758,15 +1759,24 @@ void TestBrushUi::brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects()
         QQuickItem* tabOptBtn = nullptr;
         QTRY_VERIFY((tabOptBtn = item(app, QStringLiteral("tabOptionsButton"))) != nullptr
                     && tabOptBtn->isVisible() && tabOptBtn->width() > 0 && tabOptBtn->height() > 0);
+        QSignalSpy activatedSpy(tabOptBtn, SIGNAL(activated()));
         click(app, tabOptBtn);
         auto* tabMenu = subPanel->findChild<QObject*>(QStringLiteral("collectionTabMenu"));
         QVERIFY(tabMenu);
+        auto* subQuick = qobject_cast<QQuickItem*>(subPanel);
         QTRY_VERIFY2(tabMenu->property("opened").toBool(),
-                     qPrintable(QStringLiteral("tabOptBtn pos=(%1,%2) size=(%3,%4) menu visible=%5 opened=%6")
+                     qPrintable(QStringLiteral("sub=(%1,%2 %3x%4) canvasX=%5 tabOptBtn=(%6,%7 %8x%9 en=%10 act=%11) menu(vis=%12 open=%13)")
+                         .arg(subQuick ? subQuick->mapToScene(QPointF(0, 0)).x() : -1)
+                         .arg(subQuick ? subQuick->mapToScene(QPointF(0, 0)).y() : -1)
+                         .arg(subQuick ? subQuick->width() : -1)
+                         .arg(subQuick ? subQuick->height() : -1)
+                         .arg(app.canvasItem->mapToScene(QPointF(0, 0)).x())
                          .arg(tabOptBtn->mapToScene(QPointF(0, 0)).x())
                          .arg(tabOptBtn->mapToScene(QPointF(0, 0)).y())
                          .arg(tabOptBtn->width())
                          .arg(tabOptBtn->height())
+                         .arg(tabOptBtn->isEnabled())
+                         .arg(activatedSpy.count())
                          .arg(tabMenu->property("visible").toBool())
                          .arg(tabMenu->property("opened").toBool())));
         QQuickItem* deleteMenuItem = nullptr;
