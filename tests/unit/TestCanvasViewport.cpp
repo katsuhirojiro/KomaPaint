@@ -517,17 +517,18 @@ void TestCanvasViewport::watercolourCleanWaterAndPaintLiftingInViewport()
     CanvasViewport viewport;
     viewport.setWidth(256);
     viewport.setHeight(256);
-    viewport.setDocument(&doc);
     viewport.setHistory(&history);
-    viewport.setBrush(&brush);
-    viewport.setColor(QColor(QStringLiteral("#1f5da8")));
-    viewport.setZoom(1.0);
-    viewport.setPan(QPointF(0, 0));
+    viewport.setDocument(&doc);
+    viewport.refreshNow();
 
-    QVERIFY(viewport.beginStroke(60.0, 128.0, 0.85, 0.0, 0.0));
-    viewport.moveStroke(128.0, 128.0, 0.85, 0.0, 0.0);
-    viewport.moveStroke(196.0, 128.0, 0.85, 0.0, 0.0);
-    viewport.endStroke();
+    const QPointF p0 = viewport.documentToViewport(60.0, 128.0);
+    const QPointF p1 = viewport.documentToViewport(128.0, 128.0);
+    const QPointF p2 = viewport.documentToViewport(196.0, 128.0);
+    const QColor wcColor(QStringLiteral("#1f5da8"));
+    QVERIFY(viewport.beginStroke(p0.x(), p0.y(), 0.85, &brush, wcColor));
+    viewport.continueStroke(p1.x(), p1.y(), 0.85);
+    viewport.continueStroke(p2.x(), p2.y(), 0.85);
+    viewport.endStroke(p2.x(), p2.y(), 0.85);
 
     Layer* layer = doc.layers()->layerAt(0);
     QVERIFY(layer);
@@ -539,9 +540,9 @@ void TestCanvasViewport::watercolourCleanWaterAndPaintLiftingInViewport()
     // Clean Water never introduces primary color pigment even when brush color is red.
     brush.setMaterialPresetId(QStringLiteral("clean-water"));
     brush.setSize(20);
-    viewport.setColor(QColor(QStringLiteral("#e6192e")));
-    QVERIFY(viewport.beginStroke(60.0, 60.0, 0.8, 0.0, 0.0));
-    viewport.endStroke();
+    const QPointF w0 = viewport.documentToViewport(60.0, 60.0);
+    QVERIFY(viewport.beginStroke(w0.x(), w0.y(), 0.8, &brush, QColor(QStringLiteral("#e6192e"))));
+    viewport.endStroke(w0.x(), w0.y(), 0.8);
     const auto cleanSpot = layer->materialTiles().batchAt({60, 60});
     QVERIFY(cleanSpot && cleanSpot->water > 0.0);
     QCOMPARE(cleanSpot->pigmentMass(), 0.0);
@@ -549,9 +550,11 @@ void TestCanvasViewport::watercolourCleanWaterAndPaintLiftingInViewport()
     // Paint Lifting reduces existing pigment mass cleanly without erasing via digital plane.
     brush.setMaterialPresetId(QStringLiteral("paint-lifting"));
     brush.setPickup(72);
-    QVERIFY(viewport.beginStroke(128.0, 118.0, 0.85, 0.0, 0.0));
-    viewport.moveStroke(128.0, 138.0, 0.85, 0.0, 0.0);
-    viewport.endStroke();
+    const QPointF l0 = viewport.documentToViewport(128.0, 118.0);
+    const QPointF l1 = viewport.documentToViewport(128.0, 138.0);
+    QVERIFY(viewport.beginStroke(l0.x(), l0.y(), 0.85, &brush, wcColor));
+    viewport.continueStroke(l1.x(), l1.y(), 0.85);
+    viewport.endStroke(l1.x(), l1.y(), 0.85);
     const auto liftedSpot = layer->materialTiles().batchAt({128, 128});
     QVERIFY(liftedSpot && liftedSpot->pigmentMass() < initialPigment);
     QCOMPARE(layer->tiles().allocatedTiles(), std::size_t(0));
