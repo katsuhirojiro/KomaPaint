@@ -195,10 +195,11 @@ Rectangle {
         id: brushErrorDialog
         objectName: "brushErrorDialog"
         anchors.centerIn: parent
+        width: Math.min(Math.max(280, ws.width - 48), 400)
         modal: true
         title: qsTr("Unable to paint")
         standardButtons: Dialog.Ok
-        contentItem: Label { id: brushError; objectName: "brushErrorLabel"; color: KP.text; wrapMode: Text.WordWrap; width: 360 }
+        contentItem: Label { id: brushError; objectName: "brushErrorLabel"; color: KP.text; wrapMode: Text.WordWrap }
     }
     // ---- Navigation HUD ----------------------------------------------------
     // Zooming and fitting sit under the hand, at the corner of the canvas, with
