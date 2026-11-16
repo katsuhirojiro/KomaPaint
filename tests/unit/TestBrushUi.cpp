@@ -1737,9 +1737,13 @@ void TestBrushUi::brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects()
         auto* tabOptBtn = item(app, QStringLiteral("tabOptionsButton"));
         QVERIFY(tabOptBtn && tabOptBtn->isVisible());
         click(app, tabOptBtn);
-        auto* deleteMenuItem = app.root->findChild<QObject*>(QStringLiteral("tabMenuDelete"));
-        QVERIFY(deleteMenuItem);
-        QMetaObject::invokeMethod(deleteMenuItem, "trigger");
+        auto* tabMenu = app.root->findChild<QObject*>(QStringLiteral("collectionTabMenu"));
+        QVERIFY(tabMenu);
+        QTRY_VERIFY(tabMenu->property("opened").toBool());
+        QQuickItem* deleteMenuItem = nullptr;
+        QTRY_VERIFY((deleteMenuItem = item(app, QStringLiteral("tabMenuDelete"))) != nullptr
+                    && deleteMenuItem->isVisible());
+        click(app, deleteMenuItem);
         auto* confirmDlg = app.root->findChild<QObject*>(QStringLiteral("deleteTabConfirmDialog"));
         QVERIFY(confirmDlg);
         QTRY_VERIFY(confirmDlg->property("opened").toBool());

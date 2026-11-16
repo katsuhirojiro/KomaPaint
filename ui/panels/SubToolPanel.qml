@@ -132,7 +132,7 @@ Rectangle {
                     objectName: "createBrushButton"
                     visible: panel.isBrushTool
                     glyph: "plus"
-                    iconSize: KP.iconXS
+                    iconSize: 12
                     cell: KP.controlHeightSmall
                     tooltip: qsTr("Save current settings as a new brush")
                     onActivated: panel.openCreateBrushDialog()
@@ -140,7 +140,7 @@ Rectangle {
                 IconButton {
                     objectName: "resetSubToolButton"
                     glyph: "reset"
-                    iconSize: KP.iconXS
+                    iconSize: 12
                     cell: KP.controlHeightSmall
                     tooltip: qsTr("Return this preset to its default settings")
                     enabled: panel.library.modified && (!panel.isBrushTool || panel.library.currentBrushBuiltIn)
@@ -402,8 +402,8 @@ Rectangle {
 
                 IconButton {
                     objectName: "tabOptionsButton"
-                    glyph: "more"
-                    iconSize: 11
+                    glyph: "dots-h"
+                    iconSize: 12
                     cell: 22
                     tooltip: qsTr("Manage current tab")
                     onActivated: {
@@ -661,8 +661,8 @@ Rectangle {
                     IconButton {
                         objectName: "brushMenuButton_" + row.presetIndex
                         visible: panel.isBrushTool && (row.hovered || row.current)
-                        glyph: "more"
-                        iconSize: 11
+                        glyph: "dots-h"
+                        iconSize: 12
                         cell: 20
                         tooltip: qsTr("Brush actions")
                         onActivated: {
