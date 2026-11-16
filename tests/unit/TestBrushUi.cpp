@@ -1753,15 +1753,16 @@ void TestBrushUi::brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects()
         // UI deliberate confirmation modal deletes Temp Tab cleanly.
         auto* subPanel = item(app, QStringLiteral("subToolPanel"));
         QVERIFY(subPanel);
-        auto* tabOptBtn = item(app, QStringLiteral("tabOptionsButton"));
-        QVERIFY(tabOptBtn && tabOptBtn->isVisible());
+        QQuickItem* tabOptBtn = nullptr;
+        QTRY_VERIFY((tabOptBtn = item(app, QStringLiteral("tabOptionsButton"))) != nullptr
+                    && tabOptBtn->isVisible() && tabOptBtn->width() > 0 && tabOptBtn->height() > 0);
         click(app, tabOptBtn);
         auto* tabMenu = subPanel->findChild<QObject*>(QStringLiteral("collectionTabMenu"));
         QVERIFY(tabMenu);
         QTRY_VERIFY(tabMenu->property("opened").toBool());
         QQuickItem* deleteMenuItem = nullptr;
         QTRY_VERIFY((deleteMenuItem = item(app, QStringLiteral("tabMenuDelete"))) != nullptr
-                    && deleteMenuItem->isVisible());
+                    && deleteMenuItem->isVisible() && deleteMenuItem->width() > 0 && deleteMenuItem->height() > 0);
         click(app, deleteMenuItem);
         auto* confirmDlg = subPanel->findChild<QObject*>(QStringLiteral("deleteTabConfirmDialog"));
         QVERIFY(confirmDlg);

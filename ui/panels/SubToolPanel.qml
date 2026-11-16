@@ -334,6 +334,7 @@ Rectangle {
                     id: tabStrip
                     objectName: "collectionTabStrip"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 40
                     Layout.fillHeight: true
                     orientation: ListView.Horizontal
                     clip: true
@@ -412,7 +413,10 @@ Rectangle {
                 }
 
                 IconButton {
+                    id: tabOptionsBtn
                     objectName: "tabOptionsButton"
+                    Layout.preferredWidth: 22
+                    Layout.preferredHeight: 22
                     glyph: "dots-h"
                     iconSize: 12
                     cell: 22
@@ -424,12 +428,14 @@ Rectangle {
                             panel.targetTabId = tabs[idx].id
                             panel.targetTabName = tabs[idx].name
                             panel.targetTabBrushCount = tabs[idx].brushCount
-                            tabContextMenu.popup()
+                            tabContextMenu.popup(tabOptionsBtn, 0, tabOptionsBtn.height)
                         }
                     }
                 }
                 IconButton {
                     objectName: "createTabButton"
+                    Layout.preferredWidth: 22
+                    Layout.preferredHeight: 22
                     glyph: "plus"
                     iconSize: 11
                     cell: 22
