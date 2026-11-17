@@ -17,6 +17,11 @@ Item {
     // Tools implemented by CanvasWorkspace itself.
     readonly property var viewTools: ["zoom", "hand", "eyedropper"]
     function isAvailable(tool) { return Workspace.subTools.usesSubTools(tool) || viewTools.indexOf(tool) >= 0 }
+    function shortcutFor(tool) {
+        if (!Workspace.shortcuts || !Workspace.shortcuts.bindings) return ""
+        const seq = Workspace.shortcuts.bindings["tool." + tool]
+        return seq ? String(seq) : ""
+    }
     function labelFor(tool) {
         for (let g = 0; g < groups.length; ++g)
             for (let i = 0; i < groups[g].length; ++i)
@@ -24,29 +29,29 @@ Item {
         return tool
     }
 
-    // id = Workspace.activeTool value and icon file name; key = real shortcut (see MainWindow.qml).
+    // id = Workspace.activeTool value and icon file name; shortcuts come live from ShortcutManager.
     readonly property var groups: [
-        [ { id: "zoom", label: qsTr("Zoom"), key: "Z" },
-          { id: "hand", label: qsTr("Hand"), key: "H" } ],
-        [ { id: "move", label: qsTr("Move"), key: "" },
-          { id: "transform", label: qsTr("Transform"), key: "" } ],
-        [ { id: "selection", label: qsTr("Selection"), key: "" },
-          { id: "lasso", label: qsTr("Lasso"), key: "" },
-          { id: "wand", label: qsTr("Auto select"), key: "" },
-          { id: "eyedropper", label: qsTr("Eyedropper"), key: "I" } ],
-        [ { id: "pen", label: qsTr("Pen"), key: "P" },
-          { id: "pencil", label: qsTr("Pencil"), key: "N" },
-          { id: "brush", label: qsTr("Brush"), key: "B" },
-          { id: "airbrush", label: qsTr("Airbrush"), key: "A" },
-          { id: "eraser", label: qsTr("Eraser"), key: "E" },
-          { id: "smudge", label: qsTr("Blend"), key: "" } ],
-        [ { id: "fill", label: qsTr("Fill"), key: "" },
-          { id: "gradient", label: qsTr("Gradient"), key: "" } ],
-        [ { id: "line", label: qsTr("Line"), key: "" },
-          { id: "curveline", label: qsTr("Curve"), key: "" },
-          { id: "rectangle", label: qsTr("Rectangle"), key: "" },
-          { id: "circle", label: qsTr("Ellipse"), key: "" } ],
-        [ { id: "text", label: qsTr("Text"), key: "" } ]
+        [ { id: "zoom", label: qsTr("Zoom") },
+          { id: "hand", label: qsTr("Hand") } ],
+        [ { id: "move", label: qsTr("Move") },
+          { id: "transform", label: qsTr("Transform") } ],
+        [ { id: "selection", label: qsTr("Selection") },
+          { id: "lasso", label: qsTr("Lasso") },
+          { id: "wand", label: qsTr("Auto select") },
+          { id: "eyedropper", label: qsTr("Eyedropper") } ],
+        [ { id: "pen", label: qsTr("Pen") },
+          { id: "pencil", label: qsTr("Pencil") },
+          { id: "brush", label: qsTr("Brush") },
+          { id: "airbrush", label: qsTr("Airbrush") },
+          { id: "eraser", label: qsTr("Eraser") },
+          { id: "smudge", label: qsTr("Blend") } ],
+        [ { id: "fill", label: qsTr("Fill") },
+          { id: "gradient", label: qsTr("Gradient") } ],
+        [ { id: "line", label: qsTr("Line") },
+          { id: "curveline", label: qsTr("Curve") },
+          { id: "rectangle", label: qsTr("Rectangle") },
+          { id: "circle", label: qsTr("Ellipse") } ],
+        [ { id: "text", label: qsTr("Text") } ]
     ]
 
     Rectangle {
@@ -123,8 +128,9 @@ Item {
                                 accentBar: true
                                 available: root.isAvailable(modelData.id)
                                 selected: Workspace.activeTool === modelData.id
-                                tooltip: modelData.key.length > 0 && available
-                                         ? modelData.label + " (" + modelData.key + ")" : modelData.label
+                                readonly property string keyHint: root.shortcutFor(modelData.id)
+                                tooltip: keyHint.length > 0 && available
+                                         ? modelData.label + " (" + keyHint + ")" : modelData.label
                                 onActivated: Workspace.activeTool = modelData.id
                             }
                         }

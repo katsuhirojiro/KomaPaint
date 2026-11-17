@@ -9,8 +9,10 @@
 #include "../layers/LayerModel.h"
 #include "DocumentRecovery.h"
 #include "PaintMixerController.h"
+#include "PerformanceSettings.h"
 #include "ProjectCreationService.h"
 #include "SessionStore.h"
+#include "ShortcutManager.h"
 #include "SubToolLibrary.h"
 #include "ToolSettings.h"
 
@@ -52,6 +54,8 @@ class WorkspaceState : public QObject
     Q_PROPERTY(BrushSettings* brush READ brush CONSTANT)
     Q_PROPERTY(ToolSettings* toolSettings READ toolSettings CONSTANT)
     Q_PROPERTY(komapaint::input::TabletInputSettings* inputSettings READ inputSettings CONSTANT)
+    Q_PROPERTY(PerformanceSettings* performanceSettings READ performanceSettings CONSTANT)
+    Q_PROPERTY(ShortcutManager* shortcuts READ shortcuts CONSTANT)
     Q_PROPERTY(SubToolLibrary* subTools READ subTools CONSTANT)
     Q_PROPERTY(CanvasDocument* document  READ document  NOTIFY documentChanged)
     Q_PROPERTY(LayerModel*     layers    READ layers    NOTIFY documentChanged)
@@ -79,7 +83,10 @@ public:
     BrushSettings* brush() const { return m_brush; }
     ToolSettings* toolSettings() const { return m_toolSettings; }
     input::TabletInputSettings* inputSettings() const { return m_inputSettings; }
+    PerformanceSettings* performanceSettings() const { return m_performanceSettings; }
+    ShortcutManager* shortcuts() const { return m_shortcuts; }
     void bindInputSettings(Settings* settings);
+    void bindAppSettings(Settings* settings);
     SubToolLibrary* subTools() const { return m_subTools; }
     CanvasDocument* document() const { return m_document; }
     LayerModel*     layers()   const { return m_document ? m_document->layers() : m_emptyLayers; }
@@ -306,6 +313,8 @@ private:
     BrushSettings* m_brush = nullptr;
     ToolSettings* m_toolSettings = nullptr;
     input::TabletInputSettings* m_inputSettings = nullptr;
+    PerformanceSettings* m_performanceSettings = nullptr;
+    ShortcutManager* m_shortcuts = nullptr;
     SubToolLibrary* m_subTools = nullptr;
     LayerModel* m_emptyLayers = nullptr; // empty compatibility model; never a document
     CanvasDocument* m_document = nullptr;

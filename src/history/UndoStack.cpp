@@ -360,7 +360,27 @@ bool UndoStack::commitStroke()
     while (m_commands.size() > m_cursor) { m_bytes -= m_commands.back()->bytes; m_commands.pop_back(); }
     m_current->bytes = m_currentBytes; m_bytes += m_currentBytes; m_currentBytes = 0;
     m_commands.push_back(std::move(m_current)); ++m_cursor;
+    while (m_maxCommands > 0 && m_commands.size() > m_maxCommands && m_cursor > 0) {
+        m_bytes -= m_commands.front()->bytes;
+        m_commands.erase(m_commands.begin());
+        --m_cursor;
+    }
     emit stackChanged(); return true;
+}
+
+void UndoStack::setMaxCommands(int count)
+{
+    const std::size_t next = count > 0 ? static_cast<std::size_t>(count) : 0;
+    if (m_maxCommands == next) return;
+    m_maxCommands = next;
+    bool trimmed = false;
+    while (m_maxCommands > 0 && m_commands.size() > m_maxCommands && m_cursor > 0) {
+        m_bytes -= m_commands.front()->bytes;
+        m_commands.erase(m_commands.begin());
+        --m_cursor;
+        trimmed = true;
+    }
+    if (trimmed) emit stackChanged();
 }
 bool UndoStack::cancelStroke()
 {

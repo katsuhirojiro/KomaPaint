@@ -2,6 +2,8 @@
 #include "CanvasViewport.h"
 #include "MixerSurfaceItem.h"
 #include "PaintMixerController.h"
+#include "PerformanceSettings.h"
+#include "ShortcutManager.h"
 #include "SubToolLibrary.h"
 #include "ToolSettings.h"
 #include "canvas/CanvasDocument.h"
@@ -45,7 +47,7 @@ KomaPaintApp::KomaPaintApp(const QString& fileToOpen, QObject* parent)
                                                 QStringLiteral("digital")).toString());
     const int recoveryInterval = m_settings.value(QStringLiteral("recovery/intervalMinutes"), 10).toInt();
     m_workspace.setRecoveryInterval(recoveryInterval);
-    m_workspace.bindInputSettings(&m_settings);
+    m_workspace.bindAppSettings(&m_settings);
 
     connect(&m_workspace, &WorkspaceState::brushEngineChanged, this, [this](const QString& engine) {
         m_settings.setValue(QStringLiteral("tools/brushEngine"), engine);
@@ -64,6 +66,8 @@ void KomaPaintApp::registerTypes()
     qRegisterMetaType<PanelManager*>();
     qRegisterMetaType<DockModel*>();
     qRegisterMetaType<PaintMixerController*>();
+    qRegisterMetaType<PerformanceSettings*>();
+    qRegisterMetaType<ShortcutManager*>();
     qRegisterMetaType<ToolSettings*>();
     qRegisterMetaType<komapaint::input::TabletInputSettings*>();
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
@@ -84,6 +88,7 @@ void KomaPaintApp::loadUi()
     ctx->setContextProperty("Dock",      &m_dock);
     ctx->setContextProperty("Panels",    &m_panels);
     ctx->setContextProperty("Workspace", &m_workspace);
+    ctx->setContextProperty("Shortcuts", m_workspace.shortcuts());
     ctx->setContextProperty("NewProject", &m_newProject);
 
     qInfo("[KomaPaint] loadUi(): setting up QML context properties");

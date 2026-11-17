@@ -156,6 +156,14 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     m_brush->setBrushEngine(m_brushEngine);
     m_toolSettings = new ToolSettings(this);
     m_inputSettings = new input::TabletInputSettings(this);
+    m_performanceSettings = new PerformanceSettings(this);
+    m_shortcuts = new ShortcutManager(this);
+    connect(m_performanceSettings, &PerformanceSettings::changed, this, [this] {
+        const int limit = m_performanceSettings->undoHistoryLimit();
+        for (const auto& tab : m_tabs) {
+            if (tab.history) tab.history->setMaxCommands(limit);
+        }
+    });
     // The sub tool library follows the active tool wherever it changes (tool
     // palette, tab switch, session restore) and loads that tool's settings.
     m_subTools = new SubToolLibrary(m_brush, this);
@@ -178,6 +186,13 @@ void WorkspaceState::bindInputSettings(Settings* settings)
     if (m_inputSettings) m_inputSettings->attachSettings(settings);
 }
 
+void WorkspaceState::bindAppSettings(Settings* settings)
+{
+    bindInputSettings(settings);
+    if (m_performanceSettings) m_performanceSettings->bindSettings(settings);
+    if (m_shortcuts) m_shortcuts->bindSettings(settings);
+}
+
 void WorkspaceState::connectLayerDeletion(const CanvasDocument* document, UndoStack* history)
 {
     connect(document->layers(), &QAbstractItemModel::rowsAboutToBeRemoved, history, [history] {
@@ -188,6 +203,9 @@ void WorkspaceState::connectLayerDeletion(const CanvasDocument* document, UndoSt
 
 WorkspaceState::Tab WorkspaceState::makeTab(CanvasDocument* document, UndoStack* history, const QString& path) const
 {
+    if (history && m_performanceSettings) {
+        history->setMaxCommands(m_performanceSettings->undoHistoryLimit());
+    }
     Tab tab;
     tab.document = document;
     tab.history = history;

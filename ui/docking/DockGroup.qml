@@ -34,7 +34,7 @@ Item {
     // keeps the header and a usable strip of content visible.
     readonly property real contentPreferredHeight:
         (content.item && content.item.preferredHeight !== undefined) ? content.item.preferredHeight : 64
-    readonly property real minimumBodyWidth: 118
+    readonly property real minimumBodyWidth: 148
     readonly property real minimumBodyHeight: group.collapsed ? KP.panelHeaderH : KP.panelHeaderH + group.contentPreferredHeight + 2
 
     function minimumOf(horizontal) {

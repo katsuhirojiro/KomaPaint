@@ -26,10 +26,14 @@ add_library(komapaint_app STATIC
     PaintMixerStore.h
     PanelManager.cpp
     PanelManager.h
+    PerformanceSettings.cpp
+    PerformanceSettings.h
     ProjectCreationService.cpp
     ProjectCreationService.h
     SessionStore.cpp
     SessionStore.h
+    ShortcutManager.cpp
+    ShortcutManager.h
     SubToolLibrary.cpp
     SubToolLibrary.h
     ../../resources/brush_presets.qrc

@@ -299,6 +299,7 @@ private slots:
     void preferencesDialogStoresThemeAndIconColours();
     void komaSettingsApplyAndCancelPersistGlobalValues();
     void brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive();
+    void shortcutsAndPerformanceSettingsPersistAndResolveConflicts();
     void brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects();
     void brushLibraryMigrationPreservesUserCollectionsAndUpgradesBuiltIns();
     void brushPanelsCanBeClosedAndComeBack();
@@ -328,6 +329,7 @@ bool TestBrushUi::start(Running& app, const QString& name)
     app.settings->setValue(QStringLiteral("recovery/intervalMinutes"), 10);
     app.settings->setWindowMaximized(false);
     app.settings->setWindowSize(QSize(1320, 1000));
+    app.workspace.bindAppSettings(app.settings.get());
     g_warnings = &app.warnings;
     app.engine.addImportPath(QStringLiteral("qrc:/"));
     auto* context = app.engine.rootContext();
@@ -705,10 +707,11 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
     QVERIFY(brush->size() > 40 && brush->size() < 90);                // the bar gives small sizes more room
 
     // Digital is the default Brush Engine, so physical material controls stay hidden.
+    // Brush Engine selector itself belongs in Koma Settings, NOT in Tool Properties.
     QCOMPARE(app.workspace.brushEngine(), QStringLiteral("digital"));
     QVERIFY(!app.workspace.isRealisticEngine());
-    auto* engineStatus = item(app, QStringLiteral("brushEngineStatusText"));
-    QVERIFY(engineStatus && engineStatus->property("text").toString().contains(QStringLiteral("Digital")));
+    QVERIFY(item(app, QStringLiteral("brushEngineStatusText")) == nullptr);
+    QVERIFY(item(app, QStringLiteral("brushEngineSettingsButton")) == nullptr);
     auto* medium = item(app, QStringLiteral("paintingMediumChoice"));
     QVERIFY(medium && !medium->isVisible());
     auto* paperSection = item(app, QStringLiteral("paperSurfaceSection"));
@@ -1571,9 +1574,9 @@ void TestBrushUi::komaSettingsApplyAndCancelPersistGlobalValues()
     QTRY_VERIFY(dialog->property("opened").toBool());
 
     for (const QString& category : {QStringLiteral("general"), QStringLiteral("interface"),
-                                     QStringLiteral("canvas"), QStringLiteral("tools"),
-                                     QStringLiteral("brushEngine"), QStringLiteral("performance"),
-                                     QStringLiteral("inputTablet"), QStringLiteral("filesRecovery")}) {
+                                     QStringLiteral("canvas"), QStringLiteral("brushEngine"),
+                                     QStringLiteral("tabletInput"), QStringLiteral("shortcuts"),
+                                     QStringLiteral("performance")}) {
         QVERIFY2(app.root->findChild<QObject*>(QStringLiteral("komaSettingsPage_") + category),
                  qPrintable(category));
     }
@@ -1653,11 +1656,8 @@ void TestBrushUi::brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive(
         auto* mixerNotice = item(app, QStringLiteral("mixerEngineNotice"));
         QVERIFY(mixerNotice && mixerNotice->isVisible());
 
-        // Clicking Settings in ToolPropertyPanel opens Koma Settings on the Brush Engine page.
-        auto* openBtn = item(app, QStringLiteral("brushEngineSettingsButton"));
-        QVERIFY(openBtn && openBtn->isVisible());
-        scrollIntoView(openBtn);
-        click(app, openBtn);
+        // Opening Koma Settings on the Brush Engine page via Workspace (no longer inside Tool Properties).
+        app.workspace.openBrushEngineSettings();
 
         auto* dialog = app.root->findChild<QObject*>(QStringLiteral("komaSettingsDialog"));
         QVERIFY(dialog);
@@ -1686,8 +1686,7 @@ void TestBrushUi::brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive(
         QCOMPARE(app.settings->value(QStringLiteral("tools/brushEngine")).toString(), QStringLiteral("realistic"));
 
         // Disabling Realistic while Realistic is active is blocked until returning to Digital.
-        scrollIntoView(openBtn);
-        click(app, openBtn);
+        app.workspace.openBrushEngineSettings();
         QTRY_VERIFY(dialog->property("opened").toBool());
         click(app, enableToggle);
         QCOMPARE(dialog->property("draft").toMap().value(QStringLiteral("realisticEngineEnabled")).toBool(), true);
@@ -1726,10 +1725,7 @@ void TestBrushUi::brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive(
         QVERIFY(paperSection && paperSection->isVisible());
 
         // Restore Defaults resets draft brushEngine back to Digital and locks Realistic.
-        auto* openBtn = item(restarted, QStringLiteral("brushEngineSettingsButton"));
-        QVERIFY(openBtn);
-        scrollIntoView(openBtn);
-        click(restarted, openBtn);
+        restarted.workspace.openBrushEngineSettings();
         auto* dialog = restarted.root->findChild<QObject*>(QStringLiteral("komaSettingsDialog"));
         QVERIFY(dialog);
         QTRY_VERIFY(dialog->property("opened").toBool());
@@ -1744,6 +1740,88 @@ void TestBrushUi::brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive(
         QVERIFY(!restarted.workspace.isRealisticEngineEnabled());
         QCOMPARE(restarted.settings->value(QStringLiteral("tools/brushEngine")).toString(), QStringLiteral("digital"));
         QCOMPARE(restarted.settings->value(QStringLiteral("tools/realisticEngineEnabled")).toBool(), false);
+        QVERIFY2(restarted.warnings.isEmpty(), qPrintable(restarted.warnings.join(QLatin1Char('\n'))));
+    }
+}
+
+void TestBrushUi::shortcutsAndPerformanceSettingsPersistAndResolveConflicts()
+{
+    {
+        Settings fresh(QStringLiteral("KomaPaintTests"), QStringLiteral("BrushUiShortcutsPerf"));
+        fresh.clear();
+        fresh.sync();
+    }
+    {
+        Running app;
+        QVERIFY(start(app, QStringLiteral("BrushUiShortcutsPerf")));
+        auto* shortcuts = app.workspace.shortcuts();
+        auto* perf = app.workspace.performanceSettings();
+        QVERIFY(shortcuts && perf);
+        QCOMPARE(shortcuts->keyFor(QStringLiteral("tool.pen")), QStringLiteral("P"));
+        QCOMPARE(perf->tileCacheLimitMB(), 256);
+        QCOMPARE(perf->undoHistoryLimit(), 60);
+        QVERIFY(perf->wetSimEnabled());
+        QCOMPARE(perf->wetSimIntervalMs(), 200);
+
+        // Open Koma Settings on Shortcuts page, verify conflict detection, then apply custom binding.
+        QVERIFY(QMetaObject::invokeMethod(app.root->findChild<QObject*>(QStringLiteral("komaSettingsDialog")),
+                                          "openCategory", Q_ARG(QVariant, QStringLiteral("shortcuts"))));
+        auto* dialog = app.root->findChild<QObject*>(QStringLiteral("komaSettingsDialog"));
+        QVERIFY(dialog);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+
+        // Attempting to bind tool.pen to "B" detects conflict with Brush Tool.
+        QVERIFY(!shortcuts->findConflict(QStringLiteral("tool.pen"), QStringLiteral("B")).isEmpty());
+
+        QVariantMap draft = dialog->property("draft").toMap();
+        QVariantMap scMap = draft.value(QStringLiteral("shortcuts")).toMap();
+        scMap.insert(QStringLiteral("tool.pen"), QStringLiteral("Shift+P"));
+        draft.insert(QStringLiteral("shortcuts"), scMap);
+
+        QVariantMap perfMap = draft.value(QStringLiteral("performance")).toMap();
+        perfMap.insert(QStringLiteral("tileCacheLimitMB"), 512);
+        perfMap.insert(QStringLiteral("undoHistoryLimit"), 90);
+        perfMap.insert(QStringLiteral("wetSimEnabled"), false);
+        perfMap.insert(QStringLiteral("wetSimIntervalMs"), 450);
+        draft.insert(QStringLiteral("performance"), perfMap);
+        dialog->setProperty("draft", draft);
+
+        click(app, item(app, QStringLiteral("komaSettingsApply")));
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+
+        QCOMPARE(shortcuts->keyFor(QStringLiteral("tool.pen")), QStringLiteral("Shift+P"));
+        QCOMPARE(perf->tileCacheLimitMB(), 512);
+        QCOMPARE(perf->undoHistoryLimit(), 90);
+        QVERIFY(!perf->wetSimEnabled());
+        QCOMPARE(perf->wetSimIntervalMs(), 450);
+
+        // Live MainWindow Shortcut reacts to the customized sequence.
+        QTest::keyClick(app.window, Qt::Key_P, Qt::ShiftModifier);
+        QTRY_COMPARE(app.workspace.activeTool(), QStringLiteral("pen"));
+
+        // Verify ToolPropertyPanel is now docked on the right side by default, SubTool on left.
+        auto* dock = app.panels.dockModel();
+        QCOMPARE(dock->areaSideOf(dock->groupOf(QStringLiteral("subtool"))), QStringLiteral("left"));
+        QCOMPARE(dock->areaSideOf(dock->groupOf(QStringLiteral("toolproperty"))), QStringLiteral("right"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+        app.root.reset();
+        app.window = nullptr;
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QCoreApplication::processEvents();
+    }
+
+    // Restart and verify both Shortcuts and Performance settings survived persistence.
+    {
+        Running restarted;
+        QVERIFY(start(restarted, QStringLiteral("BrushUiShortcutsPerf")));
+        QCOMPARE(restarted.workspace.shortcuts()->keyFor(QStringLiteral("tool.pen")), QStringLiteral("Shift+P"));
+        QCOMPARE(restarted.workspace.performanceSettings()->tileCacheLimitMB(), 512);
+        QCOMPARE(restarted.workspace.performanceSettings()->undoHistoryLimit(), 90);
+        QVERIFY(!restarted.workspace.performanceSettings()->wetSimEnabled());
+        QCOMPARE(restarted.workspace.performanceSettings()->wetSimIntervalMs(), 450);
+        restarted.workspace.shortcuts()->restoreDefaults();
+        restarted.workspace.performanceSettings()->restoreDefaults();
+        QCOMPARE(restarted.workspace.shortcuts()->keyFor(QStringLiteral("tool.pen")), QStringLiteral("P"));
         QVERIFY2(restarted.warnings.isEmpty(), qPrintable(restarted.warnings.join(QLatin1Char('\n'))));
     }
 }

@@ -591,18 +591,16 @@ void TestWorkspaceUi::sessionRestoresProjectsAndLayoutAtStartup()
         auto* layersGroup = findInWindow(app.window, QStringLiteral("dockGroup%1").arg(dock->groupOf(QStringLiteral("layers"))));
         QVERIFY(layersGroup);
         rightColumnWidth = layersGroup->width();
-        // Split 11 is the horizontal root: its second handle controls the
-        // canvas/right-column boundary. Split 10 is the vertical stack inside
-        // the right column and must not be used for a width-resize assertion.
-        auto* handle = findInWindow(app.window, QStringLiteral("dockHandle11_1"));
+        const int rootSplitId = dock->tree().value(QStringLiteral("id")).toInt();
+        auto* handle = findInWindow(app.window, QStringLiteral("dockHandle%1_1").arg(rootSplitId));
         QVERIFY(handle);
-        const QVariantList startFractions = dock->fractionsOf(11);
+        const QVariantList startFractions = dock->fractionsOf(rootSplitId);
         const QPoint grab = handle->mapToScene(QPointF(handle->width() / 2, handle->height() / 2)).toPoint();
         QTest::mousePress(app.window, Qt::LeftButton, Qt::NoModifier, grab);
         QTest::mouseMove(app.window, grab - QPoint(40, 0));
         QTest::mouseMove(app.window, grab - QPoint(80, 0));
         QTest::mouseRelease(app.window, Qt::LeftButton, Qt::NoModifier, grab - QPoint(80, 0));
-        QTRY_VERIFY(dock->fractionsOf(11) != startFractions);
+        QTRY_VERIFY(dock->fractionsOf(rootSplitId) != startFractions);
         // Re-find the group while waiting: dock delegates can be recreated
         // during project/layout changes, so avoid measuring a stale item.
         QTRY_VERIFY((layersGroup = findInWindow(app.window,

@@ -55,7 +55,7 @@ const QList<DockModel::PanelInfo>& DockModel::panelTable()
 {
     static const QList<PanelInfo> table = {
         { QStringLiteral("subtool"),      QStringLiteral("Sub Tool"),      QStringLiteral("left"),   true  },
-        { QStringLiteral("toolproperty"), QStringLiteral("Tool Property"), QStringLiteral("left"),   true  },
+        { QStringLiteral("toolproperty"), QStringLiteral("Tool Property"), QStringLiteral("right"),  true  },
         { QStringLiteral("brushsize"),    QStringLiteral("Brush Size"),    QStringLiteral("left"),   true  },
         { QStringLiteral("layers"),       QStringLiteral("Layers"),        QStringLiteral("right"),  true  },
         { QStringLiteral("properties"),   QStringLiteral("Properties"),    QStringLiteral("right"),  true  },
@@ -151,24 +151,27 @@ void DockModel::buildDefault()
         return split;
     };
 
-    Node left = column({ tabs(QStringLiteral("subtool")), tabs(QStringLiteral("toolproperty")),
+    Node left = column({ tabs(QStringLiteral("subtool")),
                          tabs(QStringLiteral("brushsize")) },
-                       { 0.28, 0.49, 0.23 });
+                       { 0.72, 0.28 });
     Node centre = makeCanvas();
     Node colorTabs = tabs(QStringLiteral("color"));
-    colorTabs.panels.append(QStringLiteral("properties"));
-    Node colorTools = tabs(QStringLiteral("palette"));
-    colorTools.panels.append(QStringLiteral("colormixer"));
-    Node right = column({ tabs(QStringLiteral("layers")), std::move(colorTabs),
-                          std::move(colorTools), tabs(QStringLiteral("assets")) },
-                        { 0.40, 0.34, 0.16, 0.10 });
+    colorTabs.panels.append(QStringLiteral("palette"));
+    colorTabs.panels.append(QStringLiteral("colormixer"));
+    Node propTabs = tabs(QStringLiteral("properties"));
+    propTabs.panels.append(QStringLiteral("assets"));
+    Node right = column({ tabs(QStringLiteral("toolproperty")),
+                          std::move(colorTabs),
+                          tabs(QStringLiteral("layers")),
+                          std::move(propTabs) },
+                        { 0.34, 0.28, 0.24, 0.14 });
 
     m_root = Node();
     m_root.id = nextId();
     m_root.kind = Node::Split;
     m_root.orientation = Qt::Horizontal;
     m_root.children = { std::move(left), std::move(centre), std::move(right) };
-    m_root.fractions = { 0.185, 0.635, 0.180 };
+    m_root.fractions = { 0.175, 0.615, 0.210 };
 
     m_floating.clear();
     m_hidden.clear();

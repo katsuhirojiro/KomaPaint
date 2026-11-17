@@ -7,18 +7,17 @@ KpDialog {
     id: dialog
     objectName: "komaSettingsDialog"
     heading: qsTr("Koma Settings")
-    bodyWidth: 790
+    bodyWidth: 820
     note: qsTr("Changes are staged until Apply. The default tool applies to new projects; it does not change the active project.")
 
     readonly property var categories: [
         { id: "general", label: qsTr("General") },
         { id: "interface", label: qsTr("Interface") },
         { id: "canvas", label: qsTr("Canvas") },
-        { id: "tools", label: qsTr("Tools") },
         { id: "brushEngine", label: qsTr("Brush Engine") },
-        { id: "performance", label: qsTr("Performance") },
-        { id: "inputTablet", label: qsTr("Input / Tablet") },
-        { id: "filesRecovery", label: qsTr("Files and Recovery") }
+        { id: "tabletInput", label: qsTr("Tablet & Stylus") },
+        { id: "shortcuts", label: qsTr("Keyboard Shortcuts") },
+        { id: "performance", label: qsTr("Performance & Storage") }
     ]
     readonly property var toolIds: ["brush", "pen", "pencil", "airbrush", "eraser", "zoom", "hand", "eyedropper"]
     readonly property var toolLabels: [qsTr("Brush"), qsTr("Pen"), qsTr("Pencil"), qsTr("Airbrush"),
@@ -48,34 +47,30 @@ KpDialog {
         qsTr("Undo Stroke"),
         qsTr("Disabled")
     ]
+    readonly property var shortcutCategories: [
+        qsTr("All"), qsTr("File"), qsTr("Edit"), qsTr("Select"),
+        qsTr("View"), qsTr("Tools"), qsTr("Brush"), qsTr("Layers")
+    ]
+
     property int categoryIndex: 0
     property int pendingCategoryIndex: -1
+    property string shortcutSearch: ""
+    property string shortcutCategoryFilter: "All"
+    property string capturingActionId: ""
+    readonly property bool capturingShortcut: capturingActionId.length > 0
+    property string pendingConflictActionId: ""
+    property string pendingConflictSeq: ""
+    property string pendingConflictOwnerLabel: ""
+
     property var draft: ({
         theme: "dark",
         defaultTool: "brush",
         brushEngine: "digital",
         realisticEngineEnabled: false,
         recoveryInterval: 10,
-        input: ({
-            windowsTabletMode: "auto",
-            windowsDisableWmPointer: false,
-            pressureThreshold: 0.02,
-            pressureMax: 1.0,
-            pressureGamma: 1.0,
-            pressureCurveLow: 0.25,
-            pressureCurveMid: 0.50,
-            pressureCurveHigh: 0.75,
-            stabilizationDefault: 0,
-            touchMode: "stylus_nav_only",
-            touchPinchZoom: true,
-            touchRotate: true,
-            palmRejection: true,
-            barrelButton1Action: "right_click",
-            barrelButton2Action: "pan",
-            eraserEndEnabled: true,
-            hoverOutlineEnabled: true,
-            tiltCursorEnabled: true
-        })
+        input: ({}),
+        performance: ({}),
+        shortcuts: ({})
     })
     property string validationMessage: ""
     property real testPadPressure: 0.0
@@ -116,6 +111,16 @@ KpDialog {
             tiltCursorEnabled: true
         }
     }
+
+    function defaultPerformanceDraft() {
+        return {
+            tileCacheLimitMB: 256,
+            undoHistoryLimit: 60,
+            wetSimEnabled: true,
+            wetSimIntervalMs: 200
+        }
+    }
+
     function loadInputDraft() {
         const d = defaultInputDraft()
         const rawMode = String(Settings.value("input/windowsTabletMode", d.windowsTabletMode))
@@ -147,6 +152,47 @@ KpDialog {
             tiltCursorEnabled: asBool("input/tiltCursorEnabled", d.tiltCursorEnabled)
         }
     }
+
+    function loadPerformanceDraft() {
+        const d = defaultPerformanceDraft()
+        const asBool = function(k, defVal) {
+            const v = Settings.value(k, defVal)
+            return v === true || String(v).toLowerCase() === "true"
+        }
+        const cache = Number(Settings.value("performance/tileCacheLimitMB", d.tileCacheLimitMB))
+        const undo = Number(Settings.value("performance/undoHistoryLimit", d.undoHistoryLimit))
+        const wetMs = Number(Settings.value("performance/wetSimIntervalMs", d.wetSimIntervalMs))
+        return {
+            tileCacheLimitMB: Math.max(64, Math.min(2048, isNaN(cache) ? d.tileCacheLimitMB : cache)),
+            undoHistoryLimit: Math.max(10, Math.min(200, isNaN(undo) ? d.undoHistoryLimit : undo)),
+            wetSimEnabled: asBool("performance/wetSimEnabled", d.wetSimEnabled),
+            wetSimIntervalMs: Math.max(100, Math.min(1000, isNaN(wetMs) ? d.wetSimIntervalMs : wetMs))
+        }
+    }
+
+    function loadShortcutsDraft() {
+        if (!Workspace.shortcuts) return {}
+        return Object.assign({}, Workspace.shortcuts.bindings || {})
+    }
+
+    function filteredShortcutActions() {
+        if (!Workspace.shortcuts) return []
+        const all = Workspace.shortcuts.actions || []
+        const q = shortcutSearch.trim().toLowerCase()
+        const cat = shortcutCategoryFilter
+        const out = []
+        for (let i = 0; i < all.length; ++i) {
+            const a = all[i]
+            if (cat !== "All" && a.category !== cat) continue
+            if (q.length > 0) {
+                const hay = (a.label + " " + a.category + " " + (draft.shortcuts[a.id] || "")).toLowerCase()
+                if (hay.indexOf(q) < 0) continue
+            }
+            out.push(a)
+        }
+        return out
+    }
+
     function loadDraft() {
         const savedTheme = String(Settings.value("ui/theme", "dark"))
         const savedTool = String(Settings.value("tools/defaultTool", "brush"))
@@ -160,13 +206,20 @@ KpDialog {
             realisticEngineEnabled: savedRealisticEnabled,
             brushEngine: (savedEngine === "realistic" && savedRealisticEnabled) ? "realistic" : "digital",
             recoveryInterval: recoveryIntervals.indexOf(savedInterval) >= 0 ? savedInterval : 10,
-            input: loadInputDraft()
+            input: loadInputDraft(),
+            performance: loadPerformanceDraft(),
+            shortcuts: loadShortcutsDraft()
         }
         if (Workspace.inputSettings) Workspace.inputSettings.refreshDevices()
         categoryIndex = pendingCategoryIndex >= 0 ? pendingCategoryIndex : 0
         pendingCategoryIndex = -1
+        capturingActionId = ""
+        pendingConflictActionId = ""
+        pendingConflictSeq = ""
+        pendingConflictOwnerLabel = ""
         validationMessage = ""
     }
+
     function setDraft(key, value) {
         const next = Object.assign({}, draft)
         next[key] = value
@@ -181,6 +234,7 @@ KpDialog {
         draft = next
         validationMessage = ""
     }
+
     function setInputDraft(key, value) {
         const nextInput = Object.assign({}, draft.input || defaultInputDraft())
         nextInput[key] = value
@@ -204,6 +258,45 @@ KpDialog {
         setDraft("input", nextInput)
         if (pressureCurveCanvas) pressureCurveCanvas.requestPaint()
     }
+
+    function setPerformanceDraft(key, value) {
+        const nextPerf = Object.assign({}, draft.performance || defaultPerformanceDraft())
+        nextPerf[key] = value
+        setDraft("performance", nextPerf)
+    }
+
+    function setShortcutDraft(actionId, seq, replaceConflict) {
+        const nextMap = Object.assign({}, draft.shortcuts || {})
+        const norm = Workspace.shortcuts ? Workspace.shortcuts.normalizeSequence(seq) : seq
+        if (seq.length > 0 && norm.length === 0) {
+            validationMessage = qsTr("Unsupported key sequence.")
+            return false
+        }
+        if (norm.length > 0 && Workspace.shortcuts) {
+            const owner = Workspace.shortcuts.findConflict(actionId, norm, nextMap)
+            if (owner.length > 0 && !replaceConflict) {
+                pendingConflictActionId = actionId
+                pendingConflictSeq = norm
+                pendingConflictOwnerLabel = owner
+                return false
+            }
+            if (owner.length > 0 && replaceConflict) {
+                const keys = Object.keys(nextMap)
+                for (let i = 0; i < keys.length; ++i) {
+                    if (keys[i] !== actionId && Workspace.shortcuts.normalizeSequence(String(nextMap[keys[i]] || "")) === norm) {
+                        nextMap[keys[i]] = ""
+                    }
+                }
+            }
+        }
+        nextMap[actionId] = norm
+        pendingConflictActionId = ""
+        pendingConflictSeq = ""
+        pendingConflictOwnerLabel = ""
+        setDraft("shortcuts", nextMap)
+        return true
+    }
+
     function restoreDraftDefaults() {
         draft = {
             theme: "dark",
@@ -211,11 +304,18 @@ KpDialog {
             brushEngine: "digital",
             realisticEngineEnabled: false,
             recoveryInterval: 10,
-            input: defaultInputDraft()
+            input: defaultInputDraft(),
+            performance: defaultPerformanceDraft(),
+            shortcuts: Workspace.shortcuts ? Object.assign({}, Workspace.shortcuts.defaultBindingsMap()) : ({})
         }
+        capturingActionId = ""
+        pendingConflictActionId = ""
+        pendingConflictSeq = ""
+        pendingConflictOwnerLabel = ""
         validationMessage = ""
         if (pressureCurveCanvas) pressureCurveCanvas.requestPaint()
     }
+
     function applyDraft() {
         if (toolIds.indexOf(draft.defaultTool) < 0
             || (draft.brushEngine !== "digital" && draft.brushEngine !== "realistic")
@@ -226,12 +326,14 @@ KpDialog {
             return false
         }
         const inputDraft = Object.assign(defaultInputDraft(), draft.input || {})
+        const perfDraft = Object.assign(defaultPerformanceDraft(), draft.performance || {})
         const oldTheme = Settings.value("ui/theme", "dark")
         const oldTool = Settings.value("tools/defaultTool", "brush")
         const oldEnabled = Settings.value("tools/realisticEngineEnabled", false)
         const oldEngine = Settings.value("tools/brushEngine", "digital")
         const oldInterval = Settings.value("recovery/intervalMinutes", 10)
         const oldConfigured = Settings.value("recovery/configured", false)
+
         Settings.setValue("ui/theme", draft.theme)
         Settings.setValue("tools/defaultTool", draft.defaultTool)
         Settings.setValue("tools/realisticEngineEnabled", Boolean(draft.realisticEngineEnabled))
@@ -256,6 +358,15 @@ KpDialog {
         Settings.setValue("input/eraserEndEnabled", Boolean(inputDraft.eraserEndEnabled))
         Settings.setValue("input/hoverOutlineEnabled", Boolean(inputDraft.hoverOutlineEnabled))
         Settings.setValue("input/tiltCursorEnabled", Boolean(inputDraft.tiltCursorEnabled))
+        Settings.setValue("performance/tileCacheLimitMB", Number(perfDraft.tileCacheLimitMB))
+        Settings.setValue("performance/undoHistoryLimit", Number(perfDraft.undoHistoryLimit))
+        Settings.setValue("performance/wetSimEnabled", Boolean(perfDraft.wetSimEnabled))
+        Settings.setValue("performance/wetSimIntervalMs", Number(perfDraft.wetSimIntervalMs))
+
+        if (Workspace.shortcuts && !Workspace.shortcuts.applyBindings(draft.shortcuts || {})) {
+            validationMessage = qsTr("Shortcut bindings contain duplicate keys or could not be saved.")
+            return false
+        }
         if (!Settings.sync()) {
             Settings.setValue("ui/theme", oldTheme)
             Settings.setValue("tools/defaultTool", oldTool)
@@ -275,25 +386,25 @@ KpDialog {
             Workspace.brushEngine = "digital"
             Workspace.realisticEngineEnabled = false
         }
-        if (Workspace.inputSettings) {
-            Workspace.inputSettings.applyVariantMap(inputDraft)
-        }
+        if (Workspace.inputSettings) Workspace.inputSettings.applyVariantMap(inputDraft)
+        if (Workspace.performanceSettings) Workspace.performanceSettings.applyVariantMap(perfDraft)
         Workspace.setRecoveryInterval(Number(draft.recoveryInterval))
         KP.mode = draft.theme
         return true
     }
 
     onOpened: loadDraft()
+    onClosed: { capturingActionId = ""; pendingConflictActionId = "" }
 
     body: [
         RowLayout {
             objectName: "komaSettingsContent"
             Layout.fillWidth: true
-            Layout.preferredHeight: 430
+            Layout.preferredHeight: 440
             spacing: KP.gapM
 
             Rectangle {
-                Layout.preferredWidth: 176
+                Layout.preferredWidth: 184
                 Layout.fillHeight: true
                 color: KP.paneBgAlt
                 border.width: 1
@@ -316,7 +427,10 @@ KpDialog {
                         height: 34
                         hoverEnabled: true
                         Accessible.name: modelData.label
-                        onClicked: dialog.categoryIndex = index
+                        onClicked: {
+                            dialog.capturingActionId = ""
+                            dialog.categoryIndex = index
+                        }
                         background: Rectangle {
                             radius: KP.radiusXS
                             color: categoryButton.index === dialog.categoryIndex ? KP.rowSelected
@@ -351,6 +465,7 @@ KpDialog {
                 Layout.fillHeight: true
                 currentIndex: dialog.categoryIndex
 
+                // 1. General
                 ColumnLayout {
                     objectName: "komaSettingsPage_general"
                     spacing: KP.gapM
@@ -360,53 +475,13 @@ KpDialog {
                         text: qsTr("KomaPaint opens to an empty workspace. Projects appear only when opened, created, or explicitly recovered.")
                         color: KP.textMuted; font.pixelSize: KP.fontS; wrapMode: Text.WordWrap
                     }
-                    Item { Layout.fillHeight: true }
-                }
-                ColumnLayout {
-                    objectName: "komaSettingsPage_interface"
-                    spacing: KP.gapM
-                    Text { text: qsTr("Interface"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
                     RowLayout {
                         Layout.fillWidth: true
-                        Text { text: qsTr("Theme"); color: KP.textMuted; font.pixelSize: KP.fontS; Layout.preferredWidth: 128 }
-                        SegmentedChoice {
-                            objectName: "komaSettingsTheme"
-                            Layout.preferredWidth: 190
-                            options: [qsTr("Dark"), qsTr("Light")]
-                            currentIndex: dialog.draft.theme === "light" ? 1 : 0
-                            onChosen: function(index) { dialog.setDraft("theme", index === 1 ? "light" : "dark") }
-                        }
-                        Item { Layout.fillWidth: true }
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        text: qsTr("The approved monochrome interface is preserved; this choice only selects its dark or light palette.")
-                        color: KP.textSubtle; font.pixelSize: KP.fontXS; wrapMode: Text.WordWrap
-                    }
-                    Item { Layout.fillHeight: true }
-                }
-                ColumnLayout {
-                    objectName: "komaSettingsPage_canvas"
-                    spacing: KP.gapM
-                    Text { text: qsTr("Canvas"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
-                    Text {
-                        Layout.fillWidth: true
-                        text: qsTr("Canvas dimensions, background, and resolution are document settings and stay with each project. No global canvas override is applied.")
-                        color: KP.textMuted; font.pixelSize: KP.fontS; wrapMode: Text.WordWrap
-                    }
-                    Item { Layout.fillHeight: true }
-                }
-                ColumnLayout {
-                    objectName: "komaSettingsPage_tools"
-                    spacing: KP.gapM
-                    Text { text: qsTr("Tools"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Text { text: qsTr("Default tool"); color: KP.textMuted; font.pixelSize: KP.fontS; Layout.preferredWidth: 128 }
+                        Text { text: qsTr("Default tool"); color: KP.textMuted; font.pixelSize: KP.fontS; Layout.preferredWidth: 140 }
                         ComboBox {
                             id: defaultToolChoice
                             objectName: "komaSettingsDefaultTool"
-                            Layout.preferredWidth: 190
+                            Layout.preferredWidth: 200
                             model: dialog.toolLabels
                             currentIndex: Math.max(0, dialog.toolIds.indexOf(dialog.draft.defaultTool))
                             onActivated: function(index) { dialog.setDraft("defaultTool", dialog.toolIds[index]) }
@@ -427,11 +502,82 @@ KpDialog {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: qsTr("This is used only when creating a project. An open project's current tool remains project-specific.")
+                        text: qsTr("Default tool applies to newly created projects; each open project keeps its own active tool.")
                         color: KP.textSubtle; font.pixelSize: KP.fontXS; wrapMode: Text.WordWrap
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: qsTr("File association"); color: KP.textMuted; font.pixelSize: KP.fontS; Layout.preferredWidth: 140 }
+                        KpButton {
+                            label: qsTr("Associate .koma Files…")
+                            onClicked: Workspace.associateWithKomaFiles()
+                        }
+                        Item { Layout.fillWidth: true }
                     }
                     Item { Layout.fillHeight: true }
                 }
+
+                // 2. Interface
+                ColumnLayout {
+                    objectName: "komaSettingsPage_interface"
+                    spacing: KP.gapM
+                    Text { text: qsTr("Interface"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: qsTr("Theme"); color: KP.textMuted; font.pixelSize: KP.fontS; Layout.preferredWidth: 140 }
+                        SegmentedChoice {
+                            objectName: "komaSettingsTheme"
+                            Layout.preferredWidth: 190
+                            options: [qsTr("Dark"), qsTr("Light")]
+                            currentIndex: dialog.draft.theme === "light" ? 1 : 0
+                            onChosen: function(index) { dialog.setDraft("theme", index === 1 ? "light" : "dark") }
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("The approved monochrome interface is preserved; this choice selects its dark or light surface palette.")
+                        color: KP.textSubtle; font.pixelSize: KP.fontXS; wrapMode: Text.WordWrap
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: qsTr("Panel layout"); color: KP.textMuted; font.pixelSize: KP.fontS; Layout.preferredWidth: 140 }
+                        KpButton {
+                            objectName: "komaSettingsResetDockButton"
+                            label: qsTr("Reset Workspace Panels to Default")
+                            onClicked: Dock.resetToDefault()
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                    Item { Layout.fillHeight: true }
+                }
+
+                // 3. Canvas
+                ColumnLayout {
+                    objectName: "komaSettingsPage_canvas"
+                    spacing: KP.gapM
+                    Text { text: qsTr("Canvas"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Canvas dimensions, paper surface, and resolution are document properties stored inside each .koma project.")
+                        color: KP.textMuted; font.pixelSize: KP.fontS; wrapMode: Text.WordWrap
+                    }
+                    CheckBox {
+                        objectName: "komaSettingsCanvasHoverOutline"
+                        text: qsTr("Show live brush outline cursor on canvas")
+                        checked: Boolean((dialog.draft.input || {}).hoverOutlineEnabled)
+                        onToggled: dialog.setInputDraft("hoverOutlineEnabled", checked)
+                    }
+                    CheckBox {
+                        objectName: "komaSettingsCanvasTiltCursor"
+                        text: qsTr("Tilt-aware brush cursor ellipse")
+                        checked: Boolean((dialog.draft.input || {}).tiltCursorEnabled)
+                        onToggled: dialog.setInputDraft("tiltCursorEnabled", checked)
+                    }
+                    Item { Layout.fillHeight: true }
+                }
+
+                // 4. Brush Engine
                 ColumnLayout {
                     objectName: "komaSettingsPage_brushEngine"
                     spacing: KP.gapM
@@ -585,19 +731,10 @@ KpDialog {
                     }
                     Item { Layout.fillHeight: true }
                 }
-                ColumnLayout {
-                    objectName: "komaSettingsPage_performance"
-                    spacing: KP.gapM
-                    Text { text: qsTr("Performance"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
-                    Text {
-                        Layout.fillWidth: true
-                        text: qsTr("Tile allocation, undo history, and viewport caching use the application's memory-safety controls. User-adjustable performance options will be added only when they can be validated against those controls.")
-                        color: KP.textMuted; font.pixelSize: KP.fontS; wrapMode: Text.WordWrap
-                    }
-                    Item { Layout.fillHeight: true }
-                }
+
+                // 5. Tablet & Stylus
                 Item {
-                    objectName: "komaSettingsPage_inputTablet"
+                    objectName: "komaSettingsPage_tabletInput"
                     readonly property var inp: dialog.draft.input || dialog.defaultInputDraft()
 
                     Flickable {
@@ -613,7 +750,7 @@ KpDialog {
                             width: parent.width - KP.gapM
                             spacing: KP.gapM
 
-                            Text { text: qsTr("Input / Tablet"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
+                            Text { text: qsTr("Tablet & Stylus"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
                             Text {
                                 Layout.fillWidth: true
                                 text: qsTr("Uses standard OS and vendor tablet drivers (Huion, XP-Pen, Wacom, Windows Ink, WinTab, macOS, Android) with no KomaPaint-specific drivers.")
@@ -983,41 +1120,329 @@ KpDialog {
                         }
                     }
                 }
+
+                // 6. Keyboard Shortcuts
                 ColumnLayout {
-                    objectName: "komaSettingsPage_filesRecovery"
-                    spacing: KP.gapM
-                    Text { text: qsTr("Files and Recovery"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
+                    objectName: "komaSettingsPage_shortcuts"
+                    spacing: KP.gapS
+
                     RowLayout {
                         Layout.fillWidth: true
-                        Text { text: qsTr("Automatic recovery"); color: KP.textMuted; font.pixelSize: KP.fontS; Layout.preferredWidth: 128 }
-                        ComboBox {
-                            id: recoveryChoice
-                            objectName: "komaSettingsRecoveryInterval"
-                            Layout.preferredWidth: 220
-                            model: dialog.recoveryLabels
-                            currentIndex: Math.max(0, dialog.recoveryIntervals.indexOf(Number(dialog.draft.recoveryInterval)))
-                            onActivated: function(index) { dialog.setDraft("recoveryInterval", dialog.recoveryIntervals[index]) }
-                            contentItem: Text {
-                                leftPadding: KP.gapM; rightPadding: 18
-                                text: recoveryChoice.displayText
-                                color: KP.text; font.pixelSize: KP.fontS
-                                verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
-                            }
-                            background: Rectangle { color: KP.inputBg; border.width: 1; border.color: KP.border; radius: KP.radiusS }
-                            indicator: KpGlyph {
-                                x: recoveryChoice.width - width - 5
-                                y: (recoveryChoice.height - height) / 2
-                                name: "chevron-down"; size: 10; color: KP.iconNormal
+                        Text { text: qsTr("Keyboard Shortcuts"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold; Layout.fillWidth: true }
+                        KpButton {
+                            objectName: "komaSettingsResetAllShortcuts"
+                            small: true
+                            label: qsTr("Reset All Shortcuts")
+                            onClicked: {
+                                dialog.capturingActionId = ""
+                                dialog.pendingConflictActionId = ""
+                                dialog.setDraft("shortcuts", Workspace.shortcuts ? Object.assign({}, Workspace.shortcuts.defaultBindingsMap()) : ({}))
                             }
                         }
-                        Item { Layout.fillWidth: true }
                     }
-                    Text {
+
+                    RowLayout {
                         Layout.fillWidth: true
-                        text: qsTr("Recovery snapshots are separate from project files and never overwrite saved artwork.")
-                        color: KP.textSubtle; font.pixelSize: KP.fontXS; wrapMode: Text.WordWrap
+                        spacing: KP.gapS
+                        KpTextField {
+                            id: shortcutSearchInput
+                            objectName: "komaSettingsShortcutSearch"
+                            Layout.fillWidth: true
+                            placeholder: qsTr("Search actions or keys…")
+                            text: dialog.shortcutSearch
+                            onTextChanged: dialog.shortcutSearch = text
+                        }
+                        ComboBox {
+                            id: shortcutCatCombo
+                            objectName: "komaSettingsShortcutCategory"
+                            Layout.preferredWidth: 132
+                            model: dialog.shortcutCategories
+                            currentIndex: Math.max(0, dialog.shortcutCategories.indexOf(dialog.shortcutCategoryFilter))
+                            onActivated: function(idx) { dialog.shortcutCategoryFilter = dialog.shortcutCategories[idx] }
+                            contentItem: Text { leftPadding: KP.gapM; rightPadding: 18; text: shortcutCatCombo.displayText; color: KP.text; font.pixelSize: KP.fontS; verticalAlignment: Text.AlignVCenter }
+                            background: Rectangle { color: KP.inputBg; border.width: 1; border.color: KP.border; radius: KP.radiusS }
+                            indicator: KpGlyph { x: shortcutCatCombo.width - width - 5; y: (shortcutCatCombo.height - height) / 2; name: "chevron-down"; size: 10; color: KP.iconNormal }
+                        }
                     }
-                    Item { Layout.fillHeight: true }
+
+                    // Conflict resolution banner
+                    Rectangle {
+                        objectName: "shortcutConflictBanner"
+                        Layout.fillWidth: true
+                        visible: dialog.pendingConflictActionId.length > 0
+                        implicitHeight: visible ? conflictRow.implicitHeight + 2 * KP.gapS : 0
+                        radius: KP.radiusS
+                        color: KP.rowSelected
+                        border.width: 1
+                        border.color: KP.warning
+                        RowLayout {
+                            id: conflictRow
+                            anchors.fill: parent
+                            anchors.margins: KP.gapS
+                            spacing: KP.gapS
+                            Text {
+                                Layout.fillWidth: true
+                                text: qsTr("Shortcut \"%1\" is already assigned to \"%2\". Replace it?")
+                                    .arg(dialog.pendingConflictSeq)
+                                    .arg(dialog.pendingConflictOwnerLabel)
+                                color: KP.text
+                                font.pixelSize: KP.fontXS
+                                wrapMode: Text.WordWrap
+                            }
+                            KpButton {
+                                objectName: "shortcutConflictReplaceButton"
+                                small: true
+                                label: qsTr("Replace")
+                                variant: "primary"
+                                onClicked: dialog.setShortcutDraft(dialog.pendingConflictActionId, dialog.pendingConflictSeq, true)
+                            }
+                            KpButton {
+                                small: true
+                                label: qsTr("Cancel")
+                                onClicked: { dialog.pendingConflictActionId = ""; dialog.pendingConflictSeq = ""; dialog.pendingConflictOwnerLabel = "" }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: KP.radiusS
+                        color: KP.paneBgAlt
+                        border.width: 1
+                        border.color: KP.hairline
+
+                        ListView {
+                            id: shortcutList
+                            objectName: "komaSettingsShortcutList"
+                            anchors.fill: parent
+                            anchors.margins: KP.gapXS
+                            clip: true
+                            spacing: 2
+                            boundsBehavior: Flickable.StopAtBounds
+                            model: {
+                                // Track draft.shortcuts / search / filter reactively
+                                var _deps = [dialog.draft, dialog.shortcutSearch, dialog.shortcutCategoryFilter]
+                                return dialog.filteredShortcutActions()
+                            }
+                            ScrollBar.vertical: KpScrollBar { policy: ScrollBar.AsNeeded }
+
+                            delegate: Rectangle {
+                                id: scRow
+                                required property var modelData
+                                readonly property string actionId: modelData.id
+                                readonly property string boundSeq: String((dialog.draft.shortcuts || {})[actionId] !== undefined
+                                    ? (dialog.draft.shortcuts || {})[actionId] : modelData.sequence)
+                                readonly property bool capturing: dialog.capturingActionId === actionId
+                                width: shortcutList.width - 6
+                                height: 30
+                                radius: KP.radiusXS
+                                color: capturing ? KP.rowSelected : "transparent"
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: KP.gapS
+                                    anchors.rightMargin: KP.gapXS
+                                    spacing: KP.gapS
+
+                                    Text {
+                                        Layout.preferredWidth: 56
+                                        text: scRow.modelData.category
+                                        color: KP.textSubtle
+                                        font.pixelSize: KP.fontMicro
+                                        font.weight: Font.Medium
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: scRow.modelData.label
+                                        color: KP.text
+                                        font.pixelSize: KP.fontS
+                                        elide: Text.ElideRight
+                                    }
+                                    AbstractButton {
+                                        id: keyCaptureBtn
+                                        objectName: "komaSettingsShortcutKey_" + scRow.actionId
+                                        Layout.preferredWidth: 132
+                                        Layout.preferredHeight: 24
+                                        hoverEnabled: true
+                                        focusPolicy: Qt.StrongFocus
+                                        onClicked: {
+                                            dialog.pendingConflictActionId = ""
+                                            dialog.capturingActionId = scRow.actionId
+                                            keyCaptureBtn.forceActiveFocus()
+                                        }
+                                        Keys.onPressed: function(event) {
+                                            if (!scRow.capturing) return
+                                            event.accepted = true
+                                            if (event.key === Qt.Key_Escape && event.modifiers === Qt.NoModifier) {
+                                                dialog.capturingActionId = ""
+                                                return
+                                            }
+                                            if (!Workspace.shortcuts) return
+                                            const formatted = Workspace.shortcuts.formatKeyEvent(event.key, event.modifiers)
+                                            if (formatted.length === 0) return
+                                            dialog.capturingActionId = ""
+                                            dialog.setShortcutDraft(scRow.actionId, formatted, false)
+                                        }
+                                        background: Rectangle {
+                                            radius: KP.radiusXS
+                                            color: scRow.capturing ? KP.emberSoft
+                                                 : (keyCaptureBtn.hovered ? KP.inputBgHover : KP.inputBg)
+                                            border.width: 1
+                                            border.color: scRow.capturing ? KP.ember : KP.border
+                                        }
+                                        contentItem: Text {
+                                            text: scRow.capturing ? qsTr("Press key…")
+                                                : (scRow.boundSeq.length > 0 ? scRow.boundSeq : qsTr("Unassigned"))
+                                            color: scRow.capturing ? KP.textAccent
+                                                 : (scRow.boundSeq.length > 0 ? KP.text : KP.textSubtle)
+                                            font.pixelSize: KP.fontXS
+                                            font.family: KP.fontMono
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                    IconButton {
+                                        objectName: "komaSettingsShortcutClear_" + scRow.actionId
+                                        glyph: "close"
+                                        iconSize: 10
+                                        cell: 22
+                                        enabled: scRow.boundSeq.length > 0
+                                        tooltip: qsTr("Clear shortcut")
+                                        onActivated: dialog.setShortcutDraft(scRow.actionId, "", true)
+                                    }
+                                    IconButton {
+                                        objectName: "komaSettingsShortcutReset_" + scRow.actionId
+                                        glyph: "reset"
+                                        iconSize: 11
+                                        cell: 22
+                                        enabled: scRow.boundSeq !== scRow.modelData.defaultSequence
+                                        tooltip: qsTr("Restore default (%1)").arg(scRow.modelData.defaultSequence)
+                                        onActivated: dialog.setShortcutDraft(scRow.actionId, scRow.modelData.defaultSequence, false)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 7. Performance & Storage
+                Item {
+                    objectName: "komaSettingsPage_performance"
+                    Flickable {
+                        anchors.fill: parent
+                        clip: true
+                        contentWidth: width
+                        contentHeight: perfCol.implicitHeight + KP.gapM
+                        boundsBehavior: Flickable.StopAtBounds
+                        ScrollBar.vertical: KpScrollBar { policy: ScrollBar.AsNeeded }
+
+                        ColumnLayout {
+                            id: perfCol
+                            width: parent.width - KP.gapM
+                            spacing: KP.gapM
+
+                            Text { text: qsTr("Performance & Storage"); color: KP.text; font.pixelSize: KP.fontM; font.weight: Font.DemiBold }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: memCol.implicitHeight + 2 * KP.gapM
+                                radius: KP.radiusS; color: KP.paneBgAlt; border.width: 1; border.color: KP.hairline
+                                ColumnLayout {
+                                    id: memCol
+                                    anchors.fill: parent; anchors.margins: KP.gapM; spacing: KP.gapS
+                                    Text { text: qsTr("Memory & History Limits"); color: KP.text; font.pixelSize: KP.fontS; font.weight: Font.DemiBold }
+                                    PropertySlider {
+                                        objectName: "komaSettingsTileCacheLimit"
+                                        Layout.fillWidth: true
+                                        label: qsTr("Viewport tile cache")
+                                        unit: " MB"
+                                        from: 64; to: 2048
+                                        value: Number((dialog.draft.performance || {}).tileCacheLimitMB || 256)
+                                        onEdited: function(v) { dialog.setPerformanceDraft("tileCacheLimitMB", v) }
+                                    }
+                                    PropertySlider {
+                                        objectName: "komaSettingsUndoLimit"
+                                        Layout.fillWidth: true
+                                        label: qsTr("Undo history limit")
+                                        unit: " steps"
+                                        from: 10; to: 200
+                                        value: Number((dialog.draft.performance || {}).undoHistoryLimit || 60)
+                                        onEdited: function(v) { dialog.setPerformanceDraft("undoHistoryLimit", v) }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: simCol.implicitHeight + 2 * KP.gapM
+                                radius: KP.radiusS; color: KP.paneBgAlt; border.width: 1; border.color: KP.hairline
+                                ColumnLayout {
+                                    id: simCol
+                                    anchors.fill: parent; anchors.margins: KP.gapM; spacing: KP.gapS
+                                    Text { text: qsTr("Realistic Wet Simulation"); color: KP.text; font.pixelSize: KP.fontS; font.weight: Font.DemiBold }
+                                    CheckBox {
+                                        objectName: "komaSettingsWetSimEnabled"
+                                        text: qsTr("Enable background wet pigment drying & diffusion")
+                                        checked: Boolean((dialog.draft.performance || {}).wetSimEnabled)
+                                        onToggled: dialog.setPerformanceDraft("wetSimEnabled", checked)
+                                    }
+                                    PropertySlider {
+                                        objectName: "komaSettingsWetSimInterval"
+                                        Layout.fillWidth: true
+                                        enabled: Boolean((dialog.draft.performance || {}).wetSimEnabled)
+                                        label: qsTr("Wet simulation interval")
+                                        unit: " ms"
+                                        from: 100; to: 1000
+                                        value: Number((dialog.draft.performance || {}).wetSimIntervalMs || 200)
+                                        onEdited: function(v) { dialog.setPerformanceDraft("wetSimIntervalMs", v) }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: recCol.implicitHeight + 2 * KP.gapM
+                                radius: KP.radiusS; color: KP.paneBgAlt; border.width: 1; border.color: KP.hairline
+                                ColumnLayout {
+                                    id: recCol
+                                    anchors.fill: parent; anchors.margins: KP.gapM; spacing: KP.gapS
+                                    Text { text: qsTr("Files & Crash Recovery"); color: KP.text; font.pixelSize: KP.fontS; font.weight: Font.DemiBold }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Text { text: qsTr("Automatic recovery"); color: KP.textMuted; font.pixelSize: KP.fontS; Layout.preferredWidth: 140 }
+                                        ComboBox {
+                                            id: recoveryChoice
+                                            objectName: "komaSettingsRecoveryInterval"
+                                            Layout.preferredWidth: 220
+                                            model: dialog.recoveryLabels
+                                            currentIndex: Math.max(0, dialog.recoveryIntervals.indexOf(Number(dialog.draft.recoveryInterval)))
+                                            onActivated: function(index) { dialog.setDraft("recoveryInterval", dialog.recoveryIntervals[index]) }
+                                            contentItem: Text {
+                                                leftPadding: KP.gapM; rightPadding: 18
+                                                text: recoveryChoice.displayText
+                                                color: KP.text; font.pixelSize: KP.fontS
+                                                verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
+                                            }
+                                            background: Rectangle { color: KP.inputBg; border.width: 1; border.color: KP.border; radius: KP.radiusS }
+                                            indicator: KpGlyph {
+                                                x: recoveryChoice.width - width - 5
+                                                y: (recoveryChoice.height - height) / 2
+                                                name: "chevron-down"; size: 10; color: KP.iconNormal
+                                            }
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: qsTr("Recovery snapshots are separate from project files and never overwrite saved artwork.")
+                                        color: KP.textSubtle; font.pixelSize: KP.fontXS; wrapMode: Text.WordWrap
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },

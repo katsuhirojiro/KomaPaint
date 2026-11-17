@@ -117,41 +117,6 @@ Rectangle {
                 spacing: 0
 
                 Rectangle {
-                    objectName: "brushEngineHeader"
-                    width: parent.width
-                    height: engineHeaderRow.implicitHeight + 2 * KP.gapXS
-                    radius: KP.radiusS
-                    color: KP.paneBgAlt
-                    border.width: 1
-                    border.color: KP.hairline
-
-                    RowLayout {
-                        id: engineHeaderRow
-                        anchors.fill: parent
-                        anchors.margins: KP.gapXS
-                        spacing: KP.gapS
-                        Text {
-                            Layout.fillWidth: true
-                            objectName: "brushEngineStatusText"
-                            text: panel.realisticEngine
-                                ? qsTr("Engine: Realistic")
-                                : qsTr("Engine: Digital")
-                            color: panel.realisticEngine ? KP.textAccent : KP.text
-                            font.pixelSize: KP.fontXS
-                            font.weight: Font.DemiBold
-                            elide: Text.ElideRight
-                        }
-                        KpButton {
-                            objectName: "brushEngineSettingsButton"
-                            small: true
-                            label: qsTr("Settings…")
-                            tip: qsTr("Open Settings → Brush Engine")
-                            onClicked: Workspace.openBrushEngineSettings()
-                        }
-                    }
-                }
-
-                Rectangle {
                     objectName: "realisticPresetNotice"
                     width: parent.width
                     visible: !panel.realisticEngine && panel.brush.blockedByDigitalEngine

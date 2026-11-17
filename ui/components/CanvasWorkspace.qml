@@ -9,6 +9,7 @@ Rectangle {
     color: KP.canvasBg
     clip: true   // the brush outline must not draw over neighbouring panels
     function fitCanvas() { canvas.fit() }
+    function resetRotation() { canvas.resetRotation() }
 
     // The artwork's rectangle in viewport coordinates. The chrome around the
     // canvas (its edge, the shadow it casts on the desk) is drawn by QML, which
@@ -57,6 +58,7 @@ Rectangle {
         document: Workspace.document
         history: Workspace.history
         inputSettings: Workspace.inputSettings
+        performanceSettings: Workspace.performanceSettings
         brushSettings: Workspace.brush
         toolSettings: Workspace.toolSettings
         brushColor: Workspace.colors.foreground

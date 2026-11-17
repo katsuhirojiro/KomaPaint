@@ -35,6 +35,7 @@ class TabletInputSettings;
 class BrushSettings;
 class CanvasDocument;
 class Layer;
+class PerformanceSettings;
 class ToolSettings;
 class UndoStack;
 class CanvasViewport : public QQuickPaintedItem {
@@ -42,6 +43,7 @@ class CanvasViewport : public QQuickPaintedItem {
     Q_PROPERTY(QObject* document READ document WRITE setDocument NOTIFY documentChanged)
     Q_PROPERTY(QObject* history READ history WRITE setHistory NOTIFY historyChanged)
     Q_PROPERTY(QObject* inputSettings READ inputSettings WRITE setInputSettings NOTIFY inputSettingsChanged)
+    Q_PROPERTY(QObject* performanceSettings READ performanceSettings WRITE setPerformanceSettings NOTIFY performanceSettingsChanged)
     Q_PROPERTY(QObject* brushSettings READ brushSettings WRITE setBrushSettings NOTIFY brushSettingsChanged)
     Q_PROPERTY(QObject* toolSettings READ toolSettings WRITE setToolSettings NOTIFY toolSettingsChanged)
     Q_PROPERTY(QColor brushColor READ brushColor WRITE setBrushColor NOTIFY brushColorChanged)
@@ -83,6 +85,8 @@ public:
     void setHistory(QObject* history);
     QObject* inputSettings() const;
     void setInputSettings(QObject* settings);
+    QObject* performanceSettings() const;
+    void setPerformanceSettings(QObject* settings);
     QObject* brushSettings() const;
     void setBrushSettings(QObject* settings);
     QObject* toolSettings() const;
@@ -170,6 +174,7 @@ signals:
     void documentChanged();
     void historyChanged();
     void inputSettingsChanged();
+    void performanceSettingsChanged();
     void brushSettingsChanged();
     void toolSettingsChanged();
     void brushColorChanged();
@@ -215,6 +220,7 @@ private:
     void refreshMaterialSimulation();
     void tickMaterialSimulation();
     void syncInputConfig();
+    void syncPerformanceConfig();
     void syncWinTabAttachment();
     void updateCursorState(const input::PointerSample& sample, bool visible);
     void clearCursorState();
@@ -243,6 +249,7 @@ private:
     QPointer<CanvasDocument> m_document;
     QPointer<UndoStack> m_history;
     QPointer<input::TabletInputSettings> m_inputSettings;
+    QPointer<PerformanceSettings> m_performanceSettings;
     QPointer<BrushSettings> m_brushSettings;
     QPointer<ToolSettings> m_toolSettings;
     QColor m_brushColor = QColor(Qt::black);
@@ -309,7 +316,8 @@ private:
     std::map<TilePoint, CacheEntry, TilePointLess> m_cache;
     std::size_t m_cacheBytes = 0;
     std::shared_ptr<DocumentMemoryBudget> m_cacheBudget;
-    static constexpr std::size_t CacheLimit = 32U * 1024U * 1024U;
+    std::size_t m_cacheLimitBytes = 256ULL * 1024ULL * 1024ULL;
+    bool m_wetSimEnabled = true;
     std::uint64_t m_clock = 0;
     std::size_t m_compositeCount = 0;
     qreal m_zoom = 100;

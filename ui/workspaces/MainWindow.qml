@@ -157,33 +157,59 @@ ApplicationWindow {
                                            30, 40, 50, 60, 70, 80, 100,
                                            120, 150, 170, 200, 256]
     readonly property bool editingText: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
-    Shortcut { sequence: "Ctrl+Z"; enabled: !root.editingText && Workspace.history && Workspace.history.canUndo; onActivated: Workspace.history.undo() }
-    Shortcut { sequence: "Ctrl+Y"; enabled: !root.editingText && Workspace.history && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
-    Shortcut { sequence: "Ctrl+N"; enabled: !root.editingText; onActivated: root.requestNewDocument() }
-    Shortcut { sequence: "Ctrl+Shift+Z"; enabled: !root.editingText && Workspace.history && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
-    Shortcut { sequence: "Ctrl+O"; enabled: !root.editingText; onActivated: root.requestOpenImage() }
-    Shortcut { sequence: "Ctrl+S"; enabled: !root.editingText && Workspace.document; onActivated: root.saveImage() }
-    Shortcut { sequence: "Ctrl+Shift+S"; enabled: !root.editingText && Workspace.document; onActivated: saveImageDialog.open() }
-    // Tool keys (shown in the tool palette tooltips).
-    Shortcut { sequence: "Z"; enabled: !root.editingText; onActivated: Workspace.activeTool = "zoom" }
-    Shortcut { sequence: "H"; enabled: !root.editingText; onActivated: Workspace.activeTool = "hand" }
-    Shortcut { sequence: "I"; enabled: !root.editingText; onActivated: Workspace.activeTool = "eyedropper" }
-    Shortcut { sequence: "P"; enabled: !root.editingText; onActivated: Workspace.activeTool = "pen" }
-    Shortcut { sequence: "N"; enabled: !root.editingText; onActivated: Workspace.activeTool = "pencil" }
-    Shortcut { sequence: "B"; enabled: !root.editingText; onActivated: Workspace.activeTool = "brush" }
-    Shortcut { sequence: "A"; enabled: !root.editingText; onActivated: Workspace.activeTool = "airbrush" }
-    Shortcut { sequence: "E"; enabled: !root.editingText; onActivated: Workspace.activeTool = "eraser" }
-    Shortcut { sequence: "G"; enabled: !root.editingText; onActivated: Workspace.activeTool = "fill" }
-    Shortcut { sequence: "W"; enabled: !root.editingText; onActivated: Workspace.activeTool = "wand" }
-    Shortcut { sequence: "L"; enabled: !root.editingText; onActivated: Workspace.activeTool = "lasso" }
-    Shortcut { sequence: "M"; enabled: !root.editingText; onActivated: Workspace.activeTool = "selection" }
-    Shortcut { sequence: "V"; enabled: !root.editingText; onActivated: Workspace.activeTool = "move" }
-    Shortcut { sequence: "K"; enabled: !root.editingText; onActivated: Workspace.activeTool = "transform" }
-    Shortcut { sequence: "U"; enabled: !root.editingText; onActivated: Workspace.activeTool = "rectangle" }
-    Shortcut { sequence: "T"; enabled: !root.editingText; onActivated: Workspace.activeTool = "text" }
-    Shortcut { sequence: "Ctrl+A"; enabled: !root.editingText && Workspace.document !== null; onActivated: Workspace.selectAll() }
-    Shortcut { sequence: "Ctrl+D"; enabled: !root.editingText && Workspace.hasSelection; onActivated: Workspace.deselect() }
-    Shortcut { sequence: "Ctrl+Shift+I"; enabled: !root.editingText && Workspace.document !== null; onActivated: Workspace.invertSelection() }
+    readonly property bool shortcutsEnabled: !root.editingText && !komaSettingsDialog.capturingShortcut
+    function shortcutSeq(actionId) {
+        if (!Workspace.shortcuts || !Workspace.shortcuts.bindings) return ""
+        const s = Workspace.shortcuts.bindings[actionId]
+        return s ? String(s) : ""
+    }
+    function menuShortcutSuffix(actionId) {
+        const s = shortcutSeq(actionId)
+        return s.length > 0 ? "\t" + s : ""
+    }
+    function toggleSidePanels() {
+        const collapse = !Dock.isAreaCollapsed("left") || !Dock.isAreaCollapsed("right")
+        Dock.setAreaCollapsed("left", collapse)
+        Dock.setAreaCollapsed("right", collapse)
+    }
+
+    Shortcut { sequence: root.shortcutSeq("edit.undo"); enabled: root.shortcutsEnabled && Workspace.history && Workspace.history.canUndo; onActivated: Workspace.history.undo() }
+    Shortcut { sequence: root.shortcutSeq("edit.redo"); enabled: root.shortcutsEnabled && Workspace.history && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
+    Shortcut { sequence: root.shortcutSeq("edit.redoAlt"); enabled: root.shortcutsEnabled && Workspace.history && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
+    Shortcut { sequence: root.shortcutSeq("file.new"); enabled: root.shortcutsEnabled; onActivated: root.requestNewDocument() }
+    Shortcut { sequence: root.shortcutSeq("file.open"); enabled: root.shortcutsEnabled; onActivated: root.requestOpenImage() }
+    Shortcut { sequence: root.shortcutSeq("file.save"); enabled: root.shortcutsEnabled && Workspace.document; onActivated: root.saveImage() }
+    Shortcut { sequence: root.shortcutSeq("file.saveAs"); enabled: root.shortcutsEnabled && Workspace.document; onActivated: saveImageDialog.open() }
+    // Tool shortcuts driven centrally by ShortcutManager.
+    Shortcut { sequence: root.shortcutSeq("tool.zoom"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "zoom" }
+    Shortcut { sequence: root.shortcutSeq("tool.hand"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "hand" }
+    Shortcut { sequence: root.shortcutSeq("tool.eyedropper"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "eyedropper" }
+    Shortcut { sequence: root.shortcutSeq("tool.pen"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "pen" }
+    Shortcut { sequence: root.shortcutSeq("tool.pencil"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "pencil" }
+    Shortcut { sequence: root.shortcutSeq("tool.brush"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "brush" }
+    Shortcut { sequence: root.shortcutSeq("tool.airbrush"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "airbrush" }
+    Shortcut { sequence: root.shortcutSeq("tool.eraser"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "eraser" }
+    Shortcut { sequence: root.shortcutSeq("tool.smudge"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "smudge" }
+    Shortcut { sequence: root.shortcutSeq("tool.fill"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "fill" }
+    Shortcut { sequence: root.shortcutSeq("tool.gradient"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "gradient" }
+    Shortcut { sequence: root.shortcutSeq("tool.wand"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "wand" }
+    Shortcut { sequence: root.shortcutSeq("tool.lasso"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "lasso" }
+    Shortcut { sequence: root.shortcutSeq("tool.selection"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "selection" }
+    Shortcut { sequence: root.shortcutSeq("tool.move"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "move" }
+    Shortcut { sequence: root.shortcutSeq("tool.transform"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "transform" }
+    Shortcut { sequence: root.shortcutSeq("tool.line"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "line" }
+    Shortcut { sequence: root.shortcutSeq("tool.curveline"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "curveline" }
+    Shortcut { sequence: root.shortcutSeq("tool.rectangle"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "rectangle" }
+    Shortcut { sequence: root.shortcutSeq("tool.circle"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "circle" }
+    Shortcut { sequence: root.shortcutSeq("tool.text"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "text" }
+    Shortcut { sequence: root.shortcutSeq("select.all"); enabled: root.shortcutsEnabled && Workspace.document !== null; onActivated: Workspace.selectAll() }
+    Shortcut { sequence: root.shortcutSeq("select.deselect"); enabled: root.shortcutsEnabled && Workspace.hasSelection; onActivated: Workspace.deselect() }
+    Shortcut { sequence: root.shortcutSeq("select.invert"); enabled: root.shortcutsEnabled && Workspace.document !== null; onActivated: Workspace.invertSelection() }
+    Shortcut { sequence: root.shortcutSeq("view.resetRotation"); enabled: root.shortcutsEnabled && dock.canvasItem !== null; onActivated: if (dock.canvasItem && typeof dock.canvasItem.resetRotation === "function") dock.canvasItem.resetRotation() }
+    Shortcut { sequence: root.shortcutSeq("view.togglePanels"); enabled: root.shortcutsEnabled && Workspace.document !== null; onActivated: root.toggleSidePanels() }
+    Shortcut { sequence: root.shortcutSeq("color.swap"); enabled: root.shortcutsEnabled; onActivated: Workspace.colors.swap() }
+    Shortcut { sequence: root.shortcutSeq("color.reset"); enabled: root.shortcutsEnabled; onActivated: Workspace.colors.reset() }
+    Shortcut { sequence: root.shortcutSeq("layer.newRaster"); enabled: root.shortcutsEnabled && Workspace.document !== null; onActivated: Workspace.layers.addLayer() }
     // [ and ] step to the next smaller / larger size of the Brush Size panel.
     function stepBrushSize(direction) {
         if (!Workspace.subTools.paintTool) return
@@ -191,8 +217,8 @@ ApplicationWindow {
         if (direction > 0) { for (let i = 0; i < sizes.length; ++i) if (sizes[i] > now) { Workspace.brush.size = sizes[i]; return } }
         else { for (let i = sizes.length - 1; i >= 0; --i) if (sizes[i] < now) { Workspace.brush.size = sizes[i]; return } }
     }
-    Shortcut { sequence: "["; enabled: !root.editingText; onActivated: root.stepBrushSize(-1) }
-    Shortcut { sequence: "]"; enabled: !root.editingText; onActivated: root.stepBrushSize(1) }
+    Shortcut { sequence: root.shortcutSeq("brush.sizeDown"); enabled: root.shortcutsEnabled; onActivated: root.stepBrushSize(-1) }
+    Shortcut { sequence: root.shortcutSeq("brush.sizeUp"); enabled: root.shortcutsEnabled; onActivated: root.stepBrushSize(1) }
     Connections {
         target: Workspace.history
         function onErrorOccurred(message) { historyErrorText.text = message; historyErrorDialog.open() }
@@ -439,20 +465,20 @@ ApplicationWindow {
             KpMenu {
                 title: qsTr("&File")
                 KpMenuItem {
-                    text: qsTr("&New...")
+                    text: qsTr("&New...") + root.menuShortcutSuffix("file.new")
                     onTriggered: root.requestNewDocument()
                 }
                 KpMenuItem {
-                    text: qsTr("&Open...\tCtrl+O")
+                    text: qsTr("&Open...") + root.menuShortcutSuffix("file.open")
                     onTriggered: root.requestOpenImage()
                 }
                 KpMenuItem {
-                    text: qsTr("&Save\tCtrl+S")
+                    text: qsTr("&Save") + root.menuShortcutSuffix("file.save")
                     enabled: Workspace.document !== null
                     onTriggered: if (Workspace.document) root.saveImage()
                 }
                 KpMenuItem {
-                    text: qsTr("Save &As...\tCtrl+Shift+S")
+                    text: qsTr("Save &As...") + root.menuShortcutSuffix("file.saveAs")
                     enabled: Workspace.document !== null
                     onTriggered: if (Workspace.document) saveImageDialog.open()
                 }
@@ -497,12 +523,12 @@ ApplicationWindow {
             KpMenu {
                 title: qsTr("&Edit")
                 KpMenuItem {
-                    text: qsTr("&Undo")
+                    text: qsTr("&Undo") + root.menuShortcutSuffix("edit.undo")
                     enabled: Workspace.history !== null && Workspace.history.canUndo
                     onTriggered: if (Workspace.history) Workspace.history.undo()
                 }
                 KpMenuItem {
-                    text: qsTr("&Redo")
+                    text: qsTr("&Redo") + root.menuShortcutSuffix("edit.redo")
                     enabled: Workspace.history !== null && Workspace.history.canRedo
                     onTriggered: if (Workspace.history) Workspace.history.redo()
                 }
@@ -529,6 +555,11 @@ ApplicationWindow {
                 KpMenuSeparator {
                 }
                 KpMenuItem {
+                    objectName: "keyboardShortcutsMenuItem"
+                    text: qsTr("Keyboard Shortcuts...")
+                    onTriggered: komaSettingsDialog.openCategory("shortcuts")
+                }
+                KpMenuItem {
                     objectName: "preferencesMenuItem"
                     text: qsTr("Preferences...")
                     onTriggered: preferencesDialog.open()
@@ -537,17 +568,17 @@ ApplicationWindow {
             KpMenu {
                 title: qsTr("&Select")
                 KpMenuItem {
-                    text: qsTr("Select &All\tCtrl+A")
+                    text: qsTr("Select &All") + root.menuShortcutSuffix("select.all")
                     enabled: Workspace.document !== null
                     onTriggered: Workspace.selectAll()
                 }
                 KpMenuItem {
-                    text: qsTr("&Deselect\tCtrl+D")
+                    text: qsTr("&Deselect") + root.menuShortcutSuffix("select.deselect")
                     enabled: Workspace.hasSelection
                     onTriggered: Workspace.deselect()
                 }
                 KpMenuItem {
-                    text: qsTr("&Invert Selection\tCtrl+Shift+I")
+                    text: qsTr("&Invert Selection") + root.menuShortcutSuffix("select.invert")
                     enabled: Workspace.document !== null
                     onTriggered: Workspace.invertSelection()
                 }
@@ -573,28 +604,32 @@ ApplicationWindow {
                 KpMenuItem {
                     action: Action {
                         text: qsTr("Zoom &In")
-                        shortcut: "Ctrl++"
+                        shortcut: root.shortcutSeq("view.zoomIn")
+                        enabled: root.shortcutsEnabled
                         onTriggered: Workspace.zoomIn()
                     }
                 }
                 KpMenuItem {
                     action: Action {
                         text: qsTr("Zoom &Out")
-                        shortcut: "Ctrl+-"
+                        shortcut: root.shortcutSeq("view.zoomOut")
+                        enabled: root.shortcutsEnabled
                         onTriggered: Workspace.zoomOut()
                     }
                 }
                 KpMenuItem {
                     action: Action {
                         text: qsTr("&Actual Pixels")
-                        shortcut: "Ctrl+1"
+                        shortcut: root.shortcutSeq("view.actualPixels")
+                        enabled: root.shortcutsEnabled
                         onTriggered: Workspace.resetZoom()
                     }
                 }
                 KpMenuItem {
                     action: Action {
                         text: qsTr("Fit to Window")
-                        shortcut: "Ctrl+0"
+                        shortcut: root.shortcutSeq("view.fitToWindow")
+                        enabled: root.shortcutsEnabled
                         onTriggered: dock.fitCanvas()
                     }
                 }

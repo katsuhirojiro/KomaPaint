@@ -1,5 +1,6 @@
 #include "CanvasViewport.h"
 #include "BrushSettings.h"
+#include "PerformanceSettings.h"
 #include "ToolSettings.h"
 #include "../input/QtPointerAdapter.h"
 #include "../input/TabletInputSettings.h"
@@ -288,6 +289,38 @@ void CanvasViewport::setInputSettings(QObject* settings)
     emit inputSettingsChanged();
 }
 
+QObject* CanvasViewport::performanceSettings() const { return m_performanceSettings.data(); }
+void CanvasViewport::setPerformanceSettings(QObject* settings)
+{
+    auto* next = qobject_cast<PerformanceSettings*>(settings);
+    if (m_performanceSettings == next) return;
+    if (m_performanceSettings) disconnect(m_performanceSettings, nullptr, this, nullptr);
+    m_performanceSettings = next;
+    if (m_performanceSettings) {
+        connect(m_performanceSettings, &PerformanceSettings::changed,
+                this, &CanvasViewport::syncPerformanceConfig);
+        syncPerformanceConfig();
+    }
+    emit performanceSettingsChanged();
+}
+
+void CanvasViewport::syncPerformanceConfig()
+{
+    if (!m_performanceSettings) return;
+    m_cacheLimitBytes = static_cast<std::size_t>(
+        std::max(64, m_performanceSettings->tileCacheLimitMB())) * 1024ULL * 1024ULL;
+    while (!m_cache.empty() && m_cacheBytes > m_cacheLimitBytes) {
+        auto victim = std::min_element(m_cache.begin(), m_cache.end(),
+            [](const auto& a, const auto& b) { return a.second.used < b.second.used; });
+        eraseCacheTile(victim->first);
+    }
+    m_wetSimEnabled = m_performanceSettings->wetSimEnabled();
+    if (m_materialTimer) {
+        m_materialTimer->setInterval(std::clamp(m_performanceSettings->wetSimIntervalMs(), 100, 1000));
+    }
+    refreshMaterialSimulation();
+}
+
 QObject* CanvasViewport::brushSettings() const { return m_brushSettings.data(); }
 void CanvasViewport::setBrushSettings(QObject* settings)
 {
@@ -442,6 +475,10 @@ void CanvasViewport::invalidateAll() { schedule(QRectF(0, 0, width(), height()))
 void CanvasViewport::refreshMaterialSimulation()
 {
     if (!m_materialTimer) return;
+    if (!m_wetSimEnabled) {
+        m_materialTimer->stop();
+        return;
+    }
     bool active = false;
     if (m_document) {
         const auto* model = m_document->layers();
@@ -462,9 +499,9 @@ void CanvasViewport::refreshMaterialSimulation()
 
 void CanvasViewport::tickMaterialSimulation()
 {
-    if (!m_document || m_materialStroke) {
+    if (!m_wetSimEnabled || !m_document || m_materialStroke) {
         m_lastMaterialTick = m_materialClock.elapsed();
-        if (!m_document) m_materialTimer->stop();
+        if (!m_document || !m_wetSimEnabled) m_materialTimer->stop();
         return;
     }
     const qint64 now = m_materialClock.elapsed();
@@ -727,11 +764,11 @@ QImage CanvasViewport::composedTile(TilePoint tile, const std::vector<CompositeL
                     rowBytes);
     ++m_compositeCount;
     const auto bytes = static_cast<std::size_t>(image.sizeInBytes());
-    while (!m_cache.empty() && (bytes > CacheLimit || m_cacheBytes > CacheLimit - bytes)) {
+    while (!m_cache.empty() && (bytes > m_cacheLimitBytes || m_cacheBytes > m_cacheLimitBytes - bytes)) {
         auto victim = std::min_element(m_cache.begin(), m_cache.end(), [](const auto& a, const auto& b) { return a.second.used < b.second.used; });
         eraseCacheTile(victim->first);
     }
-    if (bytes <= CacheLimit && (!m_cacheBudget || m_cacheBudget->reserve(DocumentMemoryBudget::Category::CompositeCache, bytes))) {
+    if (bytes <= m_cacheLimitBytes && (!m_cacheBudget || m_cacheBudget->reserve(DocumentMemoryBudget::Category::CompositeCache, bytes))) {
         try {
             m_cache.emplace(tile, CacheEntry{image, bytes, ++m_clock});
             m_cacheBytes += bytes;

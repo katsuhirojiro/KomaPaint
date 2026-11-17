@@ -31,6 +31,8 @@ public:
     bool commitStroke();
     bool cancelStroke();
     bool strokeActive() const { return bool(m_current); }
+    void setMaxCommands(int count);
+    int maxCommands() const { return static_cast<int>(m_maxCommands); }
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
     Q_INVOKABLE void clear();
@@ -73,5 +75,6 @@ private:
     TilePoint m_lastCapturedMaterialTile{};
     bool m_hasLastCapturedMaterialTile = false;
     std::size_t m_cursor = 0, m_bytes = 0, m_currentBytes = 0;
+    std::size_t m_maxCommands = 0; // 0 = unlimited
 };
 } // namespace komapaint

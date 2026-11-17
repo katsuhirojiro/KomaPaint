@@ -205,16 +205,16 @@ void TestDocking::tabIntoExistingGroup()
     QCOMPARE(group.value(QStringLiteral("active")).toInt(), 1);
     QCOMPARE(dock.activePanel(), QStringLiteral("color"));
     QCOMPARE(dock.groupOf(QStringLiteral("color")), layersGroup);
-    // The old group still exists: Properties was left behind.
-    QVERIFY(dock.groupOf(QStringLiteral("properties")) > 0);
-    QVERIFY(dock.isVisible(QStringLiteral("properties")));
+    // The old colour group still exists: Palette and Color Mixer were left behind.
+    QVERIFY(dock.groupOf(QStringLiteral("palette")) > 0);
+    QVERIFY(dock.isVisible(QStringLiteral("palette")));
     QVERIFY(layoutProblem(dock.tree()).isEmpty());
     QVERIFY(uniqueProblem(dock.tree()).isEmpty());
 
     // Appending without an index puts the tab last.
-    QVERIFY(dock.moveToGroup(QStringLiteral("properties"), layersGroup));
+    QVERIFY(dock.moveToGroup(QStringLiteral("palette"), layersGroup));
     QCOMPARE(dock.nodeById(layersGroup).value(QStringLiteral("panels")).toStringList(),
-             QStringList({ QStringLiteral("layers"), QStringLiteral("color"), QStringLiteral("properties") }));
+             QStringList({ QStringLiteral("layers"), QStringLiteral("color"), QStringLiteral("palette") }));
     QVERIFY(layoutProblem(dock.tree()).isEmpty());
 }
 
@@ -350,7 +350,7 @@ void TestDocking::resizingRespectsMinimumSizes()
     // constrained; the left column keeps its own share.
     const qreal second = after.at(2).toMap().value(QStringLiteral("fraction")).toDouble();
     QVERIFY2(second >= 0.199, qPrintable(QString::number(second)));            // 200 / 1000
-    QVERIFY(qAbs(after.at(0).toMap().value(QStringLiteral("fraction")).toDouble() - 0.185) < 0.001);
+    QVERIFY(qAbs(after.at(0).toMap().value(QStringLiteral("fraction")).toDouble() - 0.175) < 0.001);
 
     // Growing the left column pushes only its neighbour.
     dock.setFraction(splitId, 0, 0.3, 1000, 200);
