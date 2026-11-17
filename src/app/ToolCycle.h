@@ -24,10 +24,6 @@ inline QStringList groupForAction(const QString& actionId)
     if (actionId == QStringLiteral("tool.rectangle"))
         return { QStringLiteral("rectangle"), QStringLiteral("circle"),
                  QStringLiteral("line"), QStringLiteral("curveline") };
-    // Marquee family (M).
-    if (actionId == QStringLiteral("tool.selection"))
-        return { QStringLiteral("selection"), QStringLiteral("lasso"),
-                 QStringLiteral("wand") };
     // Fill is a family of one palette tool whose members are sub-tools, so the
     // single entry tells the caller to walk presets instead of switching tools.
     if (actionId == QStringLiteral("tool.fill"))

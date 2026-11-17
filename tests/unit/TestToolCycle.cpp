@@ -11,7 +11,6 @@ class TestToolCycle : public QObject {
 private slots:
     void brushKeyCyclesBrushAndAirbrush();
     void figureKeyCyclesShapeTools();
-    void selectionKeyCyclesMarqueeTools();
     void unrelatedToolEntersFamilyAtItsFirstMember();
     void penKeyCyclesPenAndPencil();
     void fillFamilyWalksSubTools();
@@ -33,15 +32,6 @@ void TestToolCycle::figureKeyCyclesShapeTools()
                                   QStringLiteral("line"), QStringLiteral("curveline") }));
     QCOMPARE(toolcycle::nextTool(group, QStringLiteral("rectangle")), QStringLiteral("circle"));
     QCOMPARE(toolcycle::nextTool(group, QStringLiteral("curveline")), QStringLiteral("rectangle"));
-}
-
-void TestToolCycle::selectionKeyCyclesMarqueeTools()
-{
-    const QStringList group = toolcycle::groupForAction(QStringLiteral("tool.selection"));
-    QCOMPARE(group, QStringList({ QStringLiteral("selection"), QStringLiteral("lasso"),
-                                  QStringLiteral("wand") }));
-    QCOMPARE(toolcycle::nextTool(group, QStringLiteral("lasso")), QStringLiteral("wand"));
-    QCOMPARE(toolcycle::nextTool(group, QStringLiteral("wand")), QStringLiteral("selection"));
 }
 
 void TestToolCycle::unrelatedToolEntersFamilyAtItsFirstMember()
@@ -80,6 +70,11 @@ void TestToolCycle::keysWithoutFamilyStaySingle()
     QVERIFY(toolcycle::groupForAction(QStringLiteral("tool.eraser")).isEmpty());
     QVERIFY(toolcycle::groupForAction(QStringLiteral("tool.pencil")).isEmpty());
     QVERIFY(toolcycle::groupForAction(QStringLiteral("tool.zoom")).isEmpty());
+    // The marquee tools were not part of the request, so each key still selects
+    // exactly its own tool.
+    QVERIFY(toolcycle::groupForAction(QStringLiteral("tool.selection")).isEmpty());
+    QVERIFY(toolcycle::groupForAction(QStringLiteral("tool.lasso")).isEmpty());
+    QVERIFY(toolcycle::groupForAction(QStringLiteral("tool.wand")).isEmpty());
     QVERIFY(toolcycle::nextTool({}, QStringLiteral("brush")).isEmpty());
 }
 

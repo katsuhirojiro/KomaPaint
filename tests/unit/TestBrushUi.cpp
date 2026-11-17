@@ -705,7 +705,9 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
     QVERIFY(setSlider(app, QStringLiteral("brushSizeSlider"), 0.0));
     QCOMPARE(brush->size(), int(BrushSettings::MinSize));
     QVERIFY(setSlider(app, QStringLiteral("brushSizeSlider"), 0.5));
-    QVERIFY(brush->size() > 40 && brush->size() < 90);                // the bar gives small sizes more room
+    // The rail is logarithmic across the engine's full range, so the middle is
+    // the geometric mean of 1 and MaxSize (~90 px), not a quarter of the way in.
+    QVERIFY(brush->size() > 40 && brush->size() < 200);               // the bar gives small sizes more room
 
     // Digital is the default Brush Engine, so physical material controls stay hidden.
     // Brush Engine selector itself belongs in Koma Settings, NOT in Tool Properties.
