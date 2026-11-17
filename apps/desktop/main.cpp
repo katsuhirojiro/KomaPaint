@@ -1,12 +1,14 @@
 #include "KomaPaintApp.h"
 #include "CommandLine.h"
 #include "FileAssociation.h"
+#include "core/Version.h"
 
 #include <QApplication>
 #include <QCoreApplication>
 #include <QFile>
 #include <QMessageBox>
 #include <QQuickStyle>
+#include <QSettings>
 #include <QString>
 #include <QStringList>
 #include <QtLogging>
@@ -137,6 +139,19 @@ int main(int argc, char* argv[])
 
     const int headless = runHeadlessIfRequested(argc, argv);
     if (headless != -1) return headless;
+
+    // Preserve high-frequency stylus/pointer samples without Qt move compression.
+    QCoreApplication::setAttribute(Qt::AA_CompressHighFrequencyEvents, false);
+
+#if defined(Q_OS_WIN)
+    if (!qEnvironmentVariableIsSet("QT_QPA_PLATFORM")) {
+        QSettings bootSettings(QStringLiteral(KOMAPAINT_ORGANIZATION),
+                               QStringLiteral(KOMAPAINT_PRETTY_NAME));
+        if (bootSettings.value(QStringLiteral("input/windowsDisableWmPointer"), false).toBool()) {
+            qputenv("QT_QPA_PLATFORM", QByteArrayLiteral("windows:nowmpointer"));
+        }
+    }
+#endif
 
     // Select the Qt Quick Controls style BEFORE QApplication construction.
     QQuickStyle::setStyle("Basic");

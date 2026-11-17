@@ -49,6 +49,7 @@ endif()
 
 target_link_libraries(komapaint_app PUBLIC
     komapaint::core
+    komapaint::input
     komapaint::canvas
     komapaint::drawing
     komapaint::layers

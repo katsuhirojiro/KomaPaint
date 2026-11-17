@@ -496,6 +496,38 @@ Rectangle {
                                 onEdited: function(v) { panel.brush.pressureOpacity = v }
                             }
                             PropertySlider {
+                                objectName: "digitalPressureFlowSlider"
+                                width: parent.width
+                                label: qsTr("Pressure → Density")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.pressureFlow
+                                onEdited: function(v) { panel.brush.pressureFlow = v }
+                            }
+                            PropertySlider {
+                                objectName: "digitalTiltSizeSlider"
+                                width: parent.width
+                                label: qsTr("Tilt → Size")
+                                unit: "%"
+                                from: 0
+                                to: 100
+                                value: panel.brush.tiltSize
+                                onEdited: function(v) { panel.brush.tiltSize = v }
+                            }
+                            CheckBox {
+                                objectName: "digitalTiltAngleCheck"
+                                text: qsTr("Tilt affects tip angle & flatness")
+                                checked: panel.brush.tiltAngle
+                                onToggled: panel.brush.tiltAngle = checked
+                            }
+                            CheckBox {
+                                objectName: "digitalStylusRotationCheck"
+                                text: qsTr("Follow stylus barrel rotation")
+                                checked: panel.brush.stylusRotation
+                                onToggled: panel.brush.stylusRotation = checked
+                            }
+                            PropertySlider {
                                 objectName: "digitalPressureGammaSlider"
                                 width: parent.width
                                 label: qsTr("Pressure curve")

@@ -21,8 +21,12 @@ class BrushSettings : public QObject {
     // Digital brush pressure dynamics & blending (used only by the Digital engine).
     Q_PROPERTY(int pressureSize READ pressureSize WRITE setPressureSize NOTIFY changed)
     Q_PROPERTY(int pressureOpacity READ pressureOpacity WRITE setPressureOpacity NOTIFY changed)
+    Q_PROPERTY(int pressureFlow READ pressureFlow WRITE setPressureFlow NOTIFY changed)
     Q_PROPERTY(int pressureGamma READ pressureGamma WRITE setPressureGamma NOTIFY changed)
     Q_PROPERTY(int minSizeRatio READ minSizeRatio WRITE setMinSizeRatio NOTIFY changed)
+    Q_PROPERTY(int tiltSize READ tiltSize WRITE setTiltSize NOTIFY changed)
+    Q_PROPERTY(bool tiltAngle READ tiltAngle WRITE setTiltAngle NOTIFY changed)
+    Q_PROPERTY(bool stylusRotation READ stylusRotation WRITE setStylusRotation NOTIFY changed)
     Q_PROPERTY(int blendStrength READ blendStrength WRITE setBlendStrength NOTIFY changed)
     Q_PROPERTY(int colorMix READ colorMix WRITE setColorMix NOTIFY changed)
     // True while an eraser is selected: strokes remove paint from the layer.
@@ -89,8 +93,12 @@ public:
     int stabilization() const { return m_stabilization; }
     int pressureSize() const { return m_pressureSize; }
     int pressureOpacity() const { return m_pressureOpacity; }
+    int pressureFlow() const { return m_pressureFlow; }
     int pressureGamma() const { return m_pressureGamma; }
     int minSizeRatio() const { return m_minSizeRatio; }
+    int tiltSize() const { return m_tiltSize; }
+    bool tiltAngle() const { return m_tiltAngle; }
+    bool stylusRotation() const { return m_stylusRotation; }
     int blendStrength() const { return m_blendStrength; }
     int colorMix() const { return m_colorMix; }
     bool erase() const { return m_erase; }
@@ -151,8 +159,12 @@ public:
     void setStabilization(int v) { v = qBound(0, v, 100); if (m_stabilization != v) { m_stabilization = v; emit changed(); } }
     void setPressureSize(int v) { v = qBound(0, v, 100); if (m_pressureSize != v) { m_pressureSize = v; emit changed(); } }
     void setPressureOpacity(int v) { v = qBound(0, v, 100); if (m_pressureOpacity != v) { m_pressureOpacity = v; emit changed(); } }
+    void setPressureFlow(int v) { v = qBound(0, v, 100); if (m_pressureFlow != v) { m_pressureFlow = v; emit changed(); } }
     void setPressureGamma(int v) { v = qBound(40, v, 200); if (m_pressureGamma != v) { m_pressureGamma = v; emit changed(); } }
     void setMinSizeRatio(int v) { v = qBound(5, v, 100); if (m_minSizeRatio != v) { m_minSizeRatio = v; emit changed(); } }
+    void setTiltSize(int v) { v = qBound(0, v, 100); if (m_tiltSize != v) { m_tiltSize = v; emit changed(); } }
+    void setTiltAngle(bool v) { if (m_tiltAngle != v) { m_tiltAngle = v; emit changed(); } }
+    void setStylusRotation(bool v) { if (m_stylusRotation != v) { m_stylusRotation = v; emit changed(); } }
     void setBlendStrength(int v) { v = qBound(0, v, 100); if (m_blendStrength != v) { m_blendStrength = v; emit changed(); } }
     void setColorMix(int v) { v = qBound(0, v, 100); if (m_colorMix != v) { m_colorMix = v; emit changed(); } }
     void setErase(bool v) { if (m_erase != v) { m_erase = v; emit changed(); } }
@@ -235,8 +247,12 @@ private:
     QString m_tipStyle = QStringLiteral("round");
     int m_pressureSize = 0;
     int m_pressureOpacity = 100;
+    int m_pressureFlow = 0;
     int m_pressureGamma = 100;
     int m_minSizeRatio = 15;
+    int m_tiltSize = 0;
+    bool m_tiltAngle = false;
+    bool m_stylusRotation = false;
     int m_blendStrength = 0;
     int m_colorMix = 100;
     bool m_erase = false;

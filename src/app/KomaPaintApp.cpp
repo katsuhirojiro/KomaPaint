@@ -36,6 +36,7 @@ KomaPaintApp::KomaPaintApp(const QString& fileToOpen, QObject* parent)
                                                 QStringLiteral("digital")).toString());
     const int recoveryInterval = m_settings.value(QStringLiteral("recovery/intervalMinutes"), 10).toInt();
     m_workspace.setRecoveryInterval(recoveryInterval);
+    m_workspace.bindInputSettings(&m_settings);
 
     connect(&m_workspace, &WorkspaceState::brushEngineChanged, this, [this](const QString& engine) {
         m_settings.setValue(QStringLiteral("tools/brushEngine"), engine);
@@ -54,6 +55,7 @@ void KomaPaintApp::registerTypes()
     qRegisterMetaType<PanelManager*>();
     qRegisterMetaType<DockModel*>();
     qRegisterMetaType<PaintMixerController*>();
+    qRegisterMetaType<komapaint::input::TabletInputSettings*>();
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
     qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
 }

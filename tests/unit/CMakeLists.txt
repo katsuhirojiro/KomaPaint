@@ -107,6 +107,20 @@ target_link_libraries(test_performance_benchmark PRIVATE komapaint::drawing)
 set_target_properties(test_performance_benchmark PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_performance_benchmark COMMAND test_performance_benchmark)
 
+add_executable(test_pointer_input TestPointerInput.cpp)
+target_link_libraries(test_pointer_input PRIVATE komapaint::input_core komapaint::drawing)
+set_target_properties(test_pointer_input PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_pointer_input COMMAND test_pointer_input)
+
+add_executable(test_input_performance_benchmark TestInputPerformanceBenchmark.cpp)
+target_link_libraries(test_input_performance_benchmark PRIVATE komapaint::input_core komapaint::drawing)
+set_target_properties(test_input_performance_benchmark PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_input_performance_benchmark COMMAND test_input_performance_benchmark)
+
+komapaint_add_test(test_tablet_viewport TestTabletViewport.cpp)
+target_sources(test_tablet_viewport PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_tablet_viewport PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
+
 komapaint_add_test(test_paint_mixer_app TestPaintMixerApp.cpp)
 target_link_libraries(test_paint_mixer_app PRIVATE komapaint::app komapaint::files Qt6::Widgets Qt6::Quick)
 komapaint_add_test(test_material_document TestMaterialDocument.cpp)

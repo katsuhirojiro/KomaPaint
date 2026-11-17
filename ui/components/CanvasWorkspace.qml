@@ -56,6 +56,10 @@ Rectangle {
         anchors.fill: parent
         document: Workspace.document
         history: Workspace.history
+        inputSettings: Workspace.inputSettings
+        brushSettings: Workspace.brush
+        brushColor: Workspace.colors.foreground
+        activeTool: Workspace.activeTool
         zoom: Workspace.zoom
         // The desk and the transparency checkerboard are part of the theme,
         // so a theme switch re-paints the canvas chrome as well.
@@ -65,6 +69,14 @@ Rectangle {
         onZoomRequested: function(value) { if (canvas.document === Workspace.document) Workspace.zoom = value }
         onViewChanged: { ws.rememberView(); ws.refreshPaper() }
         onStrokeError: function(message) { brushError.text = message; brushErrorDialog.open() }
+        onEyedropperPicked: function(picked) { Workspace.colors.foreground = picked }
+        onBarrelActionRequested: function(action) {
+            if (action === "right_click") {
+                canvasContextMenu.x = Math.max(8, Math.min(ws.width - canvasContextMenu.width - 8, canvas.cursorPos.x))
+                canvasContextMenu.y = Math.max(8, Math.min(ws.height - canvasContextMenu.height - 8, canvas.cursorPos.y))
+                canvasContextMenu.open()
+            }
+        }
         // "Fit to window" is asked of the canvas, which is the only thing that
         // knows how large the viewport currently is.
         Connections {
@@ -128,68 +140,65 @@ Rectangle {
         }
     }
     // Outline of the brush tip at its real size on the artwork, following the
-    // pointer while a painting tool is active.
-    HoverHandler {
-        id: brushHover
-        enabled: Workspace.subTools.paintTool
-        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad | PointerDevice.Stylus
-    }
-    Rectangle {
+    // unified C++ pointer/stylus hover state while a painting tool is active.
+    Item {
         id: brushOutline
         objectName: "brushOutline"
-        readonly property real diameter: Math.max(3, Workspace.brush.size * canvas.zoom / 100)
-        visible: Workspace.subTools.paintTool && brushHover.hovered
-        x: brushHover.point.position.x - diameter / 2
-        y: brushHover.point.position.y - diameter / 2
+        readonly property real tiltMag: canvas.cursorHasTilt
+            ? Math.min(1.0, Math.hypot(canvas.cursorTiltX, canvas.cursorTiltY) / 90.0) : 0.0
+        readonly property real tiltScale: (canvas.cursorHasTilt && Workspace.brush.tiltSize > 0)
+            ? (1.0 + (Workspace.brush.tiltSize / 100.0) * tiltMag * 1.5) : 1.0
+        readonly property real diameter: Math.max(3, Workspace.brush.size * tiltScale * canvas.zoom / 100)
+        readonly property real aspect: Math.max(1.0, (Workspace.brush.aspectRatio / 100.0)
+            * ((canvas.cursorHasTilt && Workspace.brush.tiltAngle) ? (1.0 + tiltMag * 0.75) : 1.0))
+        readonly property real outlineHeight: Math.max(3, diameter / aspect)
+        readonly property real angleDeg: Workspace.brush.tipAngle
+            + ((canvas.cursorHasTilt && Workspace.brush.tiltAngle && tiltMag > 0.02)
+               ? (Math.atan2(canvas.cursorTiltY, canvas.cursorTiltX) * 180.0 / Math.PI) : 0.0)
+            + (Workspace.brush.stylusRotation ? canvas.cursorRotationDeg : 0.0)
+        visible: Workspace.subTools.paintTool && canvas.cursorVisible
+        x: canvas.cursorPos.x - diameter / 2
+        y: canvas.cursorPos.y - outlineHeight / 2
         width: diameter
-        height: diameter
-        radius: diameter / 2
-        color: "transparent"
-        border.width: 1
-        border.color: "#f2f2f2"
-        antialiasing: true
+        height: outlineHeight
+        rotation: angleDeg
         Rectangle {
             anchors.fill: parent
-            anchors.margins: 1
-            radius: width / 2
+            radius: Math.min(width, height) / 2
             color: "transparent"
             border.width: 1
-            border.color: "#80000000"
+            border.color: canvas.cursorEraserActive ? KP.ember : "#f2f2f2"
             antialiasing: true
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: Math.min(width, height) / 2
+                color: "transparent"
+                border.width: 1
+                border.color: "#80000000"
+                antialiasing: true
+            }
         }
     }
-    // Qt Quick pointer handlers deliver mouse and stylus samples independently.
-    PointHandler {
-        id: mouseBrush
-        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-        acceptedButtons: Qt.LeftButton
-        enabled: Workspace.subTools.paintTool
-        property bool drawing: false
-        property point lastPosition
-        function finish() { if (drawing) { canvas.endStroke(lastPosition.x, lastPosition.y, 1); drawing = false } }
-        onActiveChanged: {
-            if (active) { finish(); lastPosition = point.position; drawing = canvas.beginStroke(lastPosition.x, lastPosition.y, 1, Workspace.brush, Workspace.colors.foreground) }
-            else if (drawing) Qt.callLater(finish)
+    KpMenu {
+        id: canvasContextMenu
+        KpMenuItem {
+            text: qsTr("Reset View Rotation")
+            enabled: canvas.viewRotation !== 0
+            onTriggered: canvas.resetRotation()
         }
-        onPointChanged: if (active && drawing) { lastPosition = point.position; canvas.continueStroke(lastPosition.x, lastPosition.y, 1) }
-        onCanceled: { canvas.cancelStroke(); drawing = false }
-    }
-    PointHandler {
-        id: penBrush
-        acceptedDevices: PointerDevice.Stylus | PointerDevice.Airbrush
-        acceptedPointerTypes: PointerDevice.Pen
-        acceptedButtons: Qt.LeftButton
-        enabled: Workspace.subTools.paintTool
-        property bool drawing: false
-        property point lastPosition
-        property real lastPressure: 0
-        function finish() { if (drawing) { canvas.endStroke(lastPosition.x, lastPosition.y, lastPressure); drawing = false } }
-        onActiveChanged: {
-            if (active) { finish(); lastPosition = point.position; lastPressure = point.pressure; drawing = canvas.beginStroke(lastPosition.x, lastPosition.y, lastPressure, Workspace.brush, Workspace.colors.foreground) }
-            else if (drawing) Qt.callLater(finish)
+        KpMenuItem {
+            text: qsTr("Pick Colour at Cursor")
+            onTriggered: {
+                const picked = canvas.colorAt(canvas.cursorPos.x, canvas.cursorPos.y)
+                if (picked !== undefined && picked !== null) Workspace.colors.foreground = picked
+            }
         }
-        onPointChanged: if (active && drawing) { lastPosition = point.position; lastPressure = point.pressure; canvas.continueStroke(lastPosition.x, lastPosition.y, lastPressure) }
-        onCanceled: { canvas.cancelStroke(); drawing = false }
+        KpMenuSeparator { }
+        KpMenuItem {
+            text: Workspace.activeTool === "eraser" ? qsTr("Switch to Brush") : qsTr("Switch to Eraser")
+            onTriggered: Workspace.activeTool = Workspace.activeTool === "eraser" ? "brush" : "eraser"
+        }
     }
     Dialog {
         id: brushErrorDialog
@@ -283,6 +292,30 @@ Rectangle {
                 cell: KP.controlHeightSmall
                 tooltip: qsTr("Actual size (Ctrl+1)")
                 onActivated: Workspace.resetZoom()
+            }
+            Rectangle { visible: canvas.viewRotation !== 0; width: 1; height: 12; color: KP.hairline }
+            AbstractButton {
+                visible: canvas.viewRotation !== 0
+                width: 44
+                height: KP.controlHeightSmall
+                focusPolicy: Qt.NoFocus
+                hoverEnabled: true
+                ToolTip.text: qsTr("Canvas rotation — click to reset to 0°")
+                ToolTip.visible: hovered
+                ToolTip.delay: 500
+                background: Rectangle {
+                    radius: KP.radiusXS
+                    color: parent.hovered ? KP.hoverOverlay : "transparent"
+                }
+                contentItem: Text {
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    text: Math.round(canvas.viewRotation) + "°"
+                    color: KP.textAccent
+                    font.pixelSize: KP.fontXS + 1
+                    font.family: KP.fontMono
+                }
+                onClicked: canvas.resetRotation()
             }
         }
 

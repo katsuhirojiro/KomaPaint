@@ -26,6 +26,31 @@ InputSample StrokeStabilizer::filter(InputSample raw)
     m_current.x += (raw.x - m_current.x) * m_weight;
     m_current.y += (raw.y - m_current.y) * m_weight;
     m_current.pressure += (raw.pressure - m_current.pressure) * m_weight;
+    if (raw.hasTilt) {
+        m_current.tiltX = m_current.hasTilt ? m_current.tiltX + (raw.tiltX - m_current.tiltX) * m_weight : raw.tiltX;
+        m_current.tiltY = m_current.hasTilt ? m_current.tiltY + (raw.tiltY - m_current.tiltY) * m_weight : raw.tiltY;
+        m_current.hasTilt = true;
+    } else {
+        m_current.hasTilt = false;
+        m_current.tiltX = 0.0;
+        m_current.tiltY = 0.0;
+    }
+    if (raw.hasRotation) {
+        if (m_current.hasRotation) {
+            constexpr double kPi = 3.14159265358979323846;
+            double diff = raw.rotationRadians - m_current.rotationRadians;
+            while (diff > kPi) diff -= 2.0 * kPi;
+            while (diff < -kPi) diff += 2.0 * kPi;
+            m_current.rotationRadians += diff * m_weight;
+        } else {
+            m_current.rotationRadians = raw.rotationRadians;
+        }
+        m_current.hasRotation = true;
+    } else {
+        m_current.hasRotation = false;
+        m_current.rotationRadians = 0.0;
+    }
+    m_current.tangentialPressure += (raw.tangentialPressure - m_current.tangentialPressure) * m_weight;
     return m_current;
 }
 } // namespace komapaint

@@ -22,18 +22,32 @@ struct BrushDefinition {
     double angleRadians = 0.0;    // base tip rotation
     bool followDirection = false; // align tip along stroke tangent
 
-    // Pressure curves (defaults keep existing fixed-size linear opacity behaviour)
+    // Pressure & stylus dynamics (defaults preserve fixed-size linear opacity behaviour)
     double pressureSize = 0.0;    // 0 = fixed size, 1 = full pressure->size modulation
     double pressureOpacity = 1.0; // 0 = fixed opacity, 1 = full pressure->opacity modulation
+    double pressureFlow = 0.0;    // 0 = fixed flow, 1 = full pressure->flow modulation
     double pressureGamma = 1.0;   // < 1 lifts light pressure; > 1 requires firmer press
     double minSizeRatio = 0.15;   // minimum diameter fraction when pressureSize > 0
+    double tiltSize = 0.0;        // 0 = fixed size, 1 = tilt broadens tip when device has tilt
+    bool tiltAngle = false;       // orient/flatten tip along stylus tilt azimuth when supported
+    bool stylusRotation = false;  // rotate tip by stylus barrel rotation when supported
 
     // Digital blending & smudging (0 = pure deposit; > 0 = blend/smudge existing pixels)
     double blendStrength = 0.0;   // 0..1 how strongly existing canvas paint blends/smears
     double colorMix = 1.0;        // 0 = pure smudge/blend, 1 = full foreground colour
 };
 
-struct InputSample { double x, y, pressure = 1; };
+struct InputSample {
+    double x = 0.0;
+    double y = 0.0;
+    double pressure = 1.0;
+    double tiltX = 0.0;
+    double tiltY = 0.0;
+    double rotationRadians = 0.0;
+    double tangentialPressure = 0.0;
+    bool hasTilt = false;
+    bool hasRotation = false;
+};
 
 // Stateless tip mask, sensor response and paint deposition helpers.
 class BrushRasterizer {

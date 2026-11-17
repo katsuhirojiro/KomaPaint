@@ -154,6 +154,7 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     });
     m_brush = new BrushSettings(this);
     m_brush->setBrushEngine(m_brushEngine);
+    m_inputSettings = new input::TabletInputSettings(this);
     // The sub tool library follows the active tool wherever it changes (tool
     // palette, tab switch, session restore) and loads that tool's settings.
     m_subTools = new SubToolLibrary(m_brush, this);
@@ -168,6 +169,11 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     // detached empty layer model only keeps existing panel bindings safe.
     m_document = nullptr;
     m_history = nullptr;
+}
+
+void WorkspaceState::bindInputSettings(Settings* settings)
+{
+    if (m_inputSettings) m_inputSettings->attachSettings(settings);
 }
 
 void WorkspaceState::connectLayerDeletion(const CanvasDocument* document, UndoStack* history)

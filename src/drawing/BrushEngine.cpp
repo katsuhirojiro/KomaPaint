@@ -158,7 +158,8 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
         || !std::isfinite(b.hardness) || b.hardness < 0 || b.hardness > 1
         || !std::isfinite(b.aspectRatio) || !std::isfinite(b.angleRadians)
         || !std::isfinite(b.pressureSize) || !std::isfinite(b.pressureOpacity)
-        || !std::isfinite(b.pressureGamma) || !std::isfinite(b.minSizeRatio)
+        || !std::isfinite(b.pressureFlow) || !std::isfinite(b.pressureGamma)
+        || !std::isfinite(b.minSizeRatio) || !std::isfinite(b.tiltSize)
         || !std::isfinite(b.blendStrength) || !std::isfinite(b.colorMix)) {
         return R::InvalidPixel;
     }
@@ -169,11 +170,19 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const double pSizeWeight = clamp01(b.pressureSize);
     const double minScale = std::clamp(b.minSizeRatio, 0.05, 1.0);
     const double sizeScale = (1.0 - pSizeWeight) + pSizeWeight * (minScale + (1.0 - minScale) * pShaped);
-    const double effectiveSize = std::clamp(b.size * sizeScale, 0.5, 256.0);
+    const double tiltMag = (p.hasTilt && std::isfinite(p.tiltX) && std::isfinite(p.tiltY))
+        ? std::clamp(std::hypot(p.tiltX, p.tiltY) / 90.0, 0.0, 1.0)
+        : 0.0;
+    const double tiltScale = (p.hasTilt && b.tiltSize > 0.0)
+        ? (1.0 + clamp01(b.tiltSize) * tiltMag * 1.5)
+        : 1.0;
+    const double effectiveSize = std::clamp(b.size * sizeScale * tiltScale, 0.5, 256.0);
     const double radius = effectiveSize / 2.0;
 
     const double pOpWeight = clamp01(b.pressureOpacity);
     const double pressureAlpha = (1.0 - pOpWeight) + pOpWeight * pShaped;
+    const double pFlowWeight = clamp01(b.pressureFlow);
+    const double pressureFlowScale = (1.0 - pFlowWeight) + pFlowWeight * pShaped;
 
     const double left = std::max(0.0, std::floor(p.x - radius - 1));
     const double top = std::max(0.0, std::floor(p.y - radius - 1));
@@ -188,16 +197,25 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const auto tileRange = g.tilesForRect({docLeft, docTop, docRight, docBottom});
     if (!tileRange) return R::Unchanged;
 
-    const double totalAngle = b.angleRadians + (b.followDirection ? strokeAngle : 0.0);
+    double totalAngle = b.angleRadians + (b.followDirection ? strokeAngle : 0.0);
+    if (p.hasTilt && b.tiltAngle && tiltMag > 0.02) {
+        totalAngle += std::atan2(p.tiltY, p.tiltX);
+    }
+    if (p.hasRotation && b.stylusRotation && std::isfinite(p.rotationRadians)) {
+        totalAngle += p.rotationRadians;
+    }
     const bool hasRotation = totalAngle != 0.0;
     const double cosA = hasRotation ? std::cos(-totalAngle) : 1.0;
     const double sinA = hasRotation ? std::sin(-totalAngle) : 0.0;
-    const double aspect = std::clamp(b.aspectRatio, 1.0, 4.0);
+    const double baseAspect = std::clamp(b.aspectRatio, 1.0, 4.0);
+    const double aspect = (p.hasTilt && b.tiltAngle)
+        ? std::clamp(baseAspect * (1.0 + tiltMag * 0.75), 1.0, 4.0)
+        : baseAspect;
     const double softness = 1.0 - clamp01(b.hardness);
     const double radiusPlusHalf = radius + 0.5;
     const double maxDistSq = radiusPlusHalf * radiusPlusHalf;
     const double invBand = 1.0 / std::max(1.0, softness * radiusPlusHalf);
-    const double opacityFlowPressure = b.opacity * b.flow * pressureAlpha;
+    const double opacityFlowPressure = b.opacity * b.flow * pressureAlpha * pressureFlowScale;
     if (opacityFlowPressure <= 0.0) return R::Unchanged;
 
     const double blendFactor = clamp01(b.blendStrength);
@@ -437,8 +455,17 @@ bool BrushStroke::extend(InputSample p) {
         if (at < start * distance) at += std::ceil((start * distance - at) / m_spacing) * m_spacing;
         for (; at <= end * distance && at <= distance; at += m_spacing) {
             const double t = at / distance;
-            if (!stamp({m_previous.x + dx * t, m_previous.y + dy * t,
-                        m_previous.pressure + (p.pressure - m_previous.pressure) * t})) return false;
+            InputSample interp;
+            interp.x = m_previous.x + dx * t;
+            interp.y = m_previous.y + dy * t;
+            interp.pressure = m_previous.pressure + (p.pressure - m_previous.pressure) * t;
+            interp.tiltX = m_previous.tiltX + (p.tiltX - m_previous.tiltX) * t;
+            interp.tiltY = m_previous.tiltY + (p.tiltY - m_previous.tiltY) * t;
+            interp.rotationRadians = m_previous.rotationRadians + (p.rotationRadians - m_previous.rotationRadians) * t;
+            interp.tangentialPressure = m_previous.tangentialPressure + (p.tangentialPressure - m_previous.tangentialPressure) * t;
+            interp.hasTilt = m_previous.hasTilt || p.hasTilt;
+            interp.hasRotation = m_previous.hasRotation || p.hasRotation;
+            if (!stamp(interp)) return false;
         }
     }
     const double remainder = std::fmod(distance - m_remaining, m_spacing);

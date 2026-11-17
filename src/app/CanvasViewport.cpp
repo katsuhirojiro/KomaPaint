@@ -1,15 +1,23 @@
 #include "CanvasViewport.h"
 #include "BrushSettings.h"
+#include "../input/QtPointerAdapter.h"
+#include "../input/TabletInputSettings.h"
 #include "../history/UndoStack.h"
 #include "../canvas/CanvasDocument.h"
 #include "../layers/Layer.h"
 #include "../layers/LayerModel.h"
-#include <QPainter>
+#include <QCoreApplication>
+#include <QHoverEvent>
+#include <QMouseEvent>
 #include <QMutexLocker>
+#include <QPainter>
+#include <QQuickWindow>
+#include <QTabletEvent>
 #include <QTimer>
-#include <QDebug>
+#include <QTouchEvent>
 #include <QtMath>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <new>
@@ -17,6 +25,17 @@
 
 namespace komapaint {
 namespace {
+
+constexpr double kPi = 3.14159265358979323846;
+
+std::uint64_t steadyNowNs() noexcept
+{
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
 const material::MaterialEngine& canvasMaterialEngine()
 {
     static const material::PigmentLibrary pigments;
@@ -99,24 +118,98 @@ bool prepareMaterialRenderLayers(const std::vector<CompositeLayer>& layers, Tile
     } catch (const std::bad_alloc&) { return false; }
       catch (const std::length_error&) { return false; }
 }
+
+QPointF rotateAround(QPointF pt, QPointF center, qreal degrees) noexcept
+{
+    if (degrees == 0.0) return pt;
+    const qreal rad = degrees * (kPi / 180.0);
+    const qreal c = std::cos(rad);
+    const qreal s = std::sin(rad);
+    const qreal dx = pt.x() - center.x();
+    const qreal dy = pt.y() - center.y();
+    return QPointF(center.x() + dx * c - dy * s, center.y() + dx * s + dy * c);
+}
+
+QString barrelActionId(input::BarrelAction action)
+{
+    switch (action) {
+    case input::BarrelAction::RightClick: return QStringLiteral("right_click");
+    case input::BarrelAction::MiddlePan: return QStringLiteral("pan");
+    case input::BarrelAction::Eyedropper: return QStringLiteral("eyedropper");
+    case input::BarrelAction::EraserToggle: return QStringLiteral("eraser");
+    case input::BarrelAction::Undo: return QStringLiteral("undo");
+    case input::BarrelAction::None: default: return QStringLiteral("none");
+    }
+}
+
 } // namespace
 
 CanvasViewport::CanvasViewport(QQuickItem* parent) : QQuickPaintedItem(parent)
 {
     setOpaquePainting(true);
     setAntialiasing(false);
+    setAcceptedMouseButtons(Qt::LeftButton | Qt::RightButton);
+    setAcceptTouchEvents(true);
+    setAcceptHoverEvents(true);
+
+    m_touchScratch.reserve(16);
+
     m_materialClock.start();
     m_materialTimer = new QTimer(this);
     m_materialTimer->setInterval(200);
     connect(m_materialTimer, &QTimer::timeout, this, &CanvasViewport::tickMaterialSimulation);
+
+    m_diagnosticsTimer = new QTimer(this);
+    m_diagnosticsTimer->setInterval(120);
+    connect(m_diagnosticsTimer, &QTimer::timeout, this, [this] {
+        m_arbiter.checkStaleStroke(steadyNowNs());
+        if ((m_stroke || m_materialStroke) && !m_arbiter.strokeActive()) {
+            recoverOpenStroke(true);
+        }
+        if (m_inputSettings && m_arbiter.telemetry().hasLastSample()) {
+            const bool wtActive = m_winTab && m_winTab->isContextOpen();
+            m_inputSettings->updateLiveDiagnostics(
+                m_arbiter.telemetry().lastSample(), m_arbiter.telemetry(), wtActive);
+        }
+    });
+    m_diagnosticsTimer->start();
+
+    m_winTab = std::make_unique<input::WinTabBackend>(this);
+    m_winTab->setPacketCallback([this](const input::RawPointerEvent& raw) {
+        injectRawPointerEvent(raw);
+    });
+    m_winTab->setProximityCallback([this](std::uint64_t deviceId, bool enter, std::uint64_t tsNs) {
+        m_arbiter.setProximity(deviceId, enter, input::InputBackend::WinTab, tsNs);
+        if (!enter) {
+            if (m_arbiter.strokeActive() && m_arbiter.activeBackend() == input::InputBackend::WinTab) {
+                recoverOpenStroke(true);
+            }
+            m_cursorStylusInProximity = false;
+            clearCursorState();
+        } else {
+            m_cursorStylusInProximity = true;
+            emit cursorStateChanged();
+        }
+    });
+
+    for (const auto& dev : input::QtPointerAdapter::enumerateDevices()) {
+        m_arbiter.registerDevice(dev);
+    }
 }
-CanvasViewport::~CanvasViewport() { clearCache(); }
+
+CanvasViewport::~CanvasViewport()
+{
+    if (m_winTab) m_winTab->detachWindow();
+    clearCache();
+}
+
 void CanvasViewport::clearCache() noexcept
 {
     m_cache.clear();
     if (m_cacheBudget) m_cacheBudget->release(DocumentMemoryBudget::Category::CompositeCache, m_cacheBytes);
     m_cacheBytes = 0;
 }
+
 void CanvasViewport::eraseCacheTile(TilePoint tile) noexcept
 {
     auto it = m_cache.find(tile);
@@ -126,6 +219,7 @@ void CanvasViewport::eraseCacheTile(TilePoint tile) noexcept
     m_cacheBytes -= bytes;
     if (m_cacheBudget) m_cacheBudget->release(DocumentMemoryBudget::Category::CompositeCache, bytes);
 }
+
 QObject* CanvasViewport::history() const { return m_history.data(); }
 void CanvasViewport::setHistory(QObject* object)
 {
@@ -140,12 +234,77 @@ void CanvasViewport::setHistory(QObject* object)
         m_materialStroke.reset();
         m_materialReservoir.reset();
         m_strokeLayer = nullptr;
+        m_arbiter.markStrokeEndedExternally();
         if (m_document) m_document->setModified(m_modifiedBeforeStroke);
         m_invalidation.reset(); clearCache();
         invalidateAll();
     });
     emit historyChanged();
 }
+
+QObject* CanvasViewport::inputSettings() const { return m_inputSettings.data(); }
+void CanvasViewport::setInputSettings(QObject* settings)
+{
+    auto* next = qobject_cast<input::TabletInputSettings*>(settings);
+    if (m_inputSettings == next) return;
+    if (m_inputSettings) disconnect(m_inputSettings, nullptr, this, nullptr);
+    m_inputSettings = next;
+    if (m_inputSettings) {
+        connect(m_inputSettings, &input::TabletInputSettings::configChanged,
+                this, &CanvasViewport::syncInputConfig);
+        syncInputConfig();
+    }
+    emit inputSettingsChanged();
+}
+
+QObject* CanvasViewport::brushSettings() const { return m_brushSettings.data(); }
+void CanvasViewport::setBrushSettings(QObject* settings)
+{
+    auto* next = qobject_cast<BrushSettings*>(settings);
+    if (m_brushSettings == next) return;
+    m_brushSettings = next;
+    emit brushSettingsChanged();
+}
+
+void CanvasViewport::setBrushColor(const QColor& color)
+{
+    if (!color.isValid() || m_brushColor == color) return;
+    m_brushColor = color;
+    emit brushColorChanged();
+}
+
+void CanvasViewport::setActiveTool(const QString& tool)
+{
+    if (m_activeTool == tool) return;
+    m_activeTool = tool;
+    emit activeToolChanged();
+}
+
+void CanvasViewport::syncInputConfig()
+{
+    if (!m_inputSettings) return;
+    m_arbiter.setConfig(m_inputSettings->toInputConfig());
+    syncWinTabAttachment();
+}
+
+void CanvasViewport::syncWinTabAttachment()
+{
+    if (!m_winTab) return;
+    bool enableWinTab = false;
+    if (m_inputSettings) {
+        const QString mode = m_inputSettings->windowsTabletMode();
+        enableWinTab = (mode == QStringLiteral("wintab") || mode == QStringLiteral("auto"));
+    } else {
+        enableWinTab = true;
+    }
+    m_winTab->setEnabled(enableWinTab);
+    if (enableWinTab && window()) {
+        m_winTab->attachWindow(window());
+    } else if (!enableWinTab) {
+        m_winTab->detachWindow();
+    }
+}
+
 QObject* CanvasViewport::document() const { return m_document.data(); }
 void CanvasViewport::setDocument(QObject* object)
 {
@@ -188,6 +347,7 @@ void CanvasViewport::setDocument(QObject* object)
     invalidateAll();
     refreshMaterialSimulation();
 }
+
 void CanvasViewport::reconnectLayers()
 {
     if (!m_document) return;
@@ -197,6 +357,7 @@ void CanvasViewport::reconnectLayers()
         connect(layer, &Layer::artworkChanged, this, &CanvasViewport::changedTile);
     }
 }
+
 void CanvasViewport::invalidateAll() { schedule(QRectF(0, 0, width(), height())); }
 
 void CanvasViewport::refreshMaterialSimulation()
@@ -268,6 +429,7 @@ void CanvasViewport::setCheckerDark(const QColor& colour)
     emit canvasColoursChanged();
     invalidateAll();
 }
+
 void CanvasViewport::schedule(const QRectF& region)
 {
     m_pending = m_pending.united(region.intersected(QRectF(0, 0, width(), height())));
@@ -275,15 +437,29 @@ void CanvasViewport::schedule(const QRectF& region)
     m_scheduled = true;
     QTimer::singleShot(0, this, [this] { refreshNow(); });
 }
+
 void CanvasViewport::changedTile(qint64 x, qint64 y)
 {
     if (!m_document) return;
     eraseCacheTile({x, y});
     const qreal side = m_document->layers()->layerAt(0)->tiles().geometry().tileSize();
-    const qreal scale = m_zoom / 100;
-    QRectF rect(m_origin.x() + x * side * scale, m_origin.y() + y * side * scale, side * scale, side * scale);
-    schedule(rect.adjusted(-2, -2, 2, 2));
+    if (m_viewRotation == 0.0) {
+        const qreal scale = m_zoom / 100;
+        QRectF rect(m_origin.x() + x * side * scale, m_origin.y() + y * side * scale, side * scale, side * scale);
+        schedule(rect.adjusted(-2, -2, 2, 2));
+    } else {
+        const QPointF p0 = documentToViewport(x * side, y * side);
+        const QPointF p1 = documentToViewport((x + 1) * side, y * side);
+        const QPointF p2 = documentToViewport(x * side, (y + 1) * side);
+        const QPointF p3 = documentToViewport((x + 1) * side, (y + 1) * side);
+        const qreal minX = std::min({p0.x(), p1.x(), p2.x(), p3.x()});
+        const qreal maxX = std::max({p0.x(), p1.x(), p2.x(), p3.x()});
+        const qreal minY = std::min({p0.y(), p1.y(), p2.y(), p3.y()});
+        const qreal maxY = std::max({p0.y(), p1.y(), p2.y(), p3.y()});
+        schedule(QRectF(minX - 2, minY - 2, (maxX - minX) + 4, (maxY - minY) + 4));
+    }
 }
+
 void CanvasViewport::setZoom(qreal zoom)
 {
     if (!std::isfinite(zoom)) return;
@@ -292,28 +468,77 @@ void CanvasViewport::setZoom(qreal zoom)
     QPointF center(width() / 2, height() / 2);
     const QPointF point = viewportToDocument(center.x(), center.y());
     m_zoom = zoom;
-    m_origin = center - point * (zoom / 100);
+    if (m_viewRotation == 0.0) {
+        m_origin = center - point * (zoom / 100);
+    } else {
+        m_origin = center - point * (zoom / 100);
+    }
     emit zoomChanged(); emit viewChanged(); invalidateAll();
 }
+
+void CanvasViewport::setViewRotation(qreal degrees)
+{
+    if (!std::isfinite(degrees)) return;
+    qreal norm = std::fmod(degrees, 360.0);
+    if (norm > 180.0) norm -= 360.0;
+    if (norm <= -180.0) norm += 360.0;
+    if (std::abs(norm) < 0.05) norm = 0.0;
+    if (qFuzzyCompare(m_viewRotation + 1000.0, norm + 1000.0)) return;
+    m_viewRotation = norm;
+    emit viewRotationChanged();
+    emit viewChanged();
+    invalidateAll();
+}
+
+void CanvasViewport::resetRotation()
+{
+    setViewRotation(0.0);
+}
+
 void CanvasViewport::zoomAt(qreal x, qreal y, qreal factor)
 {
     if (!std::isfinite(factor) || factor <= 0) return;
     const auto next = qBound(6.25, m_zoom * factor, 6400.0);
     if (qFuzzyCompare(next, m_zoom)) return;
     const QPointF doc = viewportToDocument(x, y);
-    m_zoom = next; m_origin = QPointF(x, y) - doc * (next / 100);
+    const QPointF center(width() / 2, height() / 2);
+    const QPointF unrotated = m_viewRotation == 0.0
+        ? QPointF(x, y)
+        : rotateAround(QPointF(x, y), center, -m_viewRotation);
+    m_zoom = next;
+    m_origin = unrotated - doc * (next / 100);
     emit zoomChanged(); emit zoomRequested(next); emit viewChanged(); invalidateAll();
 }
+
 void CanvasViewport::panBy(qreal dx, qreal dy)
 {
     if (!std::isfinite(dx) || !std::isfinite(dy)) return;
-    m_origin.setX(qBound(-1.0e9, m_origin.x() + dx, 1.0e9));
-    m_origin.setY(qBound(-1.0e9, m_origin.y() + dy, 1.0e9));
+    QPointF delta(dx, dy);
+    if (m_viewRotation != 0.0) {
+        delta = rotateAround(delta, QPointF(0, 0), -m_viewRotation);
+    }
+    m_origin.setX(qBound(-1.0e9, m_origin.x() + delta.x(), 1.0e9));
+    m_origin.setY(qBound(-1.0e9, m_origin.y() + delta.y(), 1.0e9));
     emit viewChanged();
     invalidateAll();
 }
-QPointF CanvasViewport::viewportToDocument(qreal x, qreal y) const { return (QPointF(x, y) - m_origin) / (m_zoom / 100); }
-QPointF CanvasViewport::documentToViewport(qreal x, qreal y) const { return m_origin + QPointF(x, y) * (m_zoom / 100); }
+
+QPointF CanvasViewport::viewportToDocument(qreal x, qreal y) const
+{
+    const QPointF pt = m_viewRotation == 0.0
+        ? QPointF(x, y)
+        : rotateAround(QPointF(x, y), QPointF(width() / 2, height() / 2), -m_viewRotation);
+    return (pt - m_origin) / (m_zoom / 100);
+}
+
+QPointF CanvasViewport::documentToViewport(qreal x, qreal y) const
+{
+    const QPointF unrotated = m_origin + QPointF(x, y) * (m_zoom / 100);
+    return m_viewRotation == 0.0
+        ? unrotated
+        : rotateAround(unrotated, QPointF(width() / 2, height() / 2), m_viewRotation);
+}
+
 void CanvasViewport::fit()
 {
     if (!m_document || width() <= 0 || height() <= 0) return;
@@ -324,11 +549,13 @@ void CanvasViewport::fit()
     m_pendingView = false;
     emit zoomChanged(); emit zoomRequested(m_zoom); emit viewChanged(); invalidateAll();
 }
+
 QPointF CanvasViewport::viewCenter() const
 {
     if (m_pendingView) return m_pendingCenter;
     return viewportToDocument(width() / 2, height() / 2);
 }
+
 void CanvasViewport::restoreView(qreal zoom, qreal centerX, qreal centerY)
 {
     if (!std::isfinite(zoom) || !std::isfinite(centerX) || !std::isfinite(centerY)) return;
@@ -340,7 +567,6 @@ void CanvasViewport::restoreView(qreal zoom, qreal centerX, qreal centerY)
         m_originInitialized = true;
         m_pendingView = false;
     } else {
-        // No size yet: remember the request and apply it on the first resize.
         m_pendingView = true;
         m_pendingCenter = QPointF(centerX, centerY);
     }
@@ -348,6 +574,7 @@ void CanvasViewport::restoreView(qreal zoom, qreal centerX, qreal centerY)
     emit viewChanged();
     invalidateAll();
 }
+
 void CanvasViewport::geometryChange(const QRectF& now, const QRectF& old)
 {
     QQuickPaintedItem::geometryChange(now, old);
@@ -357,19 +584,35 @@ void CanvasViewport::geometryChange(const QRectF& now, const QRectF& old)
         m_originInitialized = true;
         m_pendingView = false;
     } else if (m_originInitialized) {
-        // Keep the same point of the artwork in the middle of the view when
-        // the window or a dock is resized. Without this a project's stored
-        // position would drift every time the layout changed.
-        //
-        // Every size counts, including zero: a dock layout rebuild hides the
-        // canvas for a moment as the tree is re-created, and compensating one
-        // half of that round trip but not the other would shift the view by
-        // half a canvas per panel opened or closed.
         m_origin += QPointF((now.width() - old.width()) / 2, (now.height() - old.height()) / 2);
     }
     emit viewChanged();
     invalidateAll();
 }
+
+void CanvasViewport::itemChange(ItemChange change, const ItemChangeData& value)
+{
+    QQuickPaintedItem::itemChange(change, value);
+    if (change == ItemSceneChange) {
+        if (value.window) {
+            connect(value.window, &QQuickWindow::activeChanged, this, [this] {
+                if (window() && !window()->isActive()) {
+                    if (m_arbiter.handleFocusLost()) {
+                        recoverOpenStroke(true);
+                    }
+                    m_barrelPanActive = false;
+                    m_barrelEyedropperActive = false;
+                    m_touchNavActive = false;
+                    clearCursorState();
+                }
+            });
+            syncWinTabAttachment();
+        } else if (m_winTab) {
+            m_winTab->detachWindow();
+        }
+    }
+}
+
 std::vector<CompositeLayer> CanvasViewport::layers() const
 {
     std::vector<CompositeLayer> result;
@@ -382,6 +625,7 @@ std::vector<CompositeLayer> CanvasViewport::layers() const
     }
     return result;
 }
+
 QImage CanvasViewport::composedTile(TilePoint tile, const std::vector<CompositeLayer>& list, std::uint32_t background)
 {
     auto found = m_cache.find(tile);
@@ -419,6 +663,7 @@ QImage CanvasViewport::composedTile(TilePoint tile, const std::vector<CompositeL
     }
     return image;
 }
+
 void CanvasViewport::reportStrokeFailure(SparseTileStore::WriteResult reason, bool rolledBack,
                                          std::size_t tileBytes, std::size_t tileBudget)
 {
@@ -445,10 +690,59 @@ void CanvasViewport::reportStrokeFailure(SparseTileStore::WriteResult reason, bo
     emit strokeError(detail);
 }
 
-bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* settings, const QColor& color)
+bool CanvasViewport::activeToolIsPaintable() const
+{
+    return m_activeTool != QStringLiteral("hand") &&
+           m_activeTool != QStringLiteral("zoom") &&
+           m_activeTool != QStringLiteral("eyedropper");
+}
+
+void CanvasViewport::updateCursorState(const input::PointerSample& sample, bool visible)
+{
+    const bool hoverEnabled = !m_inputSettings || m_inputSettings->hoverOutlineEnabled();
+    const bool tiltEnabled = !m_inputSettings || m_inputSettings->tiltCursorEnabled();
+    const bool nextVisible = visible && hoverEnabled;
+    const QPointF nextPos(sample.viewX, sample.viewY);
+    const qreal nextTiltX = tiltEnabled && sample.capabilities.hasTilt ? sample.tiltX : 0.0;
+    const qreal nextTiltY = tiltEnabled && sample.capabilities.hasTilt ? sample.tiltY : 0.0;
+    const qreal nextRot = sample.capabilities.hasRotation ? sample.rotationRadians * (180.0 / kPi) : 0.0;
+    const bool nextHasTilt = tiltEnabled && sample.capabilities.hasTilt;
+    const bool nextEraser = sample.eraserActive;
+    const bool nextProx = sample.inProximity;
+
+    if (m_cursorVisible == nextVisible && m_cursorPos == nextPos &&
+        qFuzzyCompare(m_cursorTiltX + 100.0, nextTiltX + 100.0) &&
+        qFuzzyCompare(m_cursorTiltY + 100.0, nextTiltY + 100.0) &&
+        qFuzzyCompare(m_cursorRotationDeg + 400.0, nextRot + 400.0) &&
+        m_cursorHasTilt == nextHasTilt &&
+        m_cursorEraserActive == nextEraser &&
+        m_cursorStylusInProximity == nextProx) {
+        return;
+    }
+    m_cursorVisible = nextVisible;
+    m_cursorPos = nextPos;
+    m_cursorTiltX = nextTiltX;
+    m_cursorTiltY = nextTiltY;
+    m_cursorRotationDeg = nextRot;
+    m_cursorHasTilt = nextHasTilt;
+    m_cursorEraserActive = nextEraser;
+    m_cursorStylusInProximity = nextProx;
+    emit cursorStateChanged();
+}
+
+void CanvasViewport::clearCursorState()
+{
+    if (!m_cursorVisible && !m_cursorEraserActive && !m_cursorStylusInProximity) return;
+    m_cursorVisible = false;
+    m_cursorEraserActive = false;
+    m_cursorStylusInProximity = false;
+    emit cursorStateChanged();
+}
+
+bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, BrushSettings* brush,
+                                       const QColor& color, bool eraseOverride)
 {
     cancelStroke();
-    auto* brush = qobject_cast<BrushSettings*>(settings);
     if (!m_document || !m_history || !brush || !color.isValid())
         return false;
 
@@ -464,7 +758,12 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                                         "Switch to Realistic in Settings → Brush Engine, or select a Digital brush preset."));
         return false;
     }
+    const bool effectiveErase = eraseOverride || brush->erase();
     m_modifiedBeforeStroke = m_document->isModified();
+    const int effectiveStab = brush->stabilization() > 0
+        ? brush->stabilization()
+        : (m_inputSettings ? m_inputSettings->stabilizationDefault() : 0);
+
     if (brush->isRealisticEngine()) {
         if (!m_history->beginMaterialStroke(layer)) {
             emit strokeError(QStringLiteral("Could not start material stroke history; no paint was applied."));
@@ -474,7 +773,7 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             auto presets = material::defaultBrushDefinitions();
             material::PaintBatch mixerPaint;
             bool mixerPaintLoaded = false;
-            if (!brush->erase() && !brush->materialMixture().isEmpty()) {
+            if (!effectiveErase && !brush->materialMixture().isEmpty()) {
                 if (!materialBatchFromMap(brush->materialMixture(), &mixerPaint)) {
                     m_history->cancelStroke();
                     emit strokeError(QStringLiteral("The mixer batch has an invalid medium or pigment composition."));
@@ -533,7 +832,6 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                 emit strokeError(QStringLiteral("The selected material medium is unavailable."));
                 return false;
             }
-            constexpr double kPi = 3.14159265358979323846;
             definition.size = brush->size();
             definition.reservoirCapacity = definition.effectiveReservoirCapacity();
             definition.hardness = brush->hardness() / 100.0;
@@ -556,7 +854,7 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             definition.rewetting = pickupFactor * 0.9;
             definition.releaseRate *= brush->flow() / 100.0;
             definition.contactTransfer *= brush->opacity() / 100.0
-                * (brush->erase() ? brush->flow() / 100.0 : 1.0);
+                * (effectiveErase ? brush->flow() / 100.0 : 1.0);
             definition.autoReloadOnStroke = !brush->persistentReservoir();
             if (brush->textured() && definition.tip == material::TipGeometry::Round) {
                 definition.tip = material::TipGeometry::Bristle;
@@ -564,10 +862,8 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                 definition.bristleSpread = 0.55;
                 definition.textureStrength = std::max(definition.textureStrength, 0.45);
             }
-            if (!brush->erase() && !mixerPaintLoaded) {
+            if (!effectiveErase && !mixerPaintLoaded) {
                 if (preset->initialPaint.pigments.empty()) {
-                    // Clean Water & Paint Lifting remain pigment-free; water
-                    // amount adjusts moisture load without introducing pigment.
                     definition.initialPaint = preset->initialPaint;
                     const double waterScale = std::max(0.1, brush->waterAmount() / 100.0);
                     definition.initialPaint.water = std::max(0.25, preset->initialPaint.water * waterScale);
@@ -600,8 +896,7 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             if (!m_materialReservoir || !brush->persistentReservoir() || mixtureUpdated
                 || m_materialReservoir->capacity() != definition.reservoirCapacity) {
                 m_materialReservoir = std::make_unique<material::BrushReservoir>(definition.reservoirCapacity);
-                if (!brush->erase()
-                    && !m_materialReservoir->reload(definition)) {
+                if (!effectiveErase && !m_materialReservoir->reload(definition)) {
                     m_materialReservoir.reset();
                     m_history->cancelStroke();
                     emit strokeError(QStringLiteral("The selected colour could not be loaded into the material brush."));
@@ -611,12 +906,22 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             }
             m_materialStroke = std::make_unique<material::MaterialStroke>(layer->materialTiles(),
                 std::move(definition), *m_materialReservoir, canvasMaterialEngine(),
-                *selectedMedium, m_document->surfaceProfile(), brush->erase());
+                *selectedMedium, m_document->surfaceProfile(), effectiveErase);
             m_strokeLayer = layer;
-            const auto point = viewportToDocument(x, y);
-            m_stabilizer = StrokeStabilizer(brush->stabilization());
-            m_stabilizer.begin({point.x(), point.y(), pressure});
-            if (!m_materialStroke->begin({point.x(), point.y(), {pressure, 0.0, 0.0, 0.0}})) {
+            m_stabilizer = StrokeStabilizer(effectiveStab);
+            InputSample initSample{
+                sample.docX, sample.docY, sample.pressure,
+                sample.tiltX, sample.tiltY, sample.rotationRadians,
+                sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation
+            };
+            m_stabilizer.begin(initSample);
+            const material::BrushInput mInput{
+                sample.pressure,
+                sample.speedNormalized,
+                sample.capabilities.hasTilt ? sample.tiltMagnitude : 0.0,
+                sample.capabilities.hasRotation ? sample.rotationRadians : 0.0
+            };
+            if (!m_materialStroke->begin({sample.docX, sample.docY, mInput})) {
                 const auto reason = m_materialStroke->failureReason();
                 const bool rolledBack = m_history->cancelStroke();
                 m_materialStroke.reset();
@@ -625,6 +930,8 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
                 reportStrokeFailure(reason, rolledBack, layer->materialTiles().allocatedBytes(), 0);
                 return false;
             }
+            m_lastStrokeSample = sample;
+            m_hasLastStrokeSample = true;
             return true;
         } catch (const std::bad_alloc&) {
             m_materialStroke.reset();
@@ -642,13 +949,16 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
             return false;
         }
     }
+
     if (!m_history->beginStroke(layer)) {
         emit strokeError(QStringLiteral("Could not start stroke history; no paint was applied."));
         return false;
     }
     BrushDefinition definition;
-    definition.size = brush->size(); definition.opacity = brush->opacity() / 100.0;
-    definition.flow = brush->flow() / 100.0; definition.spacing = brush->spacing() / 100.0;
+    definition.size = brush->size();
+    definition.opacity = brush->opacity() / 100.0;
+    definition.flow = brush->flow() / 100.0;
+    definition.spacing = brush->spacing() / 100.0;
     const QString tipStyle = brush->tipStyle();
     if (tipStyle == QStringLiteral("bristle")) definition.tip = BrushTip::Bristle;
     else if (tipStyle == QStringLiteral("graphite")) definition.tip = BrushTip::Graphite;
@@ -661,70 +971,102 @@ bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* sett
     definition.followDirection = brush->followDirection();
     definition.pressureSize = brush->pressureSize() / 100.0;
     definition.pressureOpacity = brush->pressureOpacity() / 100.0;
+    definition.pressureFlow = brush->pressureFlow() / 100.0;
     definition.pressureGamma = brush->pressureGamma() / 100.0;
     definition.minSizeRatio = brush->minSizeRatio() / 100.0;
+    definition.tiltSize = brush->tiltSize() / 100.0;
+    definition.tiltAngle = brush->tiltAngle();
+    definition.stylusRotation = brush->stylusRotation();
     definition.blendStrength = brush->blendStrength() / 100.0;
     definition.colorMix = brush->colorMix() / 100.0;
-    definition.erase = brush->erase();
+    definition.erase = effectiveErase;
     definition.color = color.rgba();
+
     try { m_stroke = std::make_unique<BrushStroke>(layer->tiles(), definition); }
-    catch (const std::bad_alloc&) { m_history->cancelStroke(); emit strokeError(QStringLiteral("Not enough memory to start a stroke.")); return false; }
+    catch (const std::bad_alloc&) {
+        m_history->cancelStroke();
+        emit strokeError(QStringLiteral("Not enough memory to start a stroke."));
+        return false;
+    }
     m_strokeLayer = layer;
-    auto point = viewportToDocument(x, y);
-    qDebug() << "[CanvasViewport] beginStroke: viewport(" << x << "," << y << ") -> document("
-             << point.x() << "," << point.y() << ")";
-    m_stabilizer = StrokeStabilizer(brush->stabilization());
-    m_stabilizer.begin({point.x(), point.y(), pressure});
-    if (!m_stroke->begin({point.x(), point.y(), pressure})) {
+    m_stabilizer = StrokeStabilizer(effectiveStab);
+    InputSample initSample{
+        sample.docX, sample.docY, sample.pressure,
+        sample.tiltX, sample.tiltY, sample.rotationRadians,
+        sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation
+    };
+    m_stabilizer.begin(initSample);
+    if (!m_stroke->begin(initSample)) {
         const auto reason = m_stroke->failureReason();
         const auto tileBytes = layer->tiles().allocatedPixelBytes();
         const auto tileBudget = layer->tiles().pixelBudget();
         const bool rolledBack = m_history->cancelStroke();
+        m_stroke.reset();
+        m_strokeLayer = nullptr;
         reportStrokeFailure(reason, rolledBack, tileBytes, tileBudget);
         return false;
     }
-    qDebug() << "[CanvasViewport] beginStroke: stroke started on layer" << layer->name();
+    m_lastStrokeSample = sample;
+    m_hasLastStrokeSample = true;
     return true;
 }
-void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
-{
-    qDebug() << "[CanvasViewport] continueStroke() called:"
-             << "viewport=(" << x << "," << y << ")" << "pressure=" << pressure
-             << "m_stroke=" << (bool)m_stroke;
 
+void CanvasViewport::continueStrokeSample(const input::PointerSample& sample)
+{
     if ((!m_stroke && !m_materialStroke) || !m_strokeLayer || !m_document) { cancelStroke(); return; }
     if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
         m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) {
         cancelStroke(); return;
     }
-    auto point = viewportToDocument(x, y);
-    // Stabilisation smooths the samples between pen-down and pen-up; endStroke()
-    // then draws on to the real pen-up position.
-    const InputSample sample = m_stabilizer.filter({point.x(), point.y(), pressure});
+    const InputSample filtered = m_stabilizer.filter({
+        sample.docX, sample.docY, sample.pressure,
+        sample.tiltX, sample.tiltY, sample.rotationRadians,
+        sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation
+    });
+    const double tiltMag = filtered.hasTilt
+        ? std::clamp(std::hypot(filtered.tiltX, filtered.tiltY) / 90.0, 0.0, 1.0)
+        : 0.0;
     const bool extended = m_materialStroke
-        ? m_materialStroke->extend({sample.x, sample.y, {sample.pressure, 0.0, 0.0, 0.0}})
-        : m_stroke->extend(sample);
+        ? m_materialStroke->extend({filtered.x, filtered.y,
+            {filtered.pressure, sample.speedNormalized, tiltMag,
+             filtered.hasRotation ? filtered.rotationRadians : 0.0}})
+        : m_stroke->extend(filtered);
     if (!extended) {
         const auto reason = m_materialStroke ? m_materialStroke->failureReason() : m_stroke->failureReason();
         const auto tileBytes = m_materialStroke ? m_strokeLayer->materialTiles().allocatedBytes()
                                                : m_strokeLayer->tiles().allocatedPixelBytes();
         const auto tileBudget = m_materialStroke ? 0 : m_strokeLayer->tiles().pixelBudget();
         const bool rolledBack = m_history && m_history->cancelStroke();
+        m_stroke.reset();
+        m_materialStroke.reset();
+        m_strokeLayer = nullptr;
+        m_arbiter.markStrokeEndedExternally();
         reportStrokeFailure(reason, rolledBack, tileBytes, tileBudget);
+        return;
     }
+    m_lastStrokeSample = sample;
+    m_hasLastStrokeSample = true;
 }
-void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
+
+void CanvasViewport::endStrokeSample(const input::PointerSample& sample)
 {
     if ((!m_stroke && !m_materialStroke) || !m_strokeLayer || !m_document) { cancelStroke(); return; }
     if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
         m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) {
         cancelStroke(); return;
     }
-    auto point = viewportToDocument(x, y);
     const bool materialStroke = bool(m_materialStroke);
+    const InputSample endSample{
+        sample.docX, sample.docY, sample.pressure,
+        sample.tiltX, sample.tiltY, sample.rotationRadians,
+        sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation
+    };
     const bool ok = materialStroke
-        ? m_materialStroke->end({point.x(), point.y(), {pressure, 0.0, 0.0, 0.0}})
-        : m_stroke->end({point.x(), point.y(), pressure});
+        ? m_materialStroke->end({sample.docX, sample.docY,
+            {sample.pressure, sample.speedNormalized,
+             sample.capabilities.hasTilt ? sample.tiltMagnitude : 0.0,
+             sample.capabilities.hasRotation ? sample.rotationRadians : 0.0}})
+        : m_stroke->end(endSample);
     const auto reason = materialStroke ? m_materialStroke->failureReason() : m_stroke->failureReason();
     const auto tileBytes = materialStroke ? m_strokeLayer->materialTiles().allocatedBytes()
                                          : m_strokeLayer->tiles().allocatedPixelBytes();
@@ -736,6 +1078,7 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
         m_materialStroke.reset();
         m_materialReservoir.reset();
         m_strokeLayer = nullptr;
+        m_hasLastStrokeSample = false;
         refreshMaterialSimulation();
         return;
     }
@@ -751,13 +1094,442 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
             m_strokeLayer->materialTiles().reclaimUnreferenced();
         m_strokeLayer = nullptr;
     }
+    m_hasLastStrokeSample = false;
     refreshMaterialSimulation();
 }
-void CanvasViewport::cancelStroke() {
+
+void CanvasViewport::recoverOpenStroke(bool commit)
+{
+    if (!m_stroke && !m_materialStroke) return;
+    if (commit && m_hasLastStrokeSample) {
+        input::PointerSample endS = m_lastStrokeSample;
+        endS.phase = input::PointerPhase::Up;
+        endStrokeSample(endS);
+    } else {
+        cancelStroke();
+    }
+}
+
+bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* settings, const QColor& color)
+{
+    auto* brush = qobject_cast<BrushSettings*>(settings);
+    const QPointF docPt = viewportToDocument(x, y);
+    input::PointerSample s;
+    s.viewX = x;
+    s.viewY = y;
+    s.docX = docPt.x();
+    s.docY = docPt.y();
+    s.pressure = std::clamp(double(pressure), 0.0, 1.0);
+    s.rawPressure = s.pressure;
+    s.tipContact = true;
+    return beginStrokeSample(s, brush, color, false);
+}
+
+void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
+{
+    const QPointF docPt = viewportToDocument(x, y);
+    input::PointerSample s;
+    s.viewX = x;
+    s.viewY = y;
+    s.docX = docPt.x();
+    s.docY = docPt.y();
+    s.pressure = std::clamp(double(pressure), 0.0, 1.0);
+    s.rawPressure = s.pressure;
+    s.tipContact = true;
+    continueStrokeSample(s);
+}
+
+void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
+{
+    const QPointF docPt = viewportToDocument(x, y);
+    input::PointerSample s;
+    s.viewX = x;
+    s.viewY = y;
+    s.docX = docPt.x();
+    s.docY = docPt.y();
+    s.pressure = std::clamp(double(pressure), 0.0, 1.0);
+    s.rawPressure = s.pressure;
+    s.tipContact = false;
+    endStrokeSample(s);
+}
+
+void CanvasViewport::cancelStroke()
+{
     if (m_history && m_history->strokeActive()) m_history->cancelStroke();
     m_stroke.reset();
     m_materialStroke.reset();
     m_strokeLayer = nullptr;
+    m_hasLastStrokeSample = false;
+    m_arbiter.markStrokeEndedExternally();
+}
+
+void CanvasViewport::processArbiterResult(const input::ProcessResult& res)
+{
+    if (res.decision != input::ArbiterDecision::Accept) return;
+
+    const input::PointerSample& sample = res.sample;
+    if (sample.phase == input::PointerPhase::Leave) {
+        clearCursorState();
+    } else {
+        updateCursorState(sample, true);
+    }
+
+    if (res.shouldCancelPreviousStroke) {
+        m_barrelPanActive = false;
+        m_barrelEyedropperActive = false;
+        cancelStroke();
+        return;
+    }
+
+    if (res.shouldEndPreviousStroke) {
+        recoverOpenStroke(true);
+    }
+
+    // Handle triggered barrel actions
+    if (res.triggeredBarrelAction != input::BarrelAction::None) {
+        switch (res.triggeredBarrelAction) {
+        case input::BarrelAction::MiddlePan:
+            m_barrelPanActive = true;
+            m_lastPanPos = QPointF(sample.viewX, sample.viewY);
+            break;
+        case input::BarrelAction::Eyedropper: {
+            m_barrelEyedropperActive = true;
+            const QVariant picked = colorAt(sample.viewX, sample.viewY);
+            if (picked.isValid()) emit eyedropperPicked(picked.value<QColor>());
+            break;
+        }
+        case input::BarrelAction::Undo:
+            if (!m_stroke && !m_materialStroke && m_history && m_history->canUndo()) {
+                m_history->undo();
+            }
+            emit barrelActionRequested(QStringLiteral("undo"));
+            break;
+        case input::BarrelAction::RightClick:
+            emit barrelActionRequested(QStringLiteral("right_click"));
+            break;
+        case input::BarrelAction::EraserToggle:
+        case input::BarrelAction::None:
+            break;
+        }
+    }
+
+    if (m_barrelPanActive) {
+        const QPointF nowPos(sample.viewX, sample.viewY);
+        const QPointF delta = nowPos - m_lastPanPos;
+        m_lastPanPos = nowPos;
+        if (sample.phase == input::PointerPhase::Move && !delta.isNull()) {
+            panBy(delta.x(), delta.y());
+        }
+        if ((sample.buttons & (input::SecondaryButton | input::MiddleButton)) == 0 ||
+            sample.phase == input::PointerPhase::Up || sample.phase == input::PointerPhase::Leave) {
+            m_barrelPanActive = false;
+        }
+        if (!res.shouldBeginStroke && !res.shouldExtendStroke && !res.shouldEndStroke) return;
+    }
+
+    if (m_barrelEyedropperActive) {
+        if (sample.phase == input::PointerPhase::Move) {
+            const QVariant picked = colorAt(sample.viewX, sample.viewY);
+            if (picked.isValid()) emit eyedropperPicked(picked.value<QColor>());
+        }
+        if ((sample.buttons & (input::SecondaryButton | input::MiddleButton)) == 0 ||
+            sample.phase == input::PointerPhase::Up || sample.phase == input::PointerPhase::Leave) {
+            m_barrelEyedropperActive = false;
+        }
+        if (!res.shouldBeginStroke && !res.shouldExtendStroke && !res.shouldEndStroke) return;
+    }
+
+    if (res.shouldBeginStroke) {
+        if (m_document && m_brushSettings && activeToolIsPaintable()) {
+            if (!beginStrokeSample(sample, m_brushSettings.data(), m_brushColor, sample.eraserActive)) {
+                m_arbiter.markStrokeEndedExternally();
+            }
+        } else {
+            m_arbiter.markStrokeEndedExternally();
+        }
+    } else if (res.shouldExtendStroke) {
+        if (m_stroke || m_materialStroke) {
+            continueStrokeSample(sample);
+        }
+    } else if (res.shouldEndStroke) {
+        if (m_stroke || m_materialStroke) {
+            endStrokeSample(sample);
+        }
+    }
+}
+
+void CanvasViewport::injectRawPointerEvent(const input::RawPointerEvent& raw)
+{
+    const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
+    const auto res = m_arbiter.process(raw, docPt.x(), docPt.y());
+    processArbiterResult(res);
+}
+
+void CanvasViewport::handleTabletEvent(QTabletEvent* e)
+{
+    if (!e) return;
+    if (!activeToolIsPaintable() &&
+        e->type() != QEvent::TabletEnterProximity &&
+        e->type() != QEvent::TabletLeaveProximity) {
+        e->ignore();
+        return;
+    }
+    const auto raw = input::QtPointerAdapter::fromTabletEvent(e);
+    if (e->type() == QEvent::TabletEnterProximity || e->type() == QEvent::TabletLeaveProximity) {
+        m_arbiter.setProximity(raw.deviceId, e->type() == QEvent::TabletEnterProximity,
+                               raw.backend, raw.timestampNs);
+    }
+    const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
+    const auto res = m_arbiter.process(raw, docPt.x(), docPt.y());
+    if (res.decision == input::ArbiterDecision::Accept) {
+        e->accept();
+        processArbiterResult(res);
+    } else {
+        e->accept(); // still consume duplicate protocol so Qt won't synthesize mouse
+    }
+}
+
+bool CanvasViewport::event(QEvent* e)
+{
+    if (!e) return false;
+    switch (e->type()) {
+    case QEvent::TabletPress:
+    case QEvent::TabletMove:
+    case QEvent::TabletRelease:
+    case QEvent::TabletEnterProximity:
+    case QEvent::TabletLeaveProximity:
+        handleTabletEvent(static_cast<QTabletEvent*>(e));
+        return e->isAccepted();
+    default:
+        break;
+    }
+    return QQuickPaintedItem::event(e);
+}
+
+void CanvasViewport::mousePressEvent(QMouseEvent* e)
+{
+    if (!e) return;
+    if (e->button() == Qt::RightButton && activeToolIsPaintable()) {
+        const auto raw = input::QtPointerAdapter::fromMouseEvent(e, input::PointerPhase::Hover);
+        if (!raw.synthesizedMouse && !m_arbiter.stylusRecentlyActive(raw.timestampNs)) {
+            emit barrelActionRequested(QStringLiteral("right_click"));
+        }
+        e->accept();
+        return;
+    }
+    if (e->button() != Qt::LeftButton || !activeToolIsPaintable()) {
+        e->ignore();
+        return;
+    }
+    const auto raw = input::QtPointerAdapter::fromMouseEvent(e, input::PointerPhase::Down);
+    const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
+    const auto res = m_arbiter.process(raw, docPt.x(), docPt.y());
+    e->accept();
+    processArbiterResult(res);
+}
+
+void CanvasViewport::mouseMoveEvent(QMouseEvent* e)
+{
+    if (!e) return;
+    if (!activeToolIsPaintable() && !m_stroke && !m_materialStroke) {
+        e->ignore();
+        return;
+    }
+    const auto raw = input::QtPointerAdapter::fromMouseEvent(e, input::PointerPhase::Move);
+    const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
+    const auto res = m_arbiter.process(raw, docPt.x(), docPt.y());
+    e->accept();
+    processArbiterResult(res);
+}
+
+void CanvasViewport::mouseReleaseEvent(QMouseEvent* e)
+{
+    if (!e) return;
+    if (e->button() != Qt::LeftButton && !m_stroke && !m_materialStroke) {
+        e->ignore();
+        return;
+    }
+    const auto raw = input::QtPointerAdapter::fromMouseEvent(e, input::PointerPhase::Up);
+    const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
+    const auto res = m_arbiter.process(raw, docPt.x(), docPt.y());
+    e->accept();
+    processArbiterResult(res);
+}
+
+void CanvasViewport::mouseUngrabEvent()
+{
+    if (m_arbiter.handleFocusLost()) {
+        recoverOpenStroke(true);
+    }
+}
+
+void CanvasViewport::hoverEnterEvent(QHoverEvent* e)
+{
+    if (!e) return;
+    const auto raw = input::QtPointerAdapter::fromHoverEvent(e, input::PointerPhase::Enter);
+    const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
+    const auto res = m_arbiter.process(raw, docPt.x(), docPt.y());
+    if (res.decision == input::ArbiterDecision::Accept) updateCursorState(res.sample, true);
+    e->accept();
+}
+
+void CanvasViewport::hoverMoveEvent(QHoverEvent* e)
+{
+    if (!e) return;
+    const auto raw = input::QtPointerAdapter::fromHoverEvent(e, input::PointerPhase::Hover);
+    const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
+    const auto res = m_arbiter.process(raw, docPt.x(), docPt.y());
+    if (res.decision == input::ArbiterDecision::Accept) updateCursorState(res.sample, true);
+    e->accept();
+}
+
+void CanvasViewport::hoverLeaveEvent(QHoverEvent* e)
+{
+    if (!e) return;
+    const auto raw = input::QtPointerAdapter::fromHoverEvent(e, input::PointerPhase::Leave);
+    const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
+    m_arbiter.process(raw, docPt.x(), docPt.y());
+    clearCursorState();
+    e->accept();
+}
+
+void CanvasViewport::handleTouchNavigation(const QTouchEvent* e)
+{
+    if (!e) return;
+    const auto& pts = e->points();
+    std::array<TouchAnchor, 8> nextAnchors{};
+    int activeCount = 0;
+    for (const QEventPoint& pt : pts) {
+        if (pt.state() == QEventPoint::State::Released) continue;
+        if (activeCount < 8) {
+            nextAnchors[static_cast<std::size_t>(activeCount++)] = {true, pt.id(), pt.position()};
+        }
+    }
+
+    if (activeCount >= 2) {
+        // Match first two active anchors with previous frame for pan + pinch + rotate.
+        const TouchAnchor& aNow = nextAnchors[0];
+        const TouchAnchor& bNow = nextAnchors[1];
+        const TouchAnchor* aPrev = nullptr;
+        const TouchAnchor* bPrev = nullptr;
+        for (const auto& prev : m_touchAnchors) {
+            if (!prev.active) continue;
+            if (prev.id == aNow.id) aPrev = &prev;
+            else if (prev.id == bNow.id) bPrev = &prev;
+        }
+        if (aPrev && bPrev) {
+            const QPointF prevCenter = (aPrev->pos + bPrev->pos) * 0.5;
+            const QPointF nowCenter = (aNow.pos + bNow.pos) * 0.5;
+            const QPointF panDelta = nowCenter - prevCenter;
+            if (!panDelta.isNull()) panBy(panDelta.x(), panDelta.y());
+
+            const QPointF prevVec = bPrev->pos - aPrev->pos;
+            const QPointF nowVec = bNow.pos - aNow.pos;
+            const qreal prevDist = std::hypot(prevVec.x(), prevVec.y());
+            const qreal nowDist = std::hypot(nowVec.x(), nowVec.y());
+            const bool allowPinch = !m_inputSettings || m_inputSettings->touchPinchZoom();
+            if (allowPinch && prevDist > 4.0 && nowDist > 4.0) {
+                const qreal ratio = nowDist / prevDist;
+                if (std::abs(ratio - 1.0) > 0.001) {
+                    zoomAt(nowCenter.x(), nowCenter.y(), ratio);
+                }
+            }
+            const bool allowRot = !m_inputSettings || m_inputSettings->touchRotate();
+            if (allowRot && prevDist > 8.0 && nowDist > 8.0) {
+                const qreal a0 = std::atan2(prevVec.y(), prevVec.x());
+                const qreal a1 = std::atan2(nowVec.y(), nowVec.x());
+                qreal dRad = a1 - a0;
+                while (dRad > kPi) dRad -= 2.0 * kPi;
+                while (dRad < -kPi) dRad += 2.0 * kPi;
+                const qreal dDeg = dRad * (180.0 / kPi);
+                if (std::abs(dDeg) > 0.05) {
+                    setViewRotation(m_viewRotation + dDeg);
+                }
+            }
+        }
+        m_touchNavActive = true;
+    } else if (activeCount == 1 &&
+               m_arbiter.config().touchMode == input::TouchCanvasMode::StylusOnlyWithFingerNavigation) {
+        const TouchAnchor& now = nextAnchors[0];
+        for (const auto& prev : m_touchAnchors) {
+            if (prev.active && prev.id == now.id) {
+                const QPointF delta = now.pos - prev.pos;
+                if (!delta.isNull()) panBy(delta.x(), delta.y());
+                break;
+            }
+        }
+        m_touchNavActive = true;
+    } else {
+        m_touchNavActive = false;
+    }
+
+    m_touchAnchors = nextAnchors;
+}
+
+void CanvasViewport::touchEvent(QTouchEvent* e)
+{
+    if (!e) return;
+    input::QtPointerAdapter::fromTouchEvent(e, m_touchScratch);
+    if (m_touchScratch.empty()) {
+        e->ignore();
+        return;
+    }
+
+    // Check whether an active stylus is riding through QTouchEvent (e.g. Android active stylus).
+    bool hasStylusPoint = false;
+    for (const auto& r : m_touchScratch) {
+        if (r.pointerType == input::PointerType::Pen || r.pointerType == input::PointerType::Eraser) {
+            hasStylusPoint = true;
+            break;
+        }
+    }
+
+    if (hasStylusPoint) {
+        for (const auto& r : m_touchScratch) {
+            if (r.pointerType == input::PointerType::Pen || r.pointerType == input::PointerType::Eraser) {
+                injectRawPointerEvent(r);
+            }
+        }
+        e->accept();
+        return;
+    }
+
+    if (m_arbiter.config().touchMode == input::TouchCanvasMode::StylusOnlyDisableTouch) {
+        e->ignore();
+        return;
+    }
+
+    if (m_arbiter.config().palmRejection && m_arbiter.stylusRecentlyActive(m_touchScratch.front().timestampNs)) {
+        m_arbiter.process(m_touchScratch.front(), 0.0, 0.0); // records palm rejection telemetry
+        e->ignore();
+        return;
+    }
+
+    if (m_touchScratch.size() >= 2 ||
+        m_arbiter.config().touchMode == input::TouchCanvasMode::StylusOnlyWithFingerNavigation) {
+        if (m_stroke || m_materialStroke) {
+            recoverOpenStroke(false);
+        }
+        handleTouchNavigation(e);
+        e->accept();
+        return;
+    }
+
+    // Single-finger painting when AllowAll mode is enabled.
+    const auto& raw = m_touchScratch.front();
+    const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
+    const auto res = m_arbiter.process(raw, docPt.x(), docPt.y());
+    processArbiterResult(res);
+    e->accept();
+}
+
+void CanvasViewport::touchUngrabEvent()
+{
+    m_touchNavActive = false;
+    m_touchAnchors = {};
+    if (m_arbiter.handleFocusLost()) {
+        recoverOpenStroke(true);
+    }
 }
 
 QVariant CanvasViewport::colorAt(qreal x, qreal y) const
@@ -772,8 +1544,6 @@ QVariant CanvasViewport::colorAt(qreal x, qreal y) const
     const auto address = geometry.address({static_cast<std::int64_t>(std::floor(point.x())),
                                            static_cast<std::int64_t>(std::floor(point.y()))});
     if (!address) return {};
-    // Composed directly, without the viewport cache: sampling must not disturb
-    // the cache or the invalidation bookkeeping of the display.
     const auto background = m_document->hasTransparentBackground() ? 0U : m_document->backgroundColor().rgba();
     std::vector<std::vector<std::uint32_t>> scratchBuffers;
     std::vector<std::span<const std::uint32_t>> overrides;
@@ -800,7 +1570,9 @@ void CanvasViewport::paint(QPainter* painter)
     QMutexLocker lock(&m_frameMutex);
     painter->drawImage(QPointF(0, 0), m_frame);
 }
+
 QImage CanvasViewport::frameSnapshot() const { QMutexLocker lock(&m_frameMutex); return m_frame; }
+
 void CanvasViewport::refreshNow()
 {
     m_scheduled = false;
@@ -808,7 +1580,6 @@ void CanvasViewport::refreshNow()
     m_pending = {};
     const QSize frameSize(qCeil(width()), qCeil(height()));
     if (frameSize.width() <= 0 || frameSize.height() <= 0) return;
-    // Bound viewport memory independently of document size.
     if (static_cast<qint64>(frameSize.width()) * frameSize.height() > 32LL * 1024 * 1024) {
         qWarning("Canvas viewport too large to allocate safely"); return;
     }
@@ -826,7 +1597,6 @@ void CanvasViewport::refreshNow()
                                (height() - m_document->height() * m_zoom / 100) / 2);
             m_originInitialized = true;
             dirty = QRectF(QPointF(0, 0), QSizeF(frameSize));
-            // Reported after this function returns: the frame lock is held here.
             QMetaObject::invokeMethod(this, &CanvasViewport::viewChanged, Qt::QueuedConnection);
         }
         QPainter painter(&m_frame);
@@ -843,6 +1613,13 @@ void CanvasViewport::refreshNow()
             }
             const qreal scale = m_zoom / 100;
             painter.save();
+            if (m_viewRotation != 0.0) {
+                const QPointF center(width() / 2, height() / 2);
+                painter.translate(center);
+                painter.rotate(m_viewRotation);
+                painter.translate(-center);
+                painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            }
             painter.translate(m_origin);
             painter.scale(scale, scale);
             const QRectF documentRect(0, 0, m_document->width(), m_document->height());
@@ -860,12 +1637,20 @@ void CanvasViewport::refreshNow()
             painter.fillRect(documentRect, m_checkerBrush);
             if (!list.empty()) {
                 const auto& geometry = list.front().store->geometry();
-                auto a = viewportToDocument(dirty.left(), dirty.top());
-                auto b = viewportToDocument(dirty.right(), dirty.bottom());
-                TileRect requested{static_cast<std::int64_t>(std::floor(qBound<qreal>(0, a.x(), m_document->width()))),
-                                   static_cast<std::int64_t>(std::floor(qBound<qreal>(0, a.y(), m_document->height()))),
-                                   static_cast<std::int64_t>(std::ceil(qBound<qreal>(0, b.x(), m_document->width()))),
-                                   static_cast<std::int64_t>(std::ceil(qBound<qreal>(0, b.y(), m_document->height())))};
+                const QPointF c0 = viewportToDocument(dirty.left(), dirty.top());
+                const QPointF c1 = viewportToDocument(dirty.right(), dirty.top());
+                const QPointF c2 = viewportToDocument(dirty.left(), dirty.bottom());
+                const QPointF c3 = viewportToDocument(dirty.right(), dirty.bottom());
+                const qreal minDocX = std::min({c0.x(), c1.x(), c2.x(), c3.x()});
+                const qreal maxDocX = std::max({c0.x(), c1.x(), c2.x(), c3.x()});
+                const qreal minDocY = std::min({c0.y(), c1.y(), c2.y(), c3.y()});
+                const qreal maxDocY = std::max({c0.y(), c1.y(), c2.y(), c3.y()});
+                TileRect requested{
+                    static_cast<std::int64_t>(std::floor(qBound<qreal>(0, minDocX, m_document->width()))),
+                    static_cast<std::int64_t>(std::floor(qBound<qreal>(0, minDocY, m_document->height()))),
+                    static_cast<std::int64_t>(std::ceil(qBound<qreal>(0, maxDocX, m_document->width()))),
+                    static_cast<std::int64_t>(std::ceil(qBound<qreal>(0, maxDocY, m_document->height())))
+                };
                 auto range = geometry.tilesForRect(requested);
                 if (range) {
                     for (auto y = range->first.y; y <= range->last.y; ++y) {

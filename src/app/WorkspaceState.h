@@ -5,6 +5,7 @@
 #include "../canvas/CanvasDocument.h"
 #include "../color/ColorPalette.h"
 #include "../history/UndoStack.h"
+#include "../input/TabletInputSettings.h"
 #include "../layers/LayerModel.h"
 #include "DocumentRecovery.h"
 #include "PaintMixerController.h"
@@ -48,6 +49,7 @@ class WorkspaceState : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(BrushSettings* brush READ brush CONSTANT)
+    Q_PROPERTY(komapaint::input::TabletInputSettings* inputSettings READ inputSettings CONSTANT)
     Q_PROPERTY(SubToolLibrary* subTools READ subTools CONSTANT)
     Q_PROPERTY(CanvasDocument* document  READ document  NOTIFY documentChanged)
     Q_PROPERTY(LayerModel*     layers    READ layers    NOTIFY documentChanged)
@@ -72,6 +74,8 @@ public:
     explicit WorkspaceState(QObject* parent = nullptr);
 
     BrushSettings* brush() const { return m_brush; }
+    input::TabletInputSettings* inputSettings() const { return m_inputSettings; }
+    void bindInputSettings(Settings* settings);
     SubToolLibrary* subTools() const { return m_subTools; }
     CanvasDocument* document() const { return m_document; }
     LayerModel*     layers()   const { return m_document ? m_document->layers() : m_emptyLayers; }
@@ -288,6 +292,7 @@ private:
     bool m_sessionRestorePending = false;  // restoreSession() has not run yet
     bool m_sessionBatch = false;       // suppress saves while restoring
     BrushSettings* m_brush = nullptr;
+    input::TabletInputSettings* m_inputSettings = nullptr;
     SubToolLibrary* m_subTools = nullptr;
     LayerModel* m_emptyLayers = nullptr; // empty compatibility model; never a document
     CanvasDocument* m_document = nullptr;

@@ -3,6 +3,7 @@
 # them here so the desktop app can link against a single `komapaint_core` target.
 
 add_subdirectory(core)
+add_subdirectory(input)
 add_subdirectory(app)
 add_subdirectory(canvas)
 add_subdirectory(material)
