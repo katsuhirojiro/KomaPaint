@@ -17,6 +17,7 @@ import "../themes"
 Rectangle {
     id: panel
     color: KP.paneBg
+    clip: true
 
     readonly property var library: Workspace.subTools
     readonly property var brush: Workspace.brush
@@ -333,121 +334,121 @@ Rectangle {
         Rectangle {
             objectName: "collectionTabBar"
             Layout.fillWidth: true
+            Layout.maximumWidth: panel.width
             implicitHeight: visible ? 26 : 0
             visible: panel.painting && panel.isBrushTool
             clip: true
             color: KP.paneBg
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: KP.gapXS
+            IconButton {
+                id: createTabBtn
+                objectName: "createTabButton"
+                anchors.right: parent.right
                 anchors.rightMargin: KP.gapXS
+                anchors.verticalCenter: parent.verticalCenter
+                glyph: "plus"
+                iconSize: 11
+                cell: 22
+                tooltip: qsTr("Create new collection tab")
+                onActivated: panel.openCreateTabDialog()
+            }
+
+            IconButton {
+                id: tabOptionsBtn
+                objectName: "tabOptionsButton"
+                anchors.right: createTabBtn.left
+                anchors.rightMargin: 2
+                anchors.verticalCenter: parent.verticalCenter
+                glyph: "dots-h"
+                iconSize: 12
+                cell: 22
+                tooltip: qsTr("Manage current tab")
+                onActivated: {
+                    const tabs = panel.library.engineTabs
+                    const idx = panel.library.currentTabIndex
+                    if (idx >= 0 && idx < tabs.length) {
+                        panel.openTabContextMenu(tabOptionsBtn, tabs[idx].id, tabs[idx].name, tabs[idx].brushCount)
+                    }
+                }
+            }
+
+            ListView {
+                id: tabStrip
+                objectName: "collectionTabStrip"
+                anchors.left: parent.left
+                anchors.leftMargin: KP.gapXS
+                anchors.right: tabOptionsBtn.left
+                anchors.rightMargin: 2
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                orientation: ListView.Horizontal
+                clip: true
                 spacing: 2
-
-                ListView {
-                    id: tabStrip
-                    objectName: "collectionTabStrip"
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 0
-                    Layout.minimumWidth: 40
-                    Layout.fillHeight: true
-                    orientation: ListView.Horizontal
-                    clip: true
-                    spacing: 2
-                    boundsBehavior: Flickable.StopAtBounds
-                    model: panel.library.engineTabs
-                    readonly property int activeTabIdx: panel.library.currentTabIndex
-                    onActiveTabIdxChanged: {
-                        if (activeTabIdx >= 0 && activeTabIdx < count)
-                            positionViewAtIndex(activeTabIdx, ListView.Contain)
-                    }
-
-                    delegate: AbstractButton {
-                        id: colTab
-                        required property int index
-                        required property var modelData
-                        readonly property bool selected: index === panel.library.currentTabIndex
-                        objectName: "collectionTab_" + index
-                        height: tabStrip.height
-                        leftPadding: 6
-                        rightPadding: 6
-                        topPadding: 0
-                        bottomPadding: 0
-                        implicitWidth: Math.max(36, tabRow.implicitWidth + 12)
-                        hoverEnabled: true
-                        focusPolicy: Qt.NoFocus
-                        Accessible.name: modelData.name
-
-                        onClicked: panel.library.selectTab(index)
-
-                        TapHandler {
-                            acceptedButtons: Qt.RightButton
-                            onTapped: panel.openTabContextMenu(colTab, colTab.modelData.id, colTab.modelData.name, colTab.modelData.brushCount)
-                        }
-
-                        background: Rectangle {
-                            color: colTab.selected ? KP.rowSelected
-                                 : colTab.hovered ? KP.hoverOverlay : "transparent"
-                            radius: KP.radiusXS
-                            Rectangle {
-                                visible: colTab.selected
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                height: 2
-                                color: KP.accent
-                            }
-                        }
-
-                        contentItem: RowLayout {
-                            id: tabRow
-                            spacing: 3
-                            Rectangle {
-                                visible: Boolean(colTab.modelData.isDefault)
-                                Layout.alignment: Qt.AlignVCenter
-                                Layout.preferredWidth: 4
-                                Layout.preferredHeight: 4
-                                radius: 2
-                                color: KP.ember
-                            }
-                            Text {
-                                Layout.alignment: Qt.AlignVCenter
-                                text: colTab.modelData.name
-                                color: colTab.selected ? KP.textAccent : KP.textMuted
-                                font.pixelSize: KP.fontMicro
-                                font.weight: colTab.selected ? Font.DemiBold : Font.Normal
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                        }
-                    }
+                boundsBehavior: Flickable.StopAtBounds
+                model: panel.library.engineTabs
+                readonly property int activeTabIdx: panel.library.currentTabIndex
+                onActiveTabIdxChanged: {
+                    if (activeTabIdx >= 0 && activeTabIdx < count)
+                        positionViewAtIndex(activeTabIdx, ListView.Contain)
                 }
 
-                IconButton {
-                    id: tabOptionsBtn
-                    objectName: "tabOptionsButton"
-                    Layout.preferredWidth: 22
-                    Layout.preferredHeight: 22
-                    glyph: "dots-h"
-                    iconSize: 12
-                    cell: 22
-                    tooltip: qsTr("Manage current tab")
-                    onActivated: {
-                        const tabs = panel.library.engineTabs
-                        const idx = panel.library.currentTabIndex
-                        if (idx >= 0 && idx < tabs.length) {
-                            panel.openTabContextMenu(tabOptionsBtn, tabs[idx].id, tabs[idx].name, tabs[idx].brushCount)
+                delegate: AbstractButton {
+                    id: colTab
+                    required property int index
+                    required property var modelData
+                    readonly property bool selected: index === panel.library.currentTabIndex
+                    objectName: "collectionTab_" + index
+                    height: tabStrip.height
+                    leftPadding: 6
+                    rightPadding: 6
+                    topPadding: 0
+                    bottomPadding: 0
+                    implicitWidth: Math.max(36, tabRow.implicitWidth + 12)
+                    hoverEnabled: true
+                    focusPolicy: Qt.NoFocus
+                    Accessible.name: modelData.name
+
+                    onClicked: panel.library.selectTab(index)
+
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        onTapped: panel.openTabContextMenu(colTab, colTab.modelData.id, colTab.modelData.name, colTab.modelData.brushCount)
+                    }
+
+                    background: Rectangle {
+                        color: colTab.selected ? KP.rowSelected
+                             : colTab.hovered ? KP.hoverOverlay : "transparent"
+                        radius: KP.radiusXS
+                        Rectangle {
+                            visible: colTab.selected
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            height: 2
+                            color: KP.accent
                         }
                     }
-                }
-                IconButton {
-                    objectName: "createTabButton"
-                    Layout.preferredWidth: 22
-                    Layout.preferredHeight: 22
-                    glyph: "plus"
-                    iconSize: 11
-                    cell: 22
-                    tooltip: qsTr("Create new collection tab")
-                    onActivated: panel.openCreateTabDialog()
+
+                    contentItem: RowLayout {
+                        id: tabRow
+                        spacing: 3
+                        Rectangle {
+                            visible: Boolean(colTab.modelData.isDefault)
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 4
+                            Layout.preferredHeight: 4
+                            radius: 2
+                            color: KP.ember
+                        }
+                        Text {
+                            Layout.alignment: Qt.AlignVCenter
+                            text: colTab.modelData.name
+                            color: colTab.selected ? KP.textAccent : KP.textMuted
+                            font.pixelSize: KP.fontMicro
+                            font.weight: colTab.selected ? Font.DemiBold : Font.Normal
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
                 }
             }
 
@@ -464,6 +465,7 @@ Rectangle {
         RowLayout {
             objectName: "subToolFilters"
             Layout.fillWidth: true
+            Layout.maximumWidth: panel.width
             Layout.leftMargin: KP.panelInset
             Layout.rightMargin: KP.gapS
             Layout.preferredHeight: 28
@@ -474,6 +476,7 @@ Rectangle {
                 id: searchField
                 objectName: "subToolSearch"
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 Layout.preferredHeight: 22
                 placeholder: panel.isBrushTool ? qsTr("Search brushes in tab") : qsTr("Search subtools")
                 text: panel.library.searchText
