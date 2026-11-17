@@ -52,6 +52,7 @@ target_link_libraries(komapaint_app PUBLIC
     komapaint::core
     komapaint::input
     komapaint::canvas
+    komapaint::region
     komapaint::drawing
     komapaint::layers
     komapaint::animation
