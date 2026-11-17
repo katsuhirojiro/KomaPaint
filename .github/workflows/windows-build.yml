@@ -216,6 +216,7 @@ jobs:
             exit 1
           }
           $failed = 0
+          $summary = @()
           foreach ($exe in $exes) {
             Write-Host ">>> $($exe.Name) <<<"
             $output = & $exe.FullName 2>&1 | Out-String
@@ -226,8 +227,19 @@ jobs:
               $note = $note.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' || ')
               Write-Host "::error title=$($exe.Name) failed (exit $code)::$note"
               $failed++
+            } else {
+              $rows = @($output -split "`n" | Where-Object { $_.Trim().Length -gt 0 } |
+                        Select-Object -Last 8 | ForEach-Object { $_.Trim() })
+              $summary += ("[" + $exe.BaseName + "] " + ($rows -join ' | '))
             }
           }
+          # The run log archive is not always retrievable, but annotations are,
+          # so the Windows Release numbers are published as one annotation.
+          # A single annotation is capped at 4 KiB by GitHub, so trim.
+          $summaryLine = ($summary -join "`n")
+          $summaryLine = $summaryLine.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' || ')
+          if ($summaryLine.Length -gt 3800) { $summaryLine = $summaryLine.Substring(0, 3800) + ' ...' }
+          Write-Host "::notice title=Workload benchmarks (MSVC Release)::$summaryLine"
           if ($failed -gt 0) { exit 1 }
           Write-Host "=== All benchmarks ran ==="
 
