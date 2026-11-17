@@ -99,6 +99,8 @@ void SelectionMask::reset(std::int64_t docWidth, std::int64_t docHeight)
     m_height = std::max<std::int64_t>(0, docHeight);
     m_defaultCoverage = 0;
     m_tiles.clear();
+    m_cachedRevision = 0;
+    m_cachedTilePtr = nullptr;
     ++m_revision;
 }
 
@@ -157,6 +159,7 @@ std::vector<std::uint8_t>& SelectionMask::ensureTile(TilePoint tile)
     auto [it, inserted] = m_tiles.try_emplace(tile);
     if (inserted) {
         it->second.assign(kTilePixels, m_defaultCoverage);
+        m_cachedRevision = 0;
     }
     return it->second;
 }
@@ -172,19 +175,34 @@ void SelectionMask::pruneUniformTiles()
                 break;
             }
         }
-        if (uniform) it = m_tiles.erase(it);
-        else ++it;
+        if (uniform) {
+            it = m_tiles.erase(it);
+            m_cachedRevision = 0;
+        } else {
+            ++it;
+        }
     }
 }
 
 std::uint8_t SelectionMask::at(std::int64_t x, std::int64_t y) const noexcept
 {
     if (x < 0 || y < 0 || x >= m_width || y >= m_height) return 0;
-    const auto it = m_tiles.find(tileFor(x, y));
-    if (it == m_tiles.end()) return m_defaultCoverage;
+    if (m_tiles.empty()) return m_defaultCoverage;
+    const TilePoint tp = tileFor(x, y);
+    const std::uint8_t* ptr = nullptr;
+    if (m_cachedRevision == m_revision && m_cachedTile == tp) {
+        ptr = m_cachedTilePtr;
+    } else {
+        const auto it = m_tiles.find(tp);
+        ptr = (it == m_tiles.end()) ? nullptr : it->second.data();
+        m_cachedTile = tp;
+        m_cachedTilePtr = ptr;
+        m_cachedRevision = m_revision;
+    }
+    if (!ptr) return m_defaultCoverage;
     const std::int64_t lx = x % kTileSize;
     const std::int64_t ly = y % kTileSize;
-    return it->second[static_cast<std::size_t>(ly * kTileSize + lx)];
+    return ptr[static_cast<std::size_t>(ly * kTileSize + lx)];
 }
 
 void SelectionMask::setPixel(std::int64_t x, std::int64_t y, std::uint8_t value)
@@ -203,6 +221,8 @@ void SelectionMask::clear()
 {
     m_defaultCoverage = 0;
     m_tiles.clear();
+    m_cachedRevision = 0;
+    m_cachedTilePtr = nullptr;
     ++m_revision;
 }
 
@@ -211,6 +231,8 @@ void SelectionMask::selectAll()
     if (m_width <= 0 || m_height <= 0) return;
     m_defaultCoverage = 255;
     m_tiles.clear();
+    m_cachedRevision = 0;
+    m_cachedTilePtr = nullptr;
     ++m_revision;
 }
 
@@ -571,6 +593,7 @@ void SelectionMask::restore(const Snapshot& snap)
     m_height = snap.height;
     m_defaultCoverage = snap.defaultCoverage;
     m_tiles = snap.tiles;
+    m_cachedRevision = 0;
     ++m_revision;
 }
 

@@ -167,7 +167,20 @@ CanvasViewport::CanvasViewport(QQuickItem* parent) : QQuickPaintedItem(parent)
     connect(m_antsTimer, &QTimer::timeout, this, [this] {
         if (m_document && m_document->hasSelection()) {
             m_antsPhase = (m_antsPhase + 1) % 16;
-            update();
+            const auto b = m_document->selection().bounds();
+            if (b.empty()) {
+                m_antsTimer->stop();
+                return;
+            }
+            if (qFuzzyIsNull(m_viewRotation)) {
+                const QPointF p0 = documentToViewport(b.x, b.y);
+                const QPointF p1 = documentToViewport(b.x + b.width, b.y + b.height);
+                const QRectF vpDirty = QRectF(p0, p1).normalized().adjusted(-4.0, -4.0, 4.0, 4.0)
+                                       .intersected(QRectF(0.0, 0.0, width(), height()));
+                if (!vpDirty.isEmpty()) update(vpDirty.toAlignedRect());
+            } else {
+                update();
+            }
         } else {
             m_antsTimer->stop();
         }
@@ -181,9 +194,13 @@ CanvasViewport::CanvasViewport(QQuickItem* parent) : QQuickPaintedItem(parent)
             recoverOpenStroke(true);
         }
         if (m_inputSettings && m_arbiter.telemetry().hasLastSample()) {
+            const auto& sample = m_arbiter.telemetry().lastSample();
             const bool wtActive = m_winTab && m_winTab->isContextOpen();
-            m_inputSettings->updateLiveDiagnostics(
-                m_arbiter.telemetry().lastSample(), m_arbiter.telemetry(), wtActive);
+            if (sample.timestampNs != m_lastDiagSampleTs || wtActive != m_lastDiagWinTab) {
+                m_lastDiagSampleTs = sample.timestampNs;
+                m_lastDiagWinTab = wtActive;
+                m_inputSettings->updateLiveDiagnostics(sample, m_arbiter.telemetry(), wtActive);
+            }
         }
     });
     m_diagnosticsTimer->start();

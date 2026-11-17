@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -196,6 +197,7 @@ std::size_t MaterialTileStore::reclaimUnreferenced() noexcept
           catch (const std::length_error&) {}
         ++reclaimed;
     }
+    if (reclaimed > 0) ++m_compositionEpoch;
     while (m_compositions.size() > 1 && m_compositions.back().mediumId.empty()
            && m_compositionLiveRefs.back() == 0 && m_compositionPinRefs.back() == 0) {
         const std::size_t tailId = m_compositions.size() - 1;
@@ -834,6 +836,194 @@ MaterialTileStore::Result MaterialTileStore::replaceTileEntries(TilePoint tilePo
     return Result::Changed;
 }
 
+MaterialTileStore::Result MaterialTileStore::patchTileEntries(
+    TilePoint tilePoint, std::span<const MaterialEntry> patch)
+{
+    if (!isValid()) return Result::OutOfBounds;
+    const auto bounds = m_geometry.tileBounds(tilePoint);
+    if (!bounds) return Result::OutOfBounds;
+    if (patch.empty()) return Result::Unchanged;
+
+    const std::size_t tileSide = static_cast<std::size_t>(m_geometry.tileSize());
+    const std::size_t tileWidth = static_cast<std::size_t>(bounds->right - bounds->left);
+    const std::size_t tileHeight = static_cast<std::size_t>(bounds->bottom - bounds->top);
+    const std::size_t maxLocalIndex = tileSide * tileSide;
+
+    std::size_t previousIndex = 0;
+    bool hasPrevious = false;
+    for (const auto& entry : patch) {
+        if (hasPrevious && entry.localIndex <= previousIndex) return Result::InvalidData;
+        previousIndex = entry.localIndex;
+        hasPrevious = true;
+        if (entry.localIndex >= maxLocalIndex) return Result::OutOfBounds;
+        const std::size_t lx = entry.localIndex % tileSide;
+        const std::size_t ly = entry.localIndex / tileSide;
+        if (lx >= tileWidth || ly >= tileHeight) return Result::InvalidData;
+        if (!entry.cell.empty() && !validateCell(entry.cell)) return Result::InvalidData;
+    }
+
+    auto tileIt = m_tiles.find(tilePoint);
+    if (tileIt == m_tiles.end()) {
+        // Fast build when tile does not exist yet: filter non-empty patch entries directly.
+        thread_local std::vector<MaterialEntry> nonEmpty;
+        nonEmpty.clear();
+        nonEmpty.reserve(patch.size());
+        for (const auto& e : patch) {
+            if (!e.cell.empty()) nonEmpty.push_back(e);
+        }
+        if (nonEmpty.empty()) return Result::Unchanged;
+        return replaceTileEntries(tilePoint, nonEmpty);
+    }
+
+    auto& existing = tileIt->second.entries;
+    // Check if every entry in patch already exists in `existing` and stays non-empty,
+    // AND whether anything actually changed — pure in-place update needs zero allocation.
+    bool pureInPlace = true;
+    bool anyDiff = false;
+    std::size_t activeDeltaPos = 0;
+    std::size_t activeDeltaNeg = 0;
+
+    auto it = std::lower_bound(existing.begin(), existing.end(), patch.front().localIndex,
+                               [](const MaterialEntry& e, std::size_t idx) { return e.localIndex < idx; });
+    std::size_t ei = static_cast<std::size_t>(it - existing.begin());
+    const std::size_t en = existing.size();
+    for (const auto& p : patch) {
+        while (ei < en && existing[ei].localIndex < p.localIndex) ++ei;
+        if (ei < en && existing[ei].localIndex == p.localIndex) {
+            if (p.cell.empty()) {
+                pureInPlace = false;
+                anyDiff = true;
+                break;
+            }
+            if (!(existing[ei].cell == p.cell)) {
+                anyDiff = true;
+                const bool wasActive = mobileCell(existing[ei].cell);
+                const bool nowActive = mobileCell(p.cell);
+                if (!wasActive && nowActive) ++activeDeltaPos;
+                else if (wasActive && !nowActive) ++activeDeltaNeg;
+            }
+            ++ei;
+        } else {
+            if (!p.cell.empty()) {
+                pureInPlace = false;
+                anyDiff = true;
+                break;
+            }
+        }
+    }
+
+    if (!anyDiff) return Result::Unchanged;
+
+    if (!pureInPlace) {
+        // Merge existing + patch into thread-local buffer, then delegate to replaceTileEntries.
+        thread_local std::vector<MaterialEntry> merged;
+        merged.clear();
+        merged.reserve(existing.size() + patch.size());
+        std::size_t mi = 0;
+        for (const auto& p : patch) {
+            while (mi < en && existing[mi].localIndex < p.localIndex) {
+                merged.push_back(existing[mi++]);
+            }
+            if (mi < en && existing[mi].localIndex == p.localIndex) ++mi;
+            if (!p.cell.empty()) merged.push_back(p);
+        }
+        while (mi < en) merged.push_back(existing[mi++]);
+        return replaceTileEntries(tilePoint, merged);
+    }
+
+    // Pure in-place path: check active-list staging & dirty tracking, then mutate in place.
+    const std::size_t oldActiveCells = tileIt->second.activeCells;
+    const std::size_t newActiveCells = oldActiveCells + activeDeltaPos - activeDeltaNeg;
+    const bool activateTile = newActiveCells > 0 && oldActiveCells == 0;
+
+    std::vector<TilePoint> stagedActive;
+    std::size_t activeStagingBytes = 0;
+    bool activeStageCommitted = false;
+    struct ActiveStageRelease {
+        std::shared_ptr<DocumentMemoryBudget> budget;
+        std::size_t bytes = 0;
+        bool* committed = nullptr;
+        ~ActiveStageRelease() {
+            if (budget && bytes && committed && !*committed)
+                budget->release(DocumentMemoryBudget::Category::RestoreStaging, bytes);
+        }
+    } activeStage{m_budget, 0, &activeStageCommitted};
+
+    if (activateTile && m_activeTiles.size() == m_activeTiles.capacity()) {
+        const std::size_t currentCapacity = m_activeTiles.capacity();
+        const std::size_t nextCapacity = currentCapacity == 0 ? std::size_t{8}
+            : currentCapacity > std::numeric_limits<std::size_t>::max() / 2
+                ? m_activeTiles.max_size() : currentCapacity * 2;
+        if (nextCapacity <= currentCapacity || nextCapacity > m_activeTiles.max_size()
+            || nextCapacity > std::numeric_limits<std::size_t>::max() / sizeof(TilePoint))
+            return Result::AllocationFailed;
+        activeStagingBytes = nextCapacity * sizeof(TilePoint);
+        if (m_budget && !m_budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, activeStagingBytes))
+            return Result::DocumentMemoryLimit;
+        activeStage.bytes = activeStagingBytes;
+        try {
+            stagedActive.reserve(nextCapacity);
+            stagedActive.insert(stagedActive.end(), m_activeTiles.begin(), m_activeTiles.end());
+            stagedActive.insert(std::lower_bound(stagedActive.begin(), stagedActive.end(), tilePoint, TilePointLess{}), tilePoint);
+            const std::size_t actualBytes = stagedActive.capacity() * sizeof(TilePoint);
+            if (actualBytes > activeStagingBytes) {
+                const std::size_t extra = actualBytes - activeStagingBytes;
+                if (m_budget && !m_budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, extra))
+                    return Result::DocumentMemoryLimit;
+                activeStagingBytes += extra;
+                activeStage.bytes = activeStagingBytes;
+            }
+        } catch (const std::bad_alloc&) { return Result::AllocationFailed; }
+          catch (const std::length_error&) { return Result::AllocationFailed; }
+    }
+
+    if (m_beforeChange && !m_beforeChange(m_beforeContext, tilePoint, existing))
+        return Result::AllocationFailed;
+
+    const auto marked = m_dirty.mark(*bounds);
+    if (marked != DirtyTileTracker::Result::Marked)
+        return marked == DirtyTileTracker::Result::AllocationFailed ? Result::AllocationFailed : Result::TrackingLimit;
+
+    ei = static_cast<std::size_t>(it - existing.begin());
+    for (const auto& p : patch) {
+        while (existing[ei].localIndex < p.localIndex) ++ei;
+        MaterialCell& dst = existing[ei].cell;
+        if (!(dst == p.cell)) {
+            if (dst.compositionId != p.cell.compositionId) {
+                if (dst.compositionId > 0 && dst.compositionId < m_compositionLiveRefs.size()
+                    && m_compositionLiveRefs[dst.compositionId] > 0)
+                    --m_compositionLiveRefs[dst.compositionId];
+                if (p.cell.compositionId > 0 && p.cell.compositionId < m_compositionLiveRefs.size())
+                    ++m_compositionLiveRefs[p.cell.compositionId];
+            }
+            dst = p.cell;
+        }
+        ++ei;
+    }
+    tileIt->second.activeCells = newActiveCells;
+
+    if (activateTile && !stagedActive.empty()) {
+        const std::size_t oldActiveBytes = m_activeTileBytes;
+        m_activeTiles.swap(stagedActive);
+        m_activeTileBytes = m_activeTiles.capacity() * sizeof(TilePoint);
+        if (m_budget) {
+            if (oldActiveBytes) m_budget->release(DocumentMemoryBudget::Category::Artwork, oldActiveBytes);
+            m_budget->transferToArtwork(activeStage.bytes);
+        }
+        activeStageCommitted = true;
+    }
+    auto activePosition = std::lower_bound(m_activeTiles.begin(), m_activeTiles.end(),
+                                           tilePoint, TilePointLess{});
+    const bool activeListed = activePosition != m_activeTiles.end() && *activePosition == tilePoint;
+    const bool activeAfter = newActiveCells != 0;
+    if (activeAfter && !activeListed)
+        m_activeTiles.insert(activePosition, tilePoint);
+    else if (!activeAfter && activeListed)
+        m_activeTiles.erase(activePosition);
+    notify(tilePoint);
+    return Result::Changed;
+}
+
 MaterialTileStore::Result MaterialTileStore::write(TilePoint point, const PaintBatch& paint, bool combine) try
 {
     if (!paint.valid()) return Result::InvalidData;
@@ -966,6 +1156,7 @@ void MaterialTileStore::eraseUnreferencedComposition(std::size_t id) noexcept
         catch (const std::bad_alloc&) {}
         catch (const std::length_error&) {}
     }
+    ++m_compositionEpoch;
 }
 
 MaterialTileSnapshot MaterialTileStore::snapshot(TilePoint tile) const
@@ -1146,6 +1337,7 @@ bool MaterialTileStore::importCompositions(const std::vector<MaterialComposition
         m_freeCompositionIds.swap(freeIds);
         m_compositionIndex.swap(index);
         m_compositionBytes = charge;
+        ++m_compositionEpoch;
         return true;
     } catch (const std::bad_alloc&) {
         if (m_budget) m_budget->release(DocumentMemoryBudget::Category::Artwork, charge);
@@ -1200,9 +1392,22 @@ bool MaterialRenderer::renderTile(const MaterialTileStore& material, TilePoint t
         const MediumProfile& goProf = gouacheProfile();
         const MediumProfile& inkProf = inkProfile();
 
+        struct CachedOptical {
+            std::uint64_t key = 0;
+            OpticalResult optical{};
+            bool valid = false;
+        };
+        constexpr std::size_t OpticalSlots = 512;
+        std::array<CachedOptical, OpticalSlots> opticalCache{};
+
         MaterialCell lastCell{};
         OpticalResult lastOptical{};
         bool hasLastCell = false;
+
+        auto quantFloat = [](float v) noexcept -> std::uint32_t {
+            if (v <= 0.0F) return 0U;
+            return std::bit_cast<std::uint32_t>(v) >> 16U; // sign+exp+7 mantissa bits (~0.8% relative)
+        };
 
         for (const auto& entry : entries) {
             const MaterialCell& cell = entry.cell;
@@ -1227,12 +1432,28 @@ bool MaterialRenderer::renderTile(const MaterialTileStore& material, TilePoint t
             if (hasLastCell && cell == lastCell) {
                 optical = lastOptical;
             } else {
-                optical = m_engine.opticalResultPrepared(
-                    cached->optics, *cached->medium, surface,
-                    double(cell.pigmentMass), double(cell.water),
-                    double(cell.binder), double(cell.filler),
-                    double(cell.drying), double(cell.settling),
-                    ReferenceBatchPixels);
+                const std::uint64_t qP = quantFloat(cell.pigmentMass);
+                const std::uint64_t qW = quantFloat(cell.water);
+                const std::uint64_t qB = quantFloat(cell.binder);
+                const std::uint64_t qD = static_cast<std::uint64_t>(cell.drying * 255.0F + 0.5F);
+                const std::uint64_t qS = static_cast<std::uint64_t>(cell.settling * 255.0F + 0.5F);
+                const std::uint64_t oKey = (static_cast<std::uint64_t>(cell.compositionId) * 1315423911ULL)
+                    ^ (qP << 48U) ^ (qW << 32U) ^ (qB << 16U) ^ (qD << 8U) ^ qS;
+                const std::size_t oIdx = (oKey ^ (oKey >> 19U)) & (OpticalSlots - 1);
+                CachedOptical& oSlot = opticalCache[oIdx];
+                if (oSlot.valid && oSlot.key == oKey) {
+                    optical = oSlot.optical;
+                } else {
+                    optical = m_engine.opticalResultPrepared(
+                        cached->optics, *cached->medium, surface,
+                        double(cell.pigmentMass), double(cell.water),
+                        double(cell.binder), double(cell.filler),
+                        double(cell.drying), double(cell.settling),
+                        ReferenceBatchPixels);
+                    oSlot.key = oKey;
+                    oSlot.optical = optical;
+                    oSlot.valid = true;
+                }
                 lastCell = cell;
                 lastOptical = optical;
                 hasLastCell = true;

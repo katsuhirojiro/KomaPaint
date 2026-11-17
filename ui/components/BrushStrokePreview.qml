@@ -28,20 +28,45 @@ Canvas {
     antialiasing: true
     renderTarget: Canvas.Image
 
-    onBrushSizeChanged: requestPaint()
-    onHardnessChanged: requestPaint()
-    onBrushOpacityChanged: requestPaint()
-    onFlowChanged: requestPaint()
-    onSpacingChanged: requestPaint()
-    onTexturedChanged: requestPaint()
-    onTipStyleChanged: requestPaint()
-    onAspectRatioChanged: requestPaint()
-    onTipAngleChanged: requestPaint()
-    onPressureSizeChanged: requestPaint()
-    onBlendStrengthChanged: requestPaint()
-    onInkChanged: requestPaint()
-    onWidthChanged: requestPaint()
-    onHeightChanged: requestPaint()
+    property bool _dirtyPaint: false
+    Timer {
+        id: paintCoalesceTimer
+        interval: 16
+        repeat: false
+        onTriggered: {
+            if (!preview.visible || preview.width <= 4 || preview.height <= 4) {
+                preview._dirtyPaint = true
+                return
+            }
+            preview._dirtyPaint = false
+            preview.requestPaint()
+        }
+    }
+    function schedulePaint() {
+        if (!preview.visible) {
+            preview._dirtyPaint = true
+            return
+        }
+        paintCoalesceTimer.restart()
+    }
+    onVisibleChanged: {
+        if (visible && _dirtyPaint) schedulePaint()
+    }
+
+    onBrushSizeChanged: schedulePaint()
+    onHardnessChanged: schedulePaint()
+    onBrushOpacityChanged: schedulePaint()
+    onFlowChanged: schedulePaint()
+    onSpacingChanged: schedulePaint()
+    onTexturedChanged: schedulePaint()
+    onTipStyleChanged: schedulePaint()
+    onAspectRatioChanged: schedulePaint()
+    onTipAngleChanged: schedulePaint()
+    onPressureSizeChanged: schedulePaint()
+    onBlendStrengthChanged: schedulePaint()
+    onInkChanged: schedulePaint()
+    onWidthChanged: schedulePaint()
+    onHeightChanged: schedulePaint()
 
     function random(seed) {
         const x = Math.sin(seed * 12.9898) * 43758.5453
@@ -61,9 +86,12 @@ Canvas {
     }
 
     onPaint: {
+        if (!visible || width <= 4 || height <= 4) {
+            _dirtyPaint = true
+            return
+        }
         const ctx = getContext("2d")
         ctx.clearRect(0, 0, width, height)
-        if (width <= 4 || height <= 4) return
 
         const maxRadius = Math.max(1.2, Math.min(height * 0.42, 1.2 + Math.pow(brushSize / 256, 0.5) * height * 0.40)) * scaleHint
         const dabs = Math.max(14, Math.round(width / Math.max(1.4, maxRadius * 0.5 * (spacing / 25))))

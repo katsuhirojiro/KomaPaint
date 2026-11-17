@@ -280,6 +280,8 @@ private:
     quint64 m_loadedMixtureRevision = 0;
     QTimer* m_materialTimer = nullptr;
     QTimer* m_diagnosticsTimer = nullptr;
+    std::uint64_t m_lastDiagSampleTs = 0;
+    bool m_lastDiagWinTab = false;
     QElapsedTimer m_materialClock;
     qint64 m_lastMaterialTick = 0;
     StrokeStabilizer m_stabilizer;

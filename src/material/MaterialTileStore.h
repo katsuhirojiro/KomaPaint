@@ -89,6 +89,7 @@ public:
     std::optional<PaintBatch> batchAt(TilePoint point) const;
     const MaterialComposition* composition(std::size_t id) const noexcept;
     const std::vector<MaterialComposition>& compositions() const noexcept { return m_compositions; }
+    std::uint64_t compositionEpoch() const noexcept { return m_compositionEpoch; }
     std::size_t activeCompositionCount() const noexcept;
     std::size_t reclaimUnreferenced() noexcept;
     void pinSnapshots(std::span<const MaterialTileSnapshot> snapshots) noexcept;
@@ -97,6 +98,9 @@ public:
     std::optional<std::size_t> internComposition(const PaintBatch& paint, bool* inserted = nullptr);
     Result setCell(TilePoint point, const MaterialCell& cell);
     Result replaceTileEntries(TilePoint tile, std::span<const MaterialEntry> entries);
+    // Apply a sparse sorted patch of modified/erased cells (empty cell = erase)
+    // to a single tile without re-scanning or re-validating untouched entries.
+    Result patchTileEntries(TilePoint tile, std::span<const MaterialEntry> patch);
     Result deposit(TilePoint point, const PaintBatch& paint);
     Result setBatch(TilePoint point, const PaintBatch& paint);
     Result updateCellState(TilePoint point, double water, double binder, double filler,
@@ -147,6 +151,7 @@ private:
     std::size_t m_activeTileBytes = 0;
     std::vector<MaterialComposition> m_compositions; // index zero is the empty sentinel
     std::vector<std::size_t> m_compositionHashes;
+    std::uint64_t m_compositionEpoch = 1;
     std::vector<std::size_t> m_compositionLiveRefs;
     std::vector<std::size_t> m_compositionPinRefs;
     std::vector<std::size_t> m_freeCompositionIds;

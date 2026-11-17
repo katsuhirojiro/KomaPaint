@@ -109,6 +109,9 @@ private:
     std::uint8_t m_defaultCoverage = 0;
     std::uint64_t m_revision = 1;
     std::map<TilePoint, std::vector<std::uint8_t>, TilePointLess> m_tiles;
+    mutable std::uint64_t m_cachedRevision = 0;
+    mutable TilePoint m_cachedTile{};
+    mutable const std::uint8_t* m_cachedTilePtr = nullptr;
 };
 
 } // namespace komapaint::region
