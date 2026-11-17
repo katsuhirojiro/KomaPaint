@@ -7,7 +7,9 @@
 #include <QTabletEvent>
 #include <QTouchEvent>
 
+#include <algorithm>
 #include <chrono>
+#include <mutex>
 
 namespace komapaint::input {
 namespace {
@@ -22,10 +24,39 @@ std::uint64_t steadyNowNs() noexcept
 
 std::uint64_t eventTimestampNs(quint64 qtTimestampMs) noexcept
 {
+    static std::mutex s_mutex;
+    static bool s_hasQtAnchor = false;
+    static quint64 s_qtAnchorMs = 0;
+    static std::uint64_t s_wallAnchorNs = 0;
+    static std::uint64_t s_lastOutNs = 0;
+
+    const std::uint64_t nowNs = steadyNowNs();
+    std::lock_guard<std::mutex> lock(s_mutex);
+
     if (qtTimestampMs > 0) {
-        return static_cast<std::uint64_t>(qtTimestampMs) * 1'000'000ULL;
+        if (!s_hasQtAnchor || qtTimestampMs < s_qtAnchorMs) {
+            s_hasQtAnchor = true;
+            s_qtAnchorMs = qtTimestampMs;
+            s_wallAnchorNs = std::max(nowNs, s_lastOutNs + 1'000ULL);
+        }
+        std::uint64_t candidate =
+            s_wallAnchorNs + static_cast<std::uint64_t>(qtTimestampMs - s_qtAnchorMs) * 1'000'000ULL;
+        // Re-anchor if the Qt clock drifted behind real wall time (e.g. after long waits).
+        if (candidate + 50'000'000ULL < nowNs) {
+            s_qtAnchorMs = qtTimestampMs;
+            s_wallAnchorNs = std::max(nowNs, s_lastOutNs + 1'000ULL);
+            candidate = s_wallAnchorNs;
+        }
+        if (candidate < s_lastOutNs) {
+            candidate = s_lastOutNs;
+        }
+        s_lastOutNs = candidate;
+        return candidate;
     }
-    return steadyNowNs();
+
+    const std::uint64_t out = std::max(nowNs, s_lastOutNs);
+    s_lastOutNs = out;
+    return out;
 }
 
 std::uint32_t translateButtons(Qt::MouseButtons qtButtons) noexcept

@@ -178,8 +178,9 @@ void TestTabletViewport::tabletPenEraserTiltRotationAndUndo()
         {qRound(matDoc.x()), qRound(matDoc.y())});
     QVERIFY(matBatch.has_value() && matBatch->totalMass() > 0.0);
     history.undo();
-    QVERIFY(!doc.layers()->layerAt(0)->materialTiles().batchAt(
-        {qRound(matDoc.x()), qRound(matDoc.y())}).has_value());
+    const auto undoneCell = doc.layers()->layerAt(0)->materialTiles().cellAt(
+        {qRound(matDoc.x()), qRound(matDoc.y())});
+    QVERIFY(!undoneCell || undoneCell->empty());
 }
 
 void TestTabletViewport::tabletMissingReleaseAndSynthesizedMouseSuppression()
