@@ -1780,9 +1780,25 @@ void TestBrushUi::brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects()
                          .arg(tabMenu->property("visible").toBool())
                          .arg(tabMenu->property("opened").toBool())));
         QQuickItem* deleteMenuItem = nullptr;
-        QTRY_VERIFY((deleteMenuItem = item(app, QStringLiteral("tabMenuDelete"))) != nullptr
-                    && deleteMenuItem->isVisible() && deleteMenuItem->width() > 0 && deleteMenuItem->height() > 0);
-        click(app, deleteMenuItem);
+        QTRY_VERIFY2(
+            ((deleteMenuItem = item(app, QStringLiteral("tabMenuDelete"))) != nullptr
+             || (deleteMenuItem = tabMenu->findChild<QQuickItem*>(QStringLiteral("tabMenuDelete"))) != nullptr)
+            && deleteMenuItem->isVisible() && deleteMenuItem->width() > 0 && deleteMenuItem->height() > 0,
+            qPrintable(QStringLiteral("popupType=%1 found=%2 vis=%3 size=(%4,%5) sameWin=%6")
+                .arg(tabMenu->property("popupType").toInt())
+                .arg(deleteMenuItem != nullptr)
+                .arg(deleteMenuItem ? deleteMenuItem->isVisible() : false)
+                .arg(deleteMenuItem ? deleteMenuItem->width() : -1)
+                .arg(deleteMenuItem ? deleteMenuItem->height() : -1)
+                .arg(deleteMenuItem ? (deleteMenuItem->window() == app.window) : false)));
+        if (deleteMenuItem->window() && deleteMenuItem->window() != app.window) {
+            const QPoint at = deleteMenuItem->mapToScene(QPointF(deleteMenuItem->width() / 2, deleteMenuItem->height() / 2)).toPoint();
+            QTest::mouseMove(deleteMenuItem->window(), at);
+            QTest::mouseClick(deleteMenuItem->window(), Qt::LeftButton, Qt::NoModifier, at);
+            QCoreApplication::processEvents();
+        } else {
+            click(app, deleteMenuItem);
+        }
         auto* confirmDlg = subPanel->findChild<QObject*>(QStringLiteral("deleteTabConfirmDialog"));
         QVERIFY(confirmDlg);
         QTRY_VERIFY(confirmDlg->property("opened").toBool());

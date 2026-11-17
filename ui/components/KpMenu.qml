@@ -1,18 +1,18 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Controls as QQC2
 import "../themes"
 
 // The interface's popup menu: a floating panel with a hairline, a soft shadow
 // and generous hit areas. Menus are the one place a shadow is welcome, because
 // they genuinely float above the workspace.
-Menu {
+QQC2.Menu {
     id: menu
 
     padding: KP.gapS
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    closePolicy: QQC2.Popup.CloseOnEscape | QQC2.Popup.CloseOnPressOutside
     Component.onCompleted: {
-        if (typeof popupType !== "undefined" && typeof Popup.Item !== "undefined")
-            popupType = Popup.Item
+        if ("popupType" in menu)
+            menu.popupType = (typeof QQC2.Popup.Item === "number") ? QQC2.Popup.Item : 0
     }
 
     enter: Transition {
