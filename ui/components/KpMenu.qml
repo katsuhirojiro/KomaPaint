@@ -14,6 +14,17 @@ QQC2.Menu {
         if ("popupType" in menu)
             menu.popupType = (typeof QQC2.Popup.Item === "number") ? QQC2.Popup.Item : 0
     }
+    onAboutToShow: {
+        if (menu.width <= menu.leftPadding + menu.rightPadding) {
+            let maxW = 160
+            for (let i = 0; i < menu.count; ++i) {
+                const it = menu.itemAt(i)
+                if (it && it.implicitWidth > maxW)
+                    maxW = it.implicitWidth
+            }
+            menu.width = maxW + menu.leftPadding + menu.rightPadding
+        }
+    }
 
     enter: Transition {
         NumberAnimation { property: "opacity"; from: 0; to: 1; duration: KP.durationFast; easing.type: KP.easingCurve }

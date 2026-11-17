@@ -56,11 +56,13 @@ Rectangle {
         targetTabBrushCount = brushCount
         if (anchorItem) {
             const pt = anchorItem.mapToItem(panel, 0, anchorItem.height)
-            tabContextMenu.x = Math.max(4, Math.min(panel.width - tabContextMenu.implicitWidth - 4,
-                                                    pt.x - tabContextMenu.implicitWidth + anchorItem.width))
-            tabContextMenu.y = pt.y
+            const menuW = Math.max(160, tabContextMenu.implicitWidth)
+            const px = Math.max(4, Math.min(panel.width - menuW - 4,
+                                            pt.x - menuW + anchorItem.width))
+            tabContextMenu.popup(panel, px, pt.y)
+        } else {
+            tabContextMenu.popup()
         }
-        tabContextMenu.open()
     }
 
     function openCreateTabDialog() {
