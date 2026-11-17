@@ -178,6 +178,7 @@ private:
     void handleTabletEvent(QTabletEvent* e);
     void handleTouchNavigation(const QTouchEvent* e);
     void recoverOpenStroke(bool commit);
+    void clearStrokeObjects();
     bool beginStrokeSample(const input::PointerSample& sample, BrushSettings* brush,
                            const QColor& color, bool eraseOverride);
     void continueStrokeSample(const input::PointerSample& sample);

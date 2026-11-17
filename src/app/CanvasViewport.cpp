@@ -742,7 +742,7 @@ void CanvasViewport::clearCursorState()
 bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, BrushSettings* brush,
                                        const QColor& color, bool eraseOverride)
 {
-    cancelStroke();
+    clearStrokeObjects();
     if (!m_document || !m_history || !brush || !color.isValid())
         return false;
 
@@ -1112,6 +1112,7 @@ void CanvasViewport::recoverOpenStroke(bool commit)
 
 bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* settings, const QColor& color)
 {
+    m_arbiter.markStrokeEndedExternally();
     auto* brush = qobject_cast<BrushSettings*>(settings);
     const QPointF docPt = viewportToDocument(x, y);
     input::PointerSample s;
@@ -1153,13 +1154,18 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
     endStrokeSample(s);
 }
 
-void CanvasViewport::cancelStroke()
+void CanvasViewport::clearStrokeObjects()
 {
     if (m_history && m_history->strokeActive()) m_history->cancelStroke();
     m_stroke.reset();
     m_materialStroke.reset();
     m_strokeLayer = nullptr;
     m_hasLastStrokeSample = false;
+}
+
+void CanvasViewport::cancelStroke()
+{
+    clearStrokeObjects();
     m_arbiter.markStrokeEndedExternally();
 }
 
@@ -1490,6 +1496,9 @@ void CanvasViewport::touchEvent(QTouchEvent* e)
                 injectRawPointerEvent(r);
             }
         }
+        for (qsizetype i = 0; i < e->pointCount(); ++i) {
+            e->point(i).setAccepted(true);
+        }
         e->accept();
         return;
     }
@@ -1511,6 +1520,9 @@ void CanvasViewport::touchEvent(QTouchEvent* e)
             recoverOpenStroke(false);
         }
         handleTouchNavigation(e);
+        for (qsizetype i = 0; i < e->pointCount(); ++i) {
+            e->point(i).setAccepted(true);
+        }
         e->accept();
         return;
     }
@@ -1520,6 +1532,9 @@ void CanvasViewport::touchEvent(QTouchEvent* e)
     const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
     const auto res = m_arbiter.process(raw, docPt.x(), docPt.y());
     processArbiterResult(res);
+    for (qsizetype i = 0; i < e->pointCount(); ++i) {
+        e->point(i).setAccepted(true);
+    }
     e->accept();
 }
 

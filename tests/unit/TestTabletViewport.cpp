@@ -258,12 +258,8 @@ void TestTabletViewport::touchPinchZoomRotateAndPalmRejection()
     view.setBrushColor(Qt::black);
     view.refreshNow();
 
-    QPointingDevice touchDev(
-        QStringLiteral("Test Touchscreen"), 3001,
-        QInputDevice::DeviceType::TouchScreen,
-        QPointingDevice::PointerType::Finger,
-        QInputDevice::Capability::Position,
-        10, 0);
+    std::unique_ptr<QPointingDevice> touchDev(
+        QTest::createTouchDevice(QInputDevice::DeviceType::TouchScreen));
 
     QQuickWindow window;
     window.resize(400, 400);
@@ -275,13 +271,13 @@ void TestTabletViewport::touchPinchZoomRotateAndPalmRejection()
     const qreal rotBefore = view.viewRotation();
 
     // Two-finger pinch-out + rotation: zoomed & rotated without painting pixels!
-    QTest::touchEvent(&window, &touchDev)
+    QTest::touchEvent(&window, touchDev.get())
         .press(0, QPoint(150, 200))
         .press(1, QPoint(250, 200));
-    QTest::touchEvent(&window, &touchDev)
+    QTest::touchEvent(&window, touchDev.get())
         .move(0, QPoint(120, 170))
         .move(1, QPoint(280, 230));
-    QTest::touchEvent(&window, &touchDev)
+    QTest::touchEvent(&window, touchDev.get())
         .release(0, QPoint(120, 170))
         .release(1, QPoint(280, 230));
     QCoreApplication::processEvents();
