@@ -715,7 +715,12 @@ Rectangle {
                         KpIcon {
                             visible: !panel.isStrokeRow(row.modelData)
                             anchors.centerIn: parent
-                            name: "tools/" + ((row.modelData.executableTool === "smart_fill") ? "fill" : (row.modelData.executableTool || Workspace.activeTool))
+                            name: {
+                                const exec = row.modelData.executableTool || ""
+                                if (exec === "smart_fill") return "tools/fill"
+                                if (exec === "boundary_eraser") return "tools/eraser"
+                                return "tools/" + (exec.length > 0 ? exec : Workspace.activeTool)
+                            }
                             size: 16
                             color: row.current ? KP.textAccent : KP.iconNormal
                         }

@@ -200,17 +200,16 @@ region::ReferenceSet CanvasToolExecutor::buildReferenceSet(CanvasDocument* doc, 
         desc.active = (i == activeIdx);
         if (layer->materialTiles().allocatedTiles() > 0) {
             desc.renderMaterialTile = [layer, surface](TilePoint tile, std::vector<std::uint32_t>& outBuf) -> bool {
-                // RegionCache uses 64x64 tiles while MaterialTileStore may use 256x256 tiles.
-                // Map each pixel inside the 64x64 region tile to MaterialTileStore cells cleanly.
                 const auto geom = layer->materialTiles().geometry();
-                outBuf.assign(64 * 64, 0U);
+                const int ts = geom.tileSize();
+                outBuf.assign(static_cast<std::size_t>(ts) * static_cast<std::size_t>(ts), 0U);
                 bool any = false;
-                const std::int64_t bx = tile.x * 64;
-                const std::int64_t by = tile.y * 64;
-                for (int ly = 0; ly < 64; ++ly) {
+                const std::int64_t bx = tile.x * ts;
+                const std::int64_t by = tile.y * ts;
+                for (int ly = 0; ly < ts; ++ly) {
                     const std::int64_t gy = by + ly;
                     if (gy < 0 || gy >= geom.height()) continue;
-                    for (int lx = 0; lx < 64; ++lx) {
+                    for (int lx = 0; lx < ts; ++lx) {
                         const std::int64_t gx = bx + lx;
                         if (gx < 0 || gx >= geom.width()) continue;
                         const auto* cell = layer->materialTiles().findCell({gx, gy});
@@ -220,7 +219,7 @@ region::ReferenceSet CanvasToolExecutor::buildReferenceSet(CanvasDocument* doc, 
                         const auto* med = material::findMediumProfile(batch->mediumId);
                         const auto& medium = med ? *med : material::gouacheProfile();
                         const auto opt = toolMaterialEngine().opticalResult(*batch, medium, surface, 1.0);
-                        outBuf[static_cast<std::size_t>(ly * 64 + lx)] =
+                        outBuf[static_cast<std::size_t>(ly * ts + lx)] =
                             toolMaterialEngine().compositeOptical(0U, opt, surface, 1.0, 1.0);
                         any = true;
                     }

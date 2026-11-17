@@ -356,12 +356,31 @@ void RegionCache::syncWith(const ReferenceSet& refs)
 std::uint64_t RegionCache::computeTileRevision(const ReferenceSet& refs, TilePoint tile) const noexcept
 {
     std::uint64_t h = refs.signature();
+    const std::int64_t rx0 = tile.x * kTileSize;
+    const std::int64_t ry0 = tile.y * kTileSize;
+    const std::int64_t rx1 = std::min(refs.docWidth, rx0 + kTileSize);
+    const std::int64_t ry1 = std::min(refs.docHeight, ry0 + kTileSize);
+
     for (const auto& layer : refs.layersTopFirst) {
         if (!layerIncluded(layer, refs.mode)) continue;
         h = hashMix(h, layer.revision);
-        if (layer.digital) {
-            const auto span = layer.digital->tilePixels(tile);
-            h = hashMix(h, span.empty() ? 0ULL : layer.digital->dirtyVersion());
+        if (layer.digital && rx1 > rx0 && ry1 > ry0) {
+            const auto& dgeom = layer.digital->geometry();
+            if (dgeom.tileSize() == static_cast<int>(kTileSize)) {
+                const auto span = layer.digital->tilePixels(tile);
+                h = hashMix(h, span.empty() ? 0ULL : layer.digital->dirtyVersion());
+            } else if (auto range = dgeom.tilesForRect({rx0, ry0, rx1, ry1})) {
+                bool anyAllocated = false;
+                for (auto ty = range->first.y; ty <= range->last.y && !anyAllocated; ++ty) {
+                    for (auto tx = range->first.x; tx <= range->last.x; ++tx) {
+                        if (!layer.digital->tilePixels({tx, ty}).empty()) {
+                            anyAllocated = true;
+                            break;
+                        }
+                    }
+                }
+                h = hashMix(h, anyAllocated ? layer.digital->dirtyVersion() : 0ULL);
+            }
         }
     }
     return h;
@@ -375,40 +394,85 @@ void RegionCache::buildTile(const ReferenceSet& refs, TilePoint tile, CachedTile
     out.gradX.assign(kTilePixels, 0);
     out.gradY.assign(kTilePixels, 0);
 
-    // Build CompositeLayer stack top-first using CpuTileCompositor::composeInto!
-    std::vector<CompositeLayer> stack;
-    std::vector<std::span<const std::uint32_t>> overrides;
-    stack.reserve(refs.layersTopFirst.size());
-    m_scratchMaterial.clear();
-
+    int storeTileSize = static_cast<int>(kTileSize);
     for (const auto& layer : refs.layersTopFirst) {
         if (!layerIncluded(layer, refs.mode)) continue;
-        CompositeLayer cl;
-        cl.store = layer.digital;
-        cl.opacity = layer.opacity;
-        cl.blendMode = layer.blendMode;
-        cl.visible = layer.visible;
-        std::span<const std::uint32_t> ov;
-        if (layer.renderMaterialTile) {
-            m_scratchMaterial.emplace_back();
-            auto& matBuf = m_scratchMaterial.back();
-            if (layer.renderMaterialTile(tile, matBuf) && matBuf.size() == kTilePixels) {
-                ov = matBuf;
-            }
+        if (layer.digital) {
+            storeTileSize = layer.digital->geometry().tileSize();
+            break;
         }
-        stack.push_back(cl);
-        overrides.push_back(ov);
     }
 
-    const TileGeometry geom(refs.docWidth, refs.docHeight, static_cast<int>(kTileSize));
+    const TileGeometry docGeom(refs.docWidth, refs.docHeight, storeTileSize);
     const std::uint32_t bg = refs.transparentBackground ? 0x00000000U : refs.backgroundArgb;
-    std::int64_t outW = 0, outH = 0;
-    if (CpuTileCompositor::composeInto(geom, tile, stack, bg, overrides, m_scratchCompose, outW, outH) &&
-        outW > 0 && outH > 0) {
-        for (std::int64_t y = 0; y < std::min<std::int64_t>(kTileSize, outH); ++y) {
-            std::copy_n(m_scratchCompose.data() + y * outW,
-                        static_cast<std::size_t>(std::min<std::int64_t>(kTileSize, outW)),
-                        out.argb.data() + y * kTileSize);
+    const std::size_t expectedOverridePixels = static_cast<std::size_t>(storeTileSize) * static_cast<std::size_t>(storeTileSize);
+
+    auto composeDocTile = [&](TilePoint docTile, std::int64_t& outW, std::int64_t& outH) -> bool {
+        std::vector<CompositeLayer> stack;
+        std::vector<std::span<const std::uint32_t>> overrides;
+        stack.reserve(refs.layersTopFirst.size());
+        m_scratchMaterial.clear();
+        for (const auto& layer : refs.layersTopFirst) {
+            if (!layerIncluded(layer, refs.mode)) continue;
+            CompositeLayer cl;
+            cl.store = layer.digital;
+            cl.opacity = layer.opacity;
+            cl.blendMode = layer.blendMode;
+            cl.visible = layer.visible;
+            std::span<const std::uint32_t> ov;
+            if (layer.renderMaterialTile) {
+                m_scratchMaterial.emplace_back();
+                auto& matBuf = m_scratchMaterial.back();
+                if (layer.renderMaterialTile(docTile, matBuf) && matBuf.size() == expectedOverridePixels) {
+                    ov = matBuf;
+                }
+            }
+            stack.push_back(cl);
+            overrides.push_back(ov);
+        }
+        return CpuTileCompositor::composeInto(docGeom, docTile, stack, bg, overrides, m_scratchCompose, outW, outH);
+    };
+
+    if (storeTileSize == static_cast<int>(kTileSize)) {
+        std::int64_t outW = 0, outH = 0;
+        if (composeDocTile(tile, outW, outH) && outW > 0 && outH > 0) {
+            for (std::int64_t y = 0; y < std::min<std::int64_t>(kTileSize, outH); ++y) {
+                std::copy_n(m_scratchCompose.data() + y * outW,
+                            static_cast<std::size_t>(std::min<std::int64_t>(kTileSize, outW)),
+                            out.argb.data() + y * kTileSize);
+            }
+        }
+    } else {
+        const std::int64_t rx0 = tile.x * kTileSize;
+        const std::int64_t ry0 = tile.y * kTileSize;
+        const std::int64_t rx1 = std::min(refs.docWidth, rx0 + kTileSize);
+        const std::int64_t ry1 = std::min(refs.docHeight, ry0 + kTileSize);
+        if (rx1 > rx0 && ry1 > ry0) {
+            if (auto range = docGeom.tilesForRect({rx0, ry0, rx1, ry1})) {
+                for (auto dty = range->first.y; dty <= range->last.y; ++dty) {
+                    for (auto dtx = range->first.x; dtx <= range->last.x; ++dtx) {
+                        const TilePoint docTile{dtx, dty};
+                        const auto tb = docGeom.tileBounds(docTile);
+                        if (!tb) continue;
+                        std::int64_t outW = 0, outH = 0;
+                        if (!composeDocTile(docTile, outW, outH) || outW <= 0 || outH <= 0) continue;
+                        const std::int64_t ix0 = std::max(rx0, tb->left);
+                        const std::int64_t iy0 = std::max(ry0, tb->top);
+                        const std::int64_t ix1 = std::min(rx1, tb->right);
+                        const std::int64_t iy1 = std::min(ry1, tb->bottom);
+                        for (std::int64_t gy = iy0; gy < iy1; ++gy) {
+                            const std::int64_t srcY = gy - tb->top;
+                            const std::int64_t srcX = ix0 - tb->left;
+                            const std::int64_t dstY = gy - ry0;
+                            const std::int64_t dstX = ix0 - rx0;
+                            const std::size_t count = static_cast<std::size_t>(ix1 - ix0);
+                            std::copy_n(m_scratchCompose.data() + srcY * outW + srcX,
+                                        count,
+                                        out.argb.data() + dstY * kTileSize + dstX);
+                        }
+                    }
+                }
+            }
         }
     }
 

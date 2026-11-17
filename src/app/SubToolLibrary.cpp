@@ -908,7 +908,7 @@ bool SubToolLibrary::reorderBrush(int fromIndex, int toIndex)
 void SubToolLibrary::applyValuesToSettings(const Values& values, bool fallbackErase)
 {
     m_applying = true;
-    if (m_brush) {
+    if (m_brush && isPaintTool()) {
         m_brush->setSize(values.size);
         m_brush->setOpacity(values.opacity);
         m_brush->setFlow(values.flow);
@@ -965,7 +965,7 @@ SubToolLibrary::Values SubToolLibrary::captureFromSettings(bool traditionalMedia
                                                            bool eraseHint) const
 {
     Values values;
-    if (m_brush) {
+    if (m_brush && isPaintTool()) {
         values.size = m_brush->size();
         values.opacity = m_brush->opacity();
         values.flow = m_brush->flow();

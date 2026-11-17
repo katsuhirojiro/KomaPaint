@@ -241,6 +241,41 @@ void testProtectedRegionAndMagneticLasso()
     assert(mid.y < 54.0);
 }
 
+void testDefault256TileStoreSmartFill()
+{
+    SparseTileStore store(600, 600, 256);
+    for (int x = 120; x <= 320; ++x) {
+        for (int t = -2; t <= 2; ++t) {
+            store.setPixel({x, 120 + t}, 0xFF141414U);
+            store.setPixel({x, 320 + t}, 0xFF141414U);
+        }
+    }
+    for (int y = 120; y <= 320; ++y) {
+        for (int t = -2; t <= 2; ++t) {
+            store.setPixel({120 + t, y}, 0xFF141414U);
+            store.setPixel({320 + t, y}, 0xFF141414U);
+        }
+    }
+    ReferenceSet refs;
+    refs.docWidth = 600;
+    refs.docHeight = 600;
+    refs.transparentBackground = false;
+    refs.backgroundArgb = 0xFFFFFFFFU;
+    refs.mode = ReferenceMode::AllVisible;
+    refs.layersTopFirst.push_back({&store, &store, {}, store.dirtyVersion(), 1.0, BlendMode::Normal, true, true, true});
+
+    RegionEngine engine;
+    SmartFillParams sp;
+    sp.tolerance = 34;
+    sp.boundarySensitivity = 65;
+    sp.gapTolerance = 10;
+    sp.areaScaling = 1;
+    const auto res = engine.computeSmartFill(refs, 220, 220, sp, nullptr);
+    assert(res.status == RegionStatus::Enclosed);
+    assert(res.coverageAt(220, 220) > 200);
+    assert(res.coverageAt(420, 420) == 0);
+}
+
 } // namespace
 
 int main()
@@ -249,6 +284,7 @@ int main()
     testConventionalVsSmartFill();
     testColoredAndMultiLayerAndCacheInvalidation();
     testProtectedRegionAndMagneticLasso();
+    testDefault256TileStoreSmartFill();
     std::cout << "TestRegionEngine PASSED\n";
     return 0;
 }
