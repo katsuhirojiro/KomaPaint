@@ -409,7 +409,7 @@ void KomaPaintApp::runPackagedVerification()
         return;
     }
     auto* reopenedDoc = qobject_cast<CanvasDocument*>(m_workspace.document());
-    if (!reopenedDoc || !reopenedDoc->layers() || reopenedDoc->layers()->count() < 1 ||
+    if (!reopenedDoc || !reopenedDoc->layers() || reopenedDoc->layers()->rowCount() < 1 ||
         reopenedDoc->width() != 512 || reopenedDoc->height() != 512 ||
         (reopenedDoc->layers()->layerAt(0)->tiles().pixel({180, 180}).value_or(0U) >> 24) < 200) {
         fail(QStringLiteral("Reopened .koma project lost dimensions or artwork pixels."));
