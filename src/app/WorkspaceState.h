@@ -104,6 +104,10 @@ public:
     Q_INVOKABLE void openBrushEngineSettings();
     qreal   zoom()       const { return m_zoom; }
     bool hasSelection() const { return m_document && m_document->hasSelection(); }
+    // One shortcut, a family of tools: pressing B again moves Brush -> Airbrush.
+    // Returns false when the action has no family, so the caller can fall back
+    // to selecting a single tool.
+    Q_INVOKABLE bool cycleToolGroup(const QString& actionId);
     Q_INVOKABLE void selectAll() { if (m_document) m_document->selectAll(); }
     Q_INVOKABLE void deselect() { if (m_document) m_document->deselect(); }
     Q_INVOKABLE void invertSelection() { if (m_document) m_document->invertSelection(); }

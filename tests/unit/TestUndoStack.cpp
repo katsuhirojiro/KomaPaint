@@ -482,5 +482,63 @@ void TestUndoStack::unchangedTilesReleaseHistoryCharge()
     QCOMPARE(budget->historyBytes(), size_t(0));
 }
 
+
+// A new document keeps every step: there is no step quota at all.
+void TestUndoStack::unlimitedByDefault()
+{
+    Layer layer;
+    UndoStack history;
+    QVERIFY(layer.tiles().resizeEmpty(520, 300));
+    QCOMPARE(history.maxCommands(), 0); // 0 == unlimited
+    // Far more strokes than the old 200-step ceiling, on a small brush so the
+    // test stays fast.
+    for (int i = 0; i < 205; ++i) {
+        if (!draw(history, layer, 0xff000000U | static_cast<std::uint32_t>(i), 8, 8)) {
+            QFAIL("history refused a stroke while memory was available");
+        }
+    }
+    int steps = 0;
+    while (history.canUndo()) { history.undo(); ++steps; }
+    QCOMPARE(steps, 205);
+}
+
+// Memory pressure must cost old steps, never the stroke being drawn.
+void TestUndoStack::historyTrimsOldestWhenMemoryRunsOut()
+{
+    UndoStack history;
+    Layer layer;
+    auto budget = std::make_shared<DocumentMemoryBudget>();
+    auto& store = layer.tiles();
+    QVERIFY(store.resizeEmpty(520, 300));
+    QVERIFY(store.setDocumentBudget(budget));
+    QVERIFY(draw(history, layer, 0xff112233U, 8, 8));
+    QVERIFY(draw(history, layer, 0xff445566U, 8, 8));
+    QVERIFY(draw(history, layer, 0xff778899U, 8, 8));
+    const auto tile = store.tileBytes();
+    const auto painted = snapshot(store, {0, 0});
+    const auto retained = budget->historyBytes();
+    QVERIFY(retained > 0);
+
+    // The budget allows exactly the old history plus nothing more: the next
+    // tile capture fits only once every older command has been released.
+    const auto used = budget->usedBytes();
+    QVERIFY(2 * tile >= retained);
+    QVERIFY(budget->setLimit(used + 2 * tile - retained));
+
+    QSignalSpy trimmed(&history, &UndoStack::historyTrimmed);
+    QVERIFY2(draw(history, layer, 0xffaabbccU, 8, 8),
+             "painting must continue by dropping old steps, not fail");
+    QCOMPARE(trimmed.size(), 1);
+    QVERIFY(trimmed.first().at(0).toInt() >= 1);
+
+    // The artwork is what survived; only the ability to walk back was reduced.
+    QVERIFY(snapshot(store, {0, 0}) != painted);
+    // Replay staging needs its own headroom, exactly as an ordinary undo does.
+    QVERIFY(budget->setLimit(budget->usedBytes() + 8 * tile));
+    history.undo();
+    QVERIFY(snapshot(store, {0, 0}) == painted);
+    QCOMPARE(budget->stagingBytes(), size_t(0));
+}
+
 QTEST_APPLESS_MAIN(TestUndoStack)
 #include "TestUndoStack.moc"

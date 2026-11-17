@@ -40,6 +40,9 @@ signals:
     void stackChanged();
     void errorOccurred(const QString& message);
     void strokeRolledBack();
+    // Emitted once per stroke when old history had to be dropped so that new
+    // artwork could still be recorded. Memory pressure, never a fixed quota.
+    void historyTrimmed(int discardedCommands);
 private:
     struct CompactTile {
         TilePoint tile;
@@ -65,6 +68,10 @@ private:
     void finishCapture();
     void finishMaterialCapture();
     void tryCompact() noexcept;
+    // Admits a history charge, discarding the oldest committed commands when
+    // the system is out of memory rather than refusing the new artwork.
+    bool admitHistory(DocumentMemoryBudget* budget, std::size_t bytes) noexcept;
+    void flushTrimNotice();
     void replay(bool forward);
     void detachCapture() noexcept;
     void fail(const QString& message) { emit errorOccurred(message); }
@@ -76,5 +83,9 @@ private:
     bool m_hasLastCapturedMaterialTile = false;
     std::size_t m_cursor = 0, m_bytes = 0, m_currentBytes = 0;
     std::size_t m_maxCommands = 0; // 0 = unlimited
+    // Old commands dropped during the current stroke because memory ran out.
+    // Reported once, after the stroke finishes, so painting is never stalled by
+    // a dialog in the middle of a line.
+    std::size_t m_pendingDiscarded = 0;
 };
 } // namespace komapaint

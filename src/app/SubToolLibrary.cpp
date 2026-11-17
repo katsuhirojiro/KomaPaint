@@ -622,6 +622,30 @@ bool SubToolLibrary::undoDeleteTab()
     return true;
 }
 
+bool SubToolLibrary::cycleExecutableFamily(const QStringList& family)
+{
+    auto* tab = currentTabPtr();
+    if (!tab || family.isEmpty()) return false;
+    const int count = static_cast<int>(tab->brushes.size());
+    if (count < 2) return false;
+    const int current = currentBrushIndexInTab(tab);
+    if (current < 0) return false;
+    // Only presets inside the family count; walking stops at the next match so a
+    // lone Fill preset without a Smart Fill sibling simply reports "no move".
+    for (int step = 1; step < count; ++step) {
+        const int candidate = (current + step) % count;
+        // A preset may leave the executable empty, which means "the tool this
+        // collection belongs to"; resolve it the same way executableTool() does.
+        const QString exec = tab->brushes[candidate].current.executableTool;
+        const QString resolved = exec.isEmpty() ? m_tool : exec;
+        if (!family.contains(resolved)) continue;
+        if (candidate == current) return false;
+        select(candidate);
+        return true;
+    }
+    return false;
+}
+
 void SubToolLibrary::select(int index)
 {
     auto* tab = currentTabPtr();

@@ -91,6 +91,11 @@ public:
     Q_INVOKABLE QStringList supportedTools() const;
     Q_INVOKABLE QStringList compatibleToolsFor(const QString& toolOrExecutable) const;
 
+    // Moves to the next preset whose executable tool belongs to `family`,
+    // wrapping around. Returns false when the active collection holds fewer than
+    // two such presets, so the caller can fall back to another behaviour.
+    Q_INVOKABLE bool cycleExecutableFamily(const QStringList& family);
+
     Q_INVOKABLE void select(int index);
     Q_INVOKABLE void selectById(const QString& brushId);
     Q_INVOKABLE void resetCurrent();

@@ -11,6 +11,9 @@ class PerformanceSettings : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(int tileCacheLimitMB READ tileCacheLimitMB WRITE setTileCacheLimitMB NOTIFY changed)
+    // 0 means unlimited: history is kept while memory allows. This is the
+    // default and the recommended setting; any positive value is a voluntary
+    // cap chosen by the user on a constrained machine.
     Q_PROPERTY(int undoHistoryLimit READ undoHistoryLimit WRITE setUndoHistoryLimit NOTIFY changed)
     Q_PROPERTY(bool wetSimEnabled READ wetSimEnabled WRITE setWetSimEnabled NOTIFY changed)
     Q_PROPERTY(int wetSimIntervalMs READ wetSimIntervalMs WRITE setWetSimIntervalMs NOTIFY changed)
@@ -40,9 +43,11 @@ signals:
     void changed();
 
 private:
+    int migratedUndoHistoryLimit();
+
     Settings* m_settings = nullptr;
     int m_tileCacheLimitMB = 256;
-    int m_undoHistoryLimit = 60;
+    int m_undoHistoryLimit = 0;
     bool m_wetSimEnabled = true;
     int m_wetSimIntervalMs = 200;
 };

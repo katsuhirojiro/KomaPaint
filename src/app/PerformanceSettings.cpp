@@ -16,7 +16,7 @@ void PerformanceSettings::bindSettings(Settings* settings)
     m_settings = settings;
     if (m_settings) {
         setTileCacheLimitMB(m_settings->value(QStringLiteral("performance/tileCacheLimitMB"), 256).toInt());
-        setUndoHistoryLimit(m_settings->value(QStringLiteral("performance/undoHistoryLimit"), 60).toInt());
+        setUndoHistoryLimit(migratedUndoHistoryLimit());
         setWetSimEnabled(m_settings->value(QStringLiteral("performance/wetSimEnabled"), true).toBool());
         setWetSimIntervalMs(m_settings->value(QStringLiteral("performance/wetSimIntervalMs"), 200).toInt());
     }
@@ -42,7 +42,9 @@ void PerformanceSettings::setTileCacheLimitMB(int mb)
 
 void PerformanceSettings::setUndoHistoryLimit(int steps)
 {
-    const int clamped = std::clamp(steps, 10, 200);
+    // 0 = unlimited. There is no upper bound: a large number is a legitimate
+    // choice, and history is limited by real memory rather than a fixed quota.
+    const int clamped = std::max(steps, 0);
     if (m_undoHistoryLimit == clamped) return;
     m_undoHistoryLimit = clamped;
     emit changed();
@@ -77,7 +79,7 @@ QVariantMap PerformanceSettings::defaultVariantMap() const
 {
     return QVariantMap{
         { QStringLiteral("tileCacheLimitMB"), 256 },
-        { QStringLiteral("undoHistoryLimit"), 60 },
+        { QStringLiteral("undoHistoryLimit"), 0 },
         { QStringLiteral("wetSimEnabled"), true },
         { QStringLiteral("wetSimIntervalMs"), 200 }
     };
@@ -90,6 +92,23 @@ bool PerformanceSettings::applyVariantMap(const QVariantMap& map)
     setWetSimEnabled(map.value(QStringLiteral("wetSimEnabled"), m_wetSimEnabled).toBool());
     setWetSimIntervalMs(map.value(QStringLiteral("wetSimIntervalMs"), m_wetSimIntervalMs).toInt());
     return saveToSettings();
+}
+
+// Earlier builds wrote 60 into every profile as the forced default of a 10-200
+// stroke cap, whether or not the user ever chose it. Exactly 60 therefore means
+// "never deliberately set", and migrates once to unlimited (0). Any other value
+// is a real choice and is kept verbatim.
+int PerformanceSettings::migratedUndoHistoryLimit()
+{
+    constexpr int legacyForcedDefault = 60;
+    constexpr auto migratedKey = "performance/undoUnlimitedMigrated";
+    int stored = m_settings ? m_settings->value(QStringLiteral("performance/undoHistoryLimit"), 0).toInt() : 0;
+    if (m_settings && !m_settings->value(QStringLiteral(migratedKey), false).toBool()) {
+        if (stored == legacyForcedDefault) stored = 0;
+        m_settings->setValue(QStringLiteral(migratedKey), true);
+        m_settings->setValue(QStringLiteral("performance/undoHistoryLimit"), stored);
+    }
+    return std::max(stored, 0);
 }
 
 void PerformanceSettings::restoreDefaults()

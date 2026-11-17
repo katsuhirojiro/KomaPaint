@@ -56,8 +56,8 @@ bool UndoStack::beginStroke(Layer* layer)
                 throw std::length_error("history index too large");
             const auto bytes = capacity * sizeof(m_commands[0]);
             auto budget = layer->tiles().documentBudget();
-            if (budget && !budget->reserve(DocumentMemoryBudget::Category::History, bytes)) {
-                fail(QStringLiteral("Not enough available memory to grow undo history. Free memory and try again."));
+            if (!admitHistory(budget.get(), bytes)) {
+                fail(QStringLiteral("Not enough available memory to grow undo history; the stroke was not recorded."));
                 return false;
             }
             struct Reservation {
@@ -97,8 +97,8 @@ bool UndoStack::beginMaterialStroke(Layer* layer)
                 throw std::length_error("history index too large");
             const auto bytes = capacity * sizeof(m_commands[0]);
             auto budget = layer->materialTiles().documentBudget();
-            if (budget && !budget->reserve(DocumentMemoryBudget::Category::History, bytes)) {
-                fail(QStringLiteral("Not enough available memory to grow undo history. Free memory and try again."));
+            if (!admitHistory(budget.get(), bytes)) {
+                fail(QStringLiteral("Not enough available memory to grow undo history; the stroke was not recorded."));
                 return false;
             }
             struct Reservation {
@@ -153,7 +153,7 @@ SparseTileStore::CaptureResult UndoStack::captureTile(TilePoint tile, bool exist
         ~Reservation() { if (budget && !retained) budget->release(DocumentMemoryBudget::Category::History, bytes); }
     };
     auto* budget = m_current->budget.get();
-    if (budget && !budget->reserve(DocumentMemoryBudget::Category::History, tracked)) return SparseTileStore::CaptureResult::DocumentLimit;
+    if (!admitHistory(budget, tracked)) return SparseTileStore::CaptureResult::DocumentLimit;
     Reservation reservation{budget, tracked};
     SparseTileStore::TileSnapshot before{tile, {}}, after{tile, {}};
     if (existed) before.pixels.assign(pixels.begin(), pixels.end());
@@ -192,7 +192,7 @@ bool UndoStack::captureMaterialTile(TilePoint tile, std::span<const material::Ma
     if (charge > std::numeric_limits<std::size_t>::max() - m_bytes
         || m_currentBytes > std::numeric_limits<std::size_t>::max() - m_bytes - charge) return false;
     auto* budget = m_current->budget.get();
-    if (budget && dataBytes && !budget->reserve(DocumentMemoryBudget::Category::History, dataBytes)) return false;
+    if (!admitHistory(budget, dataBytes)) return false;
     struct Reservation {
         DocumentMemoryBudget* budget; std::size_t bytes; bool retained = false;
         ~Reservation() { if (budget && bytes && !retained) budget->release(DocumentMemoryBudget::Category::History, bytes); }
@@ -214,6 +214,40 @@ bool UndoStack::captureMaterialTile(TilePoint tile, std::span<const material::Ma
     m_hasLastCapturedMaterialTile = true;
     return true;
 }
+// A history charge is admitted when the memory budget can take it. When it
+// cannot, the oldest committed commands are discarded and the charge is
+// retried. This is what lets history grow with the machine instead of a fixed
+// command count: painting never stops because an arbitrary step quota is full,
+// and nothing is dropped while there is memory to keep it.
+bool UndoStack::admitHistory(DocumentMemoryBudget* budget, std::size_t bytes) noexcept
+{
+    if (!budget || !bytes) return true;
+    if (budget->reserve(DocumentMemoryBudget::Category::History, bytes)) return true;
+    // Releasing a material command unpins pigment snapshots and reclaims
+    // compositions. That is only safe between strokes, never while a material
+    // stroke is still building its own pinned set, so those keep the older
+    // behaviour (the stroke is refused and rolled back as before).
+    if (m_current && m_current->materialStroke) return false;
+    while (!m_commands.empty() && m_cursor > 0) {
+        // Erasing the oldest command runs its destructor, which releases the
+        // charge it held, so the budget shrinks before the retry.
+        m_bytes -= m_commands.front()->bytes;
+        m_commands.erase(m_commands.begin());
+        --m_cursor;
+        ++m_pendingDiscarded;
+        if (budget->reserve(DocumentMemoryBudget::Category::History, bytes)) return true;
+    }
+    return false;
+}
+
+void UndoStack::flushTrimNotice()
+{
+    if (!m_pendingDiscarded) return;
+    const auto discarded = m_pendingDiscarded;
+    m_pendingDiscarded = 0;
+    emit historyTrimmed(static_cast<int>(discarded));
+}
+
 void UndoStack::detachCapture() noexcept
 {
     m_hasLastCapturedMaterialTile = false;
@@ -252,7 +286,7 @@ void UndoStack::finishMaterialCapture()
             throw std::length_error("material tile history size overflow");
         const std::size_t bytes = current.size() * sizeof(material::MaterialEntry);
         auto* budget = m_current->budget.get();
-        if (budget && bytes && !budget->reserve(DocumentMemoryBudget::Category::History, bytes))
+        if (!admitHistory(budget, bytes))
             throw std::bad_alloc();
         struct Reservation {
             DocumentMemoryBudget* budget; std::size_t bytes; bool retained = false;
@@ -356,7 +390,7 @@ bool UndoStack::commitStroke()
         m_current->historyBytes = m_current->compactBytes;
         m_currentBytes = m_current->compactBytes + 512 * m_current->compact.size();
     }
-    if (m_current->before.empty() && m_current->materialBefore.empty() && m_current->compact.empty()) { m_current.reset(); m_currentBytes = 0; emit stackChanged(); return true; }
+    if (m_current->before.empty() && m_current->materialBefore.empty() && m_current->compact.empty()) { m_current.reset(); m_currentBytes = 0; emit stackChanged(); flushTrimNotice(); return true; }
     while (m_commands.size() > m_cursor) { m_bytes -= m_commands.back()->bytes; m_commands.pop_back(); }
     m_current->bytes = m_currentBytes; m_bytes += m_currentBytes; m_currentBytes = 0;
     m_commands.push_back(std::move(m_current)); ++m_cursor;
@@ -365,7 +399,7 @@ bool UndoStack::commitStroke()
         m_commands.erase(m_commands.begin());
         --m_cursor;
     }
-    emit stackChanged(); return true;
+    emit stackChanged(); flushTrimNotice(); return true;
 }
 
 void UndoStack::setMaxCommands(int count)
@@ -406,6 +440,7 @@ bool UndoStack::cancelStroke()
     emit strokeRolledBack();
     if (!alive) return true;
     emit stackChanged();
+    flushTrimNotice();
     return true;
 }
 void UndoStack::undo() { replay(false); }

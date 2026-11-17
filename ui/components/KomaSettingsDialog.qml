@@ -115,7 +115,8 @@ KpDialog {
     function defaultPerformanceDraft() {
         return {
             tileCacheLimitMB: 256,
-            undoHistoryLimit: 60,
+            // 0 = unlimited. History grows with available memory, not a quota.
+            undoHistoryLimit: 0,
             wetSimEnabled: true,
             wetSimIntervalMs: 200
         }
@@ -161,10 +162,11 @@ KpDialog {
         }
         const cache = Number(Settings.value("performance/tileCacheLimitMB", d.tileCacheLimitMB))
         const undo = Number(Settings.value("performance/undoHistoryLimit", d.undoHistoryLimit))
+        const undoSteps = isNaN(undo) ? 0 : Math.max(0, Math.round(undo))
         const wetMs = Number(Settings.value("performance/wetSimIntervalMs", d.wetSimIntervalMs))
         return {
             tileCacheLimitMB: Math.max(64, Math.min(2048, isNaN(cache) ? d.tileCacheLimitMB : cache)),
-            undoHistoryLimit: Math.max(10, Math.min(200, isNaN(undo) ? d.undoHistoryLimit : undo)),
+            undoHistoryLimit: undoSteps,
             wetSimEnabled: asBool("performance/wetSimEnabled", d.wetSimEnabled),
             wetSimIntervalMs: Math.max(100, Math.min(1000, isNaN(wetMs) ? d.wetSimIntervalMs : wetMs))
         }
@@ -1362,14 +1364,41 @@ KpDialog {
                                         value: Number((dialog.draft.performance || {}).tileCacheLimitMB || 256)
                                         onEdited: function(v) { dialog.setPerformanceDraft("tileCacheLimitMB", v) }
                                     }
-                                    PropertySlider {
-                                        objectName: "komaSettingsUndoLimit"
+                                    CheckBox {
+                                        objectName: "komaSettingsUndoUnlimited"
+                                        text: qsTr("Keep undo history while memory allows (recommended)")
+                                        checked: Number((dialog.draft.performance || {}).undoHistoryLimit || 0) === 0
+                                        onToggled: dialog.setPerformanceDraft(
+                                                       "undoHistoryLimit",
+                                                       checked ? 0
+                                                               : Math.max(10, Number((dialog.draft.performance || {}).undoHistoryLimit || 0) || 200))
+                                    }
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                        label: qsTr("Undo history limit")
-                                        unit: " steps"
-                                        from: 10; to: 200
-                                        value: Number((dialog.draft.performance || {}).undoHistoryLimit || 60)
-                                        onEdited: function(v) { dialog.setPerformanceDraft("undoHistoryLimit", v) }
+                                        spacing: KP.gapS
+                                        enabled: Number((dialog.draft.performance || {}).undoHistoryLimit || 0) > 0
+                                        opacity: enabled ? 1 : KP.disabledOpacity
+                                        Text {
+                                            text: qsTr("Keep at most")
+                                            color: KP.textMuted; font.pixelSize: KP.fontS
+                                        }
+                                        KpSpinBox {
+                                            objectName: "komaSettingsUndoLimit"
+                                            from: 10; to: 100000; stepSize: 10
+                                            value: Number((dialog.draft.performance || {}).undoHistoryLimit || 0)
+                                            onValueModified: dialog.setPerformanceDraft("undoHistoryLimit", value)
+                                        }
+                                        Text {
+                                            text: qsTr("steps")
+                                            color: KP.textMuted; font.pixelSize: KP.fontS
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: qsTr("Undo history is not counted in fixed steps by default. When the machine runs out of memory, the oldest steps are dropped so painting can continue, and KomaPaint tells you when that happens.")
+                                        color: KP.textMuted; font.pixelSize: KP.fontXS
+                                        wrapMode: Text.WordWrap
                                     }
                                 }
                             }

@@ -167,6 +167,12 @@ ApplicationWindow {
         const s = shortcutSeq(actionId)
         return s.length > 0 ? "\t" + s : ""
     }
+    // Repeated presses of a tool key walk its family (B: Brush -> Airbrush),
+    // matching the way Clip Studio Paint cycles tool groups. A key with no
+    // family simply selects its tool.
+    function activateTool(actionId) {
+        if (!Workspace.cycleToolGroup(actionId)) Workspace.activeTool = String(actionId).replace("tool.", "")
+    }
     function toggleSidePanels() {
         const collapse = !Dock.isAreaCollapsed("left") || !Dock.isAreaCollapsed("right")
         Dock.setAreaCollapsed("left", collapse)
@@ -184,23 +190,23 @@ ApplicationWindow {
     Shortcut { sequence: root.shortcutSeq("tool.zoom"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "zoom" }
     Shortcut { sequence: root.shortcutSeq("tool.hand"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "hand" }
     Shortcut { sequence: root.shortcutSeq("tool.eyedropper"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "eyedropper" }
-    Shortcut { sequence: root.shortcutSeq("tool.pen"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "pen" }
-    Shortcut { sequence: root.shortcutSeq("tool.pencil"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "pencil" }
-    Shortcut { sequence: root.shortcutSeq("tool.brush"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "brush" }
-    Shortcut { sequence: root.shortcutSeq("tool.airbrush"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "airbrush" }
+    Shortcut { sequence: root.shortcutSeq("tool.pen"); enabled: root.shortcutsEnabled; onActivated: root.activateTool("tool.pen") }
+    Shortcut { sequence: root.shortcutSeq("tool.pencil"); enabled: root.shortcutsEnabled; onActivated: root.activateTool("tool.pencil") }
+    Shortcut { sequence: root.shortcutSeq("tool.brush"); enabled: root.shortcutsEnabled; onActivated: root.activateTool("tool.brush") }
+    Shortcut { sequence: root.shortcutSeq("tool.airbrush"); enabled: root.shortcutsEnabled; onActivated: root.activateTool("tool.airbrush") }
     Shortcut { sequence: root.shortcutSeq("tool.eraser"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "eraser" }
     Shortcut { sequence: root.shortcutSeq("tool.smudge"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "smudge" }
     Shortcut { sequence: root.shortcutSeq("tool.fill"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "fill" }
     Shortcut { sequence: root.shortcutSeq("tool.gradient"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "gradient" }
-    Shortcut { sequence: root.shortcutSeq("tool.wand"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "wand" }
-    Shortcut { sequence: root.shortcutSeq("tool.lasso"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "lasso" }
-    Shortcut { sequence: root.shortcutSeq("tool.selection"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "selection" }
+    Shortcut { sequence: root.shortcutSeq("tool.wand"); enabled: root.shortcutsEnabled; onActivated: root.activateTool("tool.wand") }
+    Shortcut { sequence: root.shortcutSeq("tool.lasso"); enabled: root.shortcutsEnabled; onActivated: root.activateTool("tool.lasso") }
+    Shortcut { sequence: root.shortcutSeq("tool.selection"); enabled: root.shortcutsEnabled; onActivated: root.activateTool("tool.selection") }
     Shortcut { sequence: root.shortcutSeq("tool.move"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "move" }
     Shortcut { sequence: root.shortcutSeq("tool.transform"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "transform" }
     Shortcut { sequence: root.shortcutSeq("tool.line"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "line" }
     Shortcut { sequence: root.shortcutSeq("tool.curveline"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "curveline" }
-    Shortcut { sequence: root.shortcutSeq("tool.rectangle"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "rectangle" }
-    Shortcut { sequence: root.shortcutSeq("tool.circle"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "circle" }
+    Shortcut { sequence: root.shortcutSeq("tool.rectangle"); enabled: root.shortcutsEnabled; onActivated: root.activateTool("tool.rectangle") }
+    Shortcut { sequence: root.shortcutSeq("tool.circle"); enabled: root.shortcutsEnabled; onActivated: root.activateTool("tool.circle") }
     Shortcut { sequence: root.shortcutSeq("tool.text"); enabled: root.shortcutsEnabled; onActivated: Workspace.activeTool = "text" }
     Shortcut { sequence: root.shortcutSeq("select.all"); enabled: root.shortcutsEnabled && Workspace.document !== null; onActivated: Workspace.selectAll() }
     Shortcut { sequence: root.shortcutSeq("select.deselect"); enabled: root.shortcutsEnabled && Workspace.hasSelection; onActivated: Workspace.deselect() }
@@ -1310,6 +1316,64 @@ ApplicationWindow {
 
     PreferencesDialog {
         id: preferencesDialog
+    }
+
+    // --------------------------------------------- Undo history under pressure
+    // When the machine runs low on memory in the middle of a stroke, the oldest
+    // undo steps are dropped so the artwork itself keeps being recorded. That is
+    // reported here, once, as a quiet line at the bottom of the window: a modal
+    // dialog would interrupt the line the artist is drawing.
+    Item {
+        id: historyTrimToast
+        objectName: "historyTrimToast"
+        anchors.fill: parent
+        z: 1000
+        opacity: 0
+        visible: opacity > 0
+        property string message: ""
+
+        function show(text) {
+            historyTrimToast.message = text
+            historyTrimToast.opacity = 1
+            trimHideTimer.restart()
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: KP.gapXL
+            width: Math.min(historyTrimToast.width - 2 * KP.gapXL, 560)
+            height: trimText.implicitHeight + 2 * KP.gapS
+            radius: KP.radiusS
+            color: KP.paneHeaderBg
+            border.width: 1
+            border.color: KP.hairline
+
+            Text {
+                id: trimText
+                anchors.centerIn: parent
+                width: parent.width - 2 * KP.gapM
+                text: historyTrimToast.message
+                color: KP.text
+                font.pixelSize: KP.fontS
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+            }
+        }
+
+        Behavior on opacity { NumberAnimation { duration: 180 } }
+        Timer {
+            id: trimHideTimer
+            interval: 4500
+            onTriggered: historyTrimToast.opacity = 0
+        }
+    }
+    Connections {
+        target: Workspace.history
+        function onHistoryTrimmed(discarded) {
+            historyTrimToast.show(qsTr("%1 older undo step(s) were dropped to free memory. Your artwork is safe; save the file if you still need those steps.")
+                                  .arg(discarded))
+        }
     }
 
     // ------------------------------------------------------------- About dialog

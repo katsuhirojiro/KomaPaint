@@ -33,6 +33,7 @@ function(komapaint_add_test NAME SOURCE)
     )
 endfunction()
 
+komapaint_add_test(test_tool_cycle TestToolCycle.cpp)
 komapaint_add_test(test_undostack TestUndoStack.cpp)
 target_link_libraries(test_undostack PRIVATE komapaint::drawing)
 komapaint_add_test(test_layers    TestLayers.cpp)

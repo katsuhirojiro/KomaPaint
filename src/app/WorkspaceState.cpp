@@ -22,6 +22,7 @@
 #endif
 
 #include "FileAssociation.h"
+#include "ToolCycle.h"
 #include "../core/Settings.h"
 #include "../files/DocumentFile.h"
 
@@ -526,6 +527,20 @@ bool WorkspaceState::activeViewStored() const
 QPointF WorkspaceState::activeViewCenter() const
 {
     return activeViewStored() ? m_tabs[static_cast<std::size_t>(m_activeTab)].viewCenter : QPointF();
+}
+
+bool WorkspaceState::cycleToolGroup(const QString& actionId)
+{
+    const QStringList group = toolcycle::groupForAction(actionId);
+    if (group.isEmpty()) return false;
+    // A family of one palette tool lives in its sub-tools: Smart Fill is a fill
+    // preset, so pressing G again walks the configured fill group.
+    if (group.size() == 1 && group.contains(m_activeTool) && m_subTools
+            && m_subTools->cycleExecutableFamily(toolcycle::executablesForAction(actionId))) {
+        return true;
+    }
+    setActiveTool(toolcycle::nextTool(group, m_activeTool));
+    return true;
 }
 
 void WorkspaceState::setActiveTool(const QString& tool)

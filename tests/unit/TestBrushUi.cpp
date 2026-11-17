@@ -300,6 +300,7 @@ private slots:
     void komaSettingsApplyAndCancelPersistGlobalValues();
     void brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive();
     void shortcutsAndPerformanceSettingsPersistAndResolveConflicts();
+    void toolShortcutsCycleThroughTheirFamilies();
     void brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects();
     void brushLibraryMigrationPreservesUserCollectionsAndUpgradesBuiltIns();
     void brushPanelsCanBeClosedAndComeBack();
@@ -1767,7 +1768,9 @@ void TestBrushUi::shortcutsAndPerformanceSettingsPersistAndResolveConflicts()
         QVERIFY(shortcuts && perf);
         QCOMPARE(shortcuts->keyFor(QStringLiteral("tool.pen")), QStringLiteral("P"));
         QCOMPARE(perf->tileCacheLimitMB(), 256);
-        QCOMPARE(perf->undoHistoryLimit(), 60);
+        // The old forced default of 60 steps was an arbitrary cap and migrates
+        // once to 0, which means "as long as memory allows".
+        QCOMPARE(perf->undoHistoryLimit(), 0);
         QVERIFY(perf->wetSimEnabled());
         QCOMPARE(perf->wetSimIntervalMs(), 200);
 
@@ -1832,6 +1835,43 @@ void TestBrushUi::shortcutsAndPerformanceSettingsPersistAndResolveConflicts()
         QCOMPARE(restarted.workspace.shortcuts()->keyFor(QStringLiteral("tool.pen")), QStringLiteral("P"));
         QVERIFY2(restarted.warnings.isEmpty(), qPrintable(restarted.warnings.join(QLatin1Char('\n'))));
     }
+}
+
+
+// Clip Studio Paint behaviour: the same key selects the family first, then walks
+// through it. This drives the real window so the QML Shortcut wiring, the
+// ShortcutManager table and WorkspaceState all take part.
+void TestBrushUi::toolShortcutsCycleThroughTheirFamilies()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiToolCycle")));
+    app.workspace.setActiveTool(QStringLiteral("eraser"));
+
+    // B enters the brush family at its first member...
+    QTest::keyClick(app.window, Qt::Key_B);
+    QTRY_COMPARE(app.workspace.activeTool(), QStringLiteral("brush"));
+    // ...and a second press moves to the airbrush, then wraps back.
+    QTest::keyClick(app.window, Qt::Key_B);
+    QTRY_COMPARE(app.workspace.activeTool(), QStringLiteral("airbrush"));
+    QTest::keyClick(app.window, Qt::Key_B);
+    QTRY_COMPARE(app.workspace.activeTool(), QStringLiteral("brush"));
+
+    // P cycles Pen <-> Pencil.
+    QTest::keyClick(app.window, Qt::Key_P);
+    QTRY_COMPARE(app.workspace.activeTool(), QStringLiteral("pen"));
+    QTest::keyClick(app.window, Qt::Key_P);
+    QTRY_COMPARE(app.workspace.activeTool(), QStringLiteral("pencil"));
+
+    // U cycles the figure family.
+    QTest::keyClick(app.window, Qt::Key_U);
+    QTRY_COMPARE(app.workspace.activeTool(), QStringLiteral("rectangle"));
+    QTest::keyClick(app.window, Qt::Key_U);
+    QTRY_COMPARE(app.workspace.activeTool(), QStringLiteral("circle"));
+
+    // A key without a family still selects exactly its tool.
+    QTest::keyClick(app.window, Qt::Key_E);
+    QTRY_COMPARE(app.workspace.activeTool(), QStringLiteral("eraser"));
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 
 void TestBrushUi::brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects()
