@@ -3,9 +3,12 @@
 #include <QColor>
 #include "../layers/LayerModel.h"
 #include "../material/MaterialEngine.h"
+#include "../region/SelectionMask.h"
 #include <QObject>
+#include <QRectF>
 #include <QSize>
 #include <QString>
+#include <vector>
 
 namespace komapaint {
 
@@ -20,6 +23,8 @@ class CanvasDocument : public QObject
     Q_PROPERTY(int     width    READ width    WRITE setWidth    NOTIFY sizeChanged)
     Q_PROPERTY(int     height   READ height   WRITE setHeight   NOTIFY sizeChanged)
     Q_PROPERTY(qreal   dpi      READ dpi      WRITE setDpi      NOTIFY dpiChanged)
+    Q_PROPERTY(bool    hasSelection READ hasSelection NOTIFY selectionChanged)
+    Q_PROPERTY(QRectF  selectionBounds READ selectionBounds NOTIFY selectionChanged)
     Q_PROPERTY(bool    hasTransparentBackground READ hasTransparentBackground
                WRITE setTransparentBackground NOTIFY backgroundChanged)
     Q_PROPERTY(QString surfaceId READ surfaceId WRITE setSurfaceId NOTIFY surfaceChanged)
@@ -82,6 +87,23 @@ public:
     int surfaceRewetting() const;
     Q_INVOKABLE void resetSurfaceSettings();
 
+    region::SelectionMask& selection() noexcept { return m_selection; }
+    const region::SelectionMask& selection() const noexcept { return m_selection; }
+    bool hasSelection() const noexcept { return m_selection.hasSelection(); }
+    QRectF selectionBounds() const;
+    void pushSelectionSnapshot();
+    bool canUndoSelection() const noexcept { return !m_selectionUndo.empty(); }
+    bool canRedoSelection() const noexcept { return !m_selectionRedo.empty(); }
+    Q_INVOKABLE bool undoSelection();
+    Q_INVOKABLE bool redoSelection();
+    Q_INVOKABLE void selectAll();
+    Q_INVOKABLE void deselect();
+    Q_INVOKABLE void invertSelection();
+    Q_INVOKABLE void expandSelection(int radiusPx);
+    Q_INVOKABLE void contractSelection(int radiusPx);
+    Q_INVOKABLE void featherSelection(int radiusPx);
+    void notifySelectionChanged() { emit selectionChanged(); }
+
 public slots:
     void setBackgroundColor(const QColor& color);
     void setTitle(const QString& title);
@@ -109,11 +131,15 @@ signals:
     void dpiChanged();
     void backgroundChanged();
     void surfaceChanged();
+    void selectionChanged();
 
 private:
     void connectArtworkSignals();
     bool m_modified = false;
     LayerModel* m_layers;
+    region::SelectionMask m_selection{1600, 1200};
+    std::vector<region::SelectionMask::Snapshot> m_selectionUndo;
+    std::vector<region::SelectionMask::Snapshot> m_selectionRedo;
     QColor m_backgroundColor = Qt::white;
     QString m_title = QStringLiteral("Untitled");
     QSize   m_size  = QSize(1600, 1200);

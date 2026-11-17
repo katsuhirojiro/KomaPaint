@@ -71,6 +71,7 @@ class WorkspaceState : public QObject
     Q_PROPERTY(bool            realisticEngine READ isRealisticEngine NOTIFY brushEngineChanged)
     Q_PROPERTY(bool            realisticEngineEnabled READ isRealisticEngineEnabled WRITE setRealisticEngineEnabled NOTIFY realisticEngineEnabledChanged)
     Q_PROPERTY(qreal           zoom      READ zoom      WRITE setZoom      NOTIFY zoomChanged)
+    Q_PROPERTY(bool            hasSelection READ hasSelection NOTIFY selectionChanged)
 
 public:
     explicit WorkspaceState(QObject* parent = nullptr);
@@ -95,6 +96,13 @@ public:
     Q_INVOKABLE bool canDisableRealisticEngine() const { return !isRealisticEngine(); }
     Q_INVOKABLE void openBrushEngineSettings();
     qreal   zoom()       const { return m_zoom; }
+    bool hasSelection() const { return m_document && m_document->hasSelection(); }
+    Q_INVOKABLE void selectAll() { if (m_document) m_document->selectAll(); }
+    Q_INVOKABLE void deselect() { if (m_document) m_document->deselect(); }
+    Q_INVOKABLE void invertSelection() { if (m_document) m_document->invertSelection(); }
+    Q_INVOKABLE void expandSelection(int px) { if (m_document) m_document->expandSelection(px); }
+    Q_INVOKABLE void contractSelection(int px) { if (m_document) m_document->contractSelection(px); }
+    Q_INVOKABLE void featherSelection(int px) { if (m_document) m_document->featherSelection(px); }
     QString currentFile() const { return m_currentFile; }
     QVariantList projectTabs() const;
     int activeTab() const { return m_activeTab; }
@@ -231,6 +239,7 @@ signals:
     void creationErrorChanged();
     void fileErrorOccurred(const QString& message);
     void fileAssociationCompleted(const QString& message, bool ok);
+    void selectionChanged();
 
 private:
     // Clears artwork history when a layer is deleted, because layer deletion

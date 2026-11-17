@@ -161,6 +161,20 @@
         }
       ]
     },
+    "smudge": {
+      "defaultTabId": "smudge-default",
+      "tabs": [
+        {
+          "id": "smudge-default",
+          "name": "Default",
+          "presets": [
+            { "id": "smudge-finger", "name": "Finger Smudge", "category": "Blending", "executableTool": "smudge", "size": 22, "opacity": 92, "flow": 90, "spacing": 10, "hardness": 35, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 30, "pressureOpacity": 90, "blendStrength": 92, "colorMix": 0 },
+            { "id": "smudge-wet-blender", "name": "Wet Mix Blender", "category": "Blending", "executableTool": "smudge", "size": 28, "opacity": 88, "flow": 85, "spacing": 10, "hardness": 42, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 25, "pressureOpacity": 85, "blendStrength": 78, "colorMix": 35 },
+            { "id": "smudge-soft-blur", "name": "Soft Blender", "category": "Blending", "executableTool": "smudge", "size": 44, "opacity": 75, "flow": 60, "spacing": 10, "hardness": 15, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 20, "pressureOpacity": 80, "blendStrength": 68, "colorMix": 10 }
+          ]
+        }
+      ]
+    },
     "fill": {
       "defaultTabId": "fill-default",
       "tabs": [

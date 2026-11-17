@@ -160,6 +160,10 @@ struct BrushDefinition {
     std::string mediumId = "gouache";
     bool autoReloadOnStroke = true;
 
+    // Optional per-pixel mask callback (e.g. active SelectionMask or Boundary-Aware protection).
+    double (*pixelMask)(void*, std::int64_t, std::int64_t) noexcept = nullptr;
+    void* pixelMaskContext = nullptr;
+
     double effectiveReservoirCapacity() const noexcept;
     bool valid() const noexcept;
 };

@@ -1517,9 +1517,13 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
             const auto x = left + static_cast<std::int64_t>(rxIdx);
             const auto res = dabContactAt(brush, x, y, centerX, centerY, ca, sa, rx, ry,
                                           contactFirmness, &m_surface, dryBrushFactor);
-            row[rxIdx].contact = res.contact;
+            double c = res.contact;
+            if (c > 0.0 && brush.pixelMask) {
+                c *= clamp01(brush.pixelMask(brush.pixelMaskContext, x, y));
+            }
+            row[rxIdx].contact = c;
             row[rxIdx].radial = res.radial;
-            contactWeight += res.contact;
+            contactWeight += c;
         }
     }
     if (contactWeight <= 0) return Result::Unchanged;
@@ -1641,10 +1645,14 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
             const auto x = left + static_cast<std::int64_t>(rxIdx);
             const auto res = dabContactAt(brush, x, y, centerX, centerY, ca, sa, rx, ry,
                                           contactFirmness, &m_surface, dryBrushFactor);
-            row[rxIdx].contact = res.contact;
+            double c = res.contact;
+            if (c > 0.0 && brush.pixelMask) {
+                c *= clamp01(brush.pixelMask(brush.pixelMaskContext, x, y));
+            }
+            row[rxIdx].contact = c;
             row[rxIdx].radial = res.radial;
             row[rxIdx].weight = 0.0;
-            contactWeight += res.contact;
+            contactWeight += c;
         }
     }
     if (contactWeight <= 0.0) return Result::Unchanged;
@@ -2306,8 +2314,12 @@ SparseTileStore::WriteResult MaterialStroke::eraseMaterialDab(MaterialSample sam
     Result failure = Result::Unchanged;
     for (auto y = top; y < bottom && failure == Result::Unchanged; ++y) {
         for (auto x = left; x < right; ++x) {
-            const double contact = dabContactAt(m_brush, x, y, sample.x, sample.y, ca, sa, rx, ry, 1.0).contact;
+            double contact = dabContactAt(m_brush, x, y, sample.x, sample.y, ca, sa, rx, ry, 1.0).contact;
             if (contact <= 0.0) continue;
+            if (m_brush.pixelMask) {
+                contact *= clamp01(m_brush.pixelMask(m_brush.pixelMaskContext, x, y));
+                if (contact <= 0.0) continue;
+            }
             const double coverage = clamp01(contact * sample.input.pressure * m_brush.contactTransfer);
             if (coverage <= 0.0) continue;
             const auto result = store.scaleCell({x, y}, 1.0 - coverage);

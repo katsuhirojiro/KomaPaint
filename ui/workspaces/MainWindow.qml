@@ -173,6 +173,17 @@ ApplicationWindow {
     Shortcut { sequence: "B"; enabled: !root.editingText; onActivated: Workspace.activeTool = "brush" }
     Shortcut { sequence: "A"; enabled: !root.editingText; onActivated: Workspace.activeTool = "airbrush" }
     Shortcut { sequence: "E"; enabled: !root.editingText; onActivated: Workspace.activeTool = "eraser" }
+    Shortcut { sequence: "G"; enabled: !root.editingText; onActivated: Workspace.activeTool = "fill" }
+    Shortcut { sequence: "W"; enabled: !root.editingText; onActivated: Workspace.activeTool = "wand" }
+    Shortcut { sequence: "L"; enabled: !root.editingText; onActivated: Workspace.activeTool = "lasso" }
+    Shortcut { sequence: "M"; enabled: !root.editingText; onActivated: Workspace.activeTool = "selection" }
+    Shortcut { sequence: "V"; enabled: !root.editingText; onActivated: Workspace.activeTool = "move" }
+    Shortcut { sequence: "K"; enabled: !root.editingText; onActivated: Workspace.activeTool = "transform" }
+    Shortcut { sequence: "U"; enabled: !root.editingText; onActivated: Workspace.activeTool = "rectangle" }
+    Shortcut { sequence: "T"; enabled: !root.editingText; onActivated: Workspace.activeTool = "text" }
+    Shortcut { sequence: "Ctrl+A"; enabled: !root.editingText && Workspace.document !== null; onActivated: Workspace.selectAll() }
+    Shortcut { sequence: "Ctrl+D"; enabled: !root.editingText && Workspace.hasSelection; onActivated: Workspace.deselect() }
+    Shortcut { sequence: "Ctrl+Shift+I"; enabled: !root.editingText && Workspace.document !== null; onActivated: Workspace.invertSelection() }
     // [ and ] step to the next smaller / larger size of the Brush Size panel.
     function stepBrushSize(direction) {
         if (!Workspace.subTools.paintTool) return
@@ -521,6 +532,40 @@ ApplicationWindow {
                     objectName: "preferencesMenuItem"
                     text: qsTr("Preferences...")
                     onTriggered: preferencesDialog.open()
+                }
+            }
+            KpMenu {
+                title: qsTr("&Select")
+                KpMenuItem {
+                    text: qsTr("Select &All\tCtrl+A")
+                    enabled: Workspace.document !== null
+                    onTriggered: Workspace.selectAll()
+                }
+                KpMenuItem {
+                    text: qsTr("&Deselect\tCtrl+D")
+                    enabled: Workspace.hasSelection
+                    onTriggered: Workspace.deselect()
+                }
+                KpMenuItem {
+                    text: qsTr("&Invert Selection\tCtrl+Shift+I")
+                    enabled: Workspace.document !== null
+                    onTriggered: Workspace.invertSelection()
+                }
+                KpMenuSeparator {}
+                KpMenuItem {
+                    text: qsTr("Expand 2 px")
+                    enabled: Workspace.hasSelection
+                    onTriggered: Workspace.expandSelection(2)
+                }
+                KpMenuItem {
+                    text: qsTr("Contract 2 px")
+                    enabled: Workspace.hasSelection
+                    onTriggered: Workspace.contractSelection(2)
+                }
+                KpMenuItem {
+                    text: qsTr("Feather 3 px")
+                    enabled: Workspace.hasSelection
+                    onTriggered: Workspace.featherSelection(3)
                 }
             }
             KpMenu {

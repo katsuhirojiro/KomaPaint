@@ -35,6 +35,10 @@ struct BrushDefinition {
     // Digital blending & smudging (0 = pure deposit; > 0 = blend/smudge existing pixels)
     double blendStrength = 0.0;   // 0..1 how strongly existing canvas paint blends/smears
     double colorMix = 1.0;        // 0 = pure smudge/blend, 1 = full foreground colour
+
+    // Optional per-pixel mask callback (e.g. active SelectionMask or Boundary-Aware protection).
+    double (*pixelMask)(void*, std::int64_t, std::int64_t) noexcept = nullptr;
+    void* pixelMaskContext = nullptr;
 };
 
 struct InputSample {

@@ -1,5 +1,6 @@
 #include "CanvasViewport.h"
 #include "BrushSettings.h"
+#include "ToolSettings.h"
 #include "../input/QtPointerAdapter.h"
 #include "../input/TabletInputSettings.h"
 #include "../history/UndoStack.h"
@@ -7,8 +8,10 @@
 #include "../layers/Layer.h"
 #include "../layers/LayerModel.h"
 #include <QCoreApplication>
+#include <QGuiApplication>
 #include <QHoverEvent>
 #include <QMouseEvent>
+#include <QPainterPath>
 #include <QMutexLocker>
 #include <QPainter>
 #include <QQuickWindow>
@@ -159,6 +162,17 @@ CanvasViewport::CanvasViewport(QQuickItem* parent) : QQuickPaintedItem(parent)
     m_materialTimer->setInterval(200);
     connect(m_materialTimer, &QTimer::timeout, this, &CanvasViewport::tickMaterialSimulation);
 
+    m_antsTimer = new QTimer(this);
+    m_antsTimer->setInterval(120);
+    connect(m_antsTimer, &QTimer::timeout, this, [this] {
+        if (m_document && m_document->hasSelection()) {
+            m_antsPhase = (m_antsPhase + 1) % 16;
+            update();
+        } else {
+            m_antsTimer->stop();
+        }
+    });
+
     m_diagnosticsTimer = new QTimer(this);
     m_diagnosticsTimer->setInterval(120);
     connect(m_diagnosticsTimer, &QTimer::timeout, this, [this] {
@@ -266,6 +280,26 @@ void CanvasViewport::setBrushSettings(QObject* settings)
     emit brushSettingsChanged();
 }
 
+QObject* CanvasViewport::toolSettings() const { return m_toolSettings.data(); }
+void CanvasViewport::setToolSettings(QObject* settings)
+{
+    auto* next = qobject_cast<ToolSettings*>(settings);
+    if (m_toolSettings == next) return;
+    if (m_toolSettings) disconnect(m_toolSettings, nullptr, this, nullptr);
+    m_toolSettings = next;
+    if (m_toolSettings) {
+        connect(m_toolSettings, &ToolSettings::executableToolChanged, this, [this] {
+            m_toolDragActive = false;
+            m_lassoPolygonalActive = false;
+            m_lassoPoints.clear();
+            m_lassoPreviewSegment.clear();
+            m_curveBendStage = false;
+            update();
+        });
+    }
+    emit toolSettingsChanged();
+}
+
 void CanvasViewport::setBrushColor(const QColor& color)
 {
     if (!color.isValid() || m_brushColor == color) return;
@@ -277,7 +311,14 @@ void CanvasViewport::setActiveTool(const QString& tool)
 {
     if (m_activeTool == tool) return;
     m_activeTool = tool;
+    m_toolDragActive = false;
+    m_lassoPolygonalActive = false;
+    m_lassoPoints.clear();
+    m_lassoPreviewSegment.clear();
+    m_curveBendStage = false;
+    dismissTextInput();
     emit activeToolChanged();
+    update();
 }
 
 void CanvasViewport::syncInputConfig()
@@ -318,6 +359,14 @@ void CanvasViewport::setDocument(QObject* object)
     }
     if (m_materialTimer) m_materialTimer->stop();
     cancelStroke();
+    cancelPendingRegionFill();
+    clearProtectedRegion();
+    dismissTextInput();
+    m_toolDragActive = false;
+    m_lassoPolygonalActive = false;
+    m_lassoPoints.clear();
+    m_lassoPreviewSegment.clear();
+    m_curveBendStage = false;
     m_materialReservoir.reset();
     m_document = doc;
     m_invalidation.reset();
@@ -334,6 +383,17 @@ void CanvasViewport::setDocument(QObject* object)
         connect(doc, &CanvasDocument::sizeChanged, this, [this] {
             m_invalidation.reset(); clearCache(); invalidateAll();
         });
+        connect(doc, &CanvasDocument::selectionChanged, this, [this] {
+            rebuildSelectionOverlayCache();
+            if (m_antsTimer) {
+                if (m_document && m_document->hasSelection()) {
+                    if (!m_antsTimer->isActive()) m_antsTimer->start();
+                } else {
+                    m_antsTimer->stop();
+                }
+            }
+            update();
+        });
         connect(doc, &QObject::destroyed, this, [this] { m_document = nullptr; m_invalidation.reset(); clearCache(); m_cacheBudget.reset(); invalidateAll(); });
         auto* model = doc->layers();
         connect(model, &QAbstractItemModel::dataChanged, this, &CanvasViewport::invalidateAll);
@@ -344,6 +404,11 @@ void CanvasViewport::setDocument(QObject* object)
         reconnectLayers();
     }
     emit documentChanged();
+    rebuildSelectionOverlayCache();
+    if (m_antsTimer) {
+        if (doc && doc->hasSelection()) m_antsTimer->start();
+        else m_antsTimer->stop();
+    }
     invalidateAll();
     refreshMaterialSimulation();
 }
@@ -764,6 +829,13 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
         ? brush->stabilization()
         : (m_inputSettings ? m_inputSettings->stabilizationDefault() : 0);
 
+    m_strokeMaskContext = {};
+    m_strokeMaskContext.selection = &m_document->selection();
+    m_strokeMaskContext.hasSelection = m_document->selection().hasSelection();
+    m_strokeMaskContext.protectInterior = effectiveErase && isBoundaryEraserActive() && m_hasProtectedRegion;
+    m_strokeMaskContext.protectedRegion = m_strokeMaskContext.protectInterior ? &m_protectedRegion : nullptr;
+    const bool useMaskCallback = m_strokeMaskContext.hasSelection || m_strokeMaskContext.protectInterior;
+
     if (brush->isRealisticEngine()) {
         if (!m_history->beginMaterialStroke(layer)) {
             emit strokeError(QStringLiteral("Could not start material stroke history; no paint was applied."));
@@ -856,6 +928,10 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
             definition.contactTransfer *= brush->opacity() / 100.0
                 * (effectiveErase ? brush->flow() / 100.0 : 1.0);
             definition.autoReloadOnStroke = !brush->persistentReservoir();
+            if (useMaskCallback) {
+                definition.pixelMask = &evaluatePixelMask;
+                definition.pixelMaskContext = &m_strokeMaskContext;
+            }
             if (brush->textured() && definition.tip == material::TipGeometry::Round) {
                 definition.tip = material::TipGeometry::Bristle;
                 definition.bristleCount = 13;
@@ -981,6 +1057,10 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
     definition.colorMix = brush->colorMix() / 100.0;
     definition.erase = effectiveErase;
     definition.color = color.rgba();
+    if (useMaskCallback) {
+        definition.pixelMask = &evaluatePixelMask;
+        definition.pixelMaskContext = &m_strokeMaskContext;
+    }
 
     try { m_stroke = std::make_unique<BrushStroke>(layer->tiles(), definition); }
     catch (const std::bad_alloc&) {
@@ -1247,6 +1327,16 @@ void CanvasViewport::processArbiterResult(const input::ProcessResult& res)
 
     if (res.shouldBeginStroke) {
         if (m_document && m_brushSettings && activeToolIsPaintable()) {
+            if (!activeToolUsesStrokeEngine()) {
+                handleInteractiveToolSample(sample);
+                return;
+            }
+            if (isBoundaryEraserActive() &&
+                (!m_hasProtectedRegion || (QGuiApplication::keyboardModifiers() & Qt::AltModifier))) {
+                m_arbiter.markStrokeEndedExternally();
+                sampleProtectedRegionAt(sample.docX, sample.docY);
+                return;
+            }
             if (!beginStrokeSample(sample, m_brushSettings.data(), m_brushColor, sample.eraserActive)) {
                 m_arbiter.markStrokeEndedExternally();
             }
@@ -1254,12 +1344,24 @@ void CanvasViewport::processArbiterResult(const input::ProcessResult& res)
             m_arbiter.markStrokeEndedExternally();
         }
     } else if (res.shouldExtendStroke) {
+        if (!activeToolUsesStrokeEngine()) {
+            handleInteractiveToolSample(sample);
+            return;
+        }
         if (m_stroke || m_materialStroke) {
             continueStrokeSample(sample);
         }
     } else if (res.shouldEndStroke) {
+        if (!activeToolUsesStrokeEngine()) {
+            handleInteractiveToolSample(sample);
+            return;
+        }
         if (m_stroke || m_materialStroke) {
             endStrokeSample(sample);
+        }
+    } else if (sample.phase == input::PointerPhase::Hover && !activeToolUsesStrokeEngine()) {
+        if (m_lassoPolygonalActive || m_curveBendStage) {
+            handleInteractiveToolSample(sample);
         }
     }
 }
@@ -1362,6 +1464,17 @@ void CanvasViewport::mouseReleaseEvent(QMouseEvent* e)
     processArbiterResult(res);
 }
 
+void CanvasViewport::mouseDoubleClickEvent(QMouseEvent* e)
+{
+    if (!e) return;
+    if (m_activeTool == QStringLiteral("lasso") && m_lassoPolygonalActive) {
+        finalizePolygonLasso();
+        e->accept();
+        return;
+    }
+    QQuickPaintedItem::mouseDoubleClickEvent(e);
+}
+
 void CanvasViewport::mouseUngrabEvent()
 {
     if (m_arbiter.handleFocusLost()) {
@@ -1385,7 +1498,12 @@ void CanvasViewport::hoverMoveEvent(QHoverEvent* e)
     const auto raw = input::QtPointerAdapter::fromHoverEvent(e, input::PointerPhase::Hover);
     const QPointF docPt = viewportToDocument(raw.viewX, raw.viewY);
     const auto res = m_arbiter.process(raw, docPt.x(), docPt.y());
-    if (res.decision == input::ArbiterDecision::Accept) updateCursorState(res.sample, true);
+    if (res.decision == input::ArbiterDecision::Accept) {
+        updateCursorState(res.sample, true);
+        if (m_lassoPolygonalActive || m_curveBendStage) {
+            handleInteractiveToolSample(res.sample);
+        }
+    }
     e->accept();
 }
 
@@ -1582,8 +1700,11 @@ QVariant CanvasViewport::colorAt(qreal x, qreal y) const
 
 void CanvasViewport::paint(QPainter* painter)
 {
-    QMutexLocker lock(&m_frameMutex);
-    painter->drawImage(QPointF(0, 0), m_frame);
+    {
+        QMutexLocker lock(&m_frameMutex);
+        painter->drawImage(QPointF(0, 0), m_frame);
+    }
+    paintOverlays(painter);
 }
 
 QImage CanvasViewport::frameSnapshot() const { QMutexLocker lock(&m_frameMutex); return m_frame; }
@@ -1688,5 +1809,656 @@ void CanvasViewport::refreshNow()
         painter.end();
     } catch (const std::bad_alloc&) { qWarning("Canvas viewport allocation failed"); return; }
     update(dirty.toAlignedRect());
+}
+
+bool CanvasViewport::activeToolUsesStrokeEngine() const
+{
+    return m_activeTool == QStringLiteral("pen")
+        || m_activeTool == QStringLiteral("pencil")
+        || m_activeTool == QStringLiteral("brush")
+        || m_activeTool == QStringLiteral("airbrush")
+        || m_activeTool == QStringLiteral("eraser")
+        || m_activeTool == QStringLiteral("smudge");
+}
+
+bool CanvasViewport::isBoundaryEraserActive() const
+{
+    return m_activeTool == QStringLiteral("eraser")
+        && m_toolSettings
+        && m_toolSettings->executableTool() == QStringLiteral("boundary_eraser");
+}
+
+QPointF CanvasViewport::textInputViewPos() const
+{
+    return documentToViewport(m_textInputDocPos.x(), m_textInputDocPos.y());
+}
+
+namespace {
+
+QImage buildRegionOverlayImage(const region::RegionResult& res, QColor fillCol, QColor uncertainCol)
+{
+    if (res.empty()) return {};
+    const int w = static_cast<int>(res.bounds.width);
+    const int h = static_cast<int>(res.bounds.height);
+    if (w <= 0 || h <= 0 || w * h > 4096 * 4096) return {};
+    QImage img(w, h, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    for (int y = 0; y < h; ++y) {
+        auto* row = reinterpret_cast<std::uint32_t*>(img.scanLine(y));
+        for (int x = 0; x < w; ++x) {
+            const std::size_t idx = static_cast<std::size_t>(y * w + x);
+            const std::uint8_t cov = idx < res.coverage.size() ? res.coverage[idx] : 0;
+            const std::uint8_t unc = idx < res.uncertainMask.size() ? res.uncertainMask[idx] : 0;
+            if (unc > 0) {
+                const unsigned a = static_cast<unsigned>(std::clamp((unc * uncertainCol.alpha()) / 255, 0, 255));
+                const unsigned r = (uncertainCol.red() * a + 127) / 255;
+                const unsigned g = (uncertainCol.green() * a + 127) / 255;
+                const unsigned b = (uncertainCol.blue() * a + 127) / 255;
+                row[x] = (a << 24) | (r << 16) | (g << 8) | b;
+            } else if (cov > 0) {
+                const unsigned a = static_cast<unsigned>(std::clamp((cov * fillCol.alpha()) / 255, 0, 255));
+                const unsigned r = (fillCol.red() * a + 127) / 255;
+                const unsigned g = (fillCol.green() * a + 127) / 255;
+                const unsigned b = (fillCol.blue() * a + 127) / 255;
+                row[x] = (a << 24) | (r << 16) | (g << 8) | b;
+            }
+        }
+    }
+    return img;
+}
+
+region::SelectionOp selectionOpFromToolSettings(const ToolSettings* ts)
+{
+    const QString op = ts ? ts->selectionOp() : QStringLiteral("replace");
+    const auto mods = QGuiApplication::keyboardModifiers();
+    if (mods & Qt::ShiftModifier) return region::SelectionOp::Add;
+    if (mods & Qt::AltModifier) return region::SelectionOp::Subtract;
+    if (op == QStringLiteral("add")) return region::SelectionOp::Add;
+    if (op == QStringLiteral("subtract")) return region::SelectionOp::Subtract;
+    if (op == QStringLiteral("intersect")) return region::SelectionOp::Intersect;
+    return region::SelectionOp::Replace;
+}
+
+int referenceModeToInt(const ToolSettings* ts)
+{
+    if (!ts) return 1;
+    const QString m = ts->referenceMode();
+    if (m == QStringLiteral("current")) return 0;
+    if (m == QStringLiteral("selected_and_below")) return 2;
+    return 1; // "visible"
+}
+
+} // namespace
+
+bool CanvasViewport::applyFillAt(qreal docX, qreal docY)
+{
+    if (!m_document) return false;
+    const std::int64_t sx = static_cast<std::int64_t>(std::floor(docX));
+    const std::int64_t sy = static_cast<std::int64_t>(std::floor(docY));
+    if (sx < 0 || sy < 0 || sx >= m_document->width() || sy >= m_document->height()) return false;
+
+    const int refMode = referenceModeToInt(m_toolSettings.data());
+    const auto refs = CanvasToolExecutor::buildReferenceSet(m_document.data(), refMode);
+    const region::SelectionMask* sel = m_document->selection().hasSelection() ? &m_document->selection() : nullptr;
+
+    const bool isSmart = m_toolSettings && m_toolSettings->executableTool() == QStringLiteral("smart_fill");
+    region::RegionResult result;
+    if (isSmart) {
+        region::SmartFillParams sp;
+        sp.tolerance = m_toolSettings ? m_toolSettings->tolerance() : 34;
+        sp.boundarySensitivity = m_toolSettings ? m_toolSettings->boundarySensitivity() : 65;
+        sp.gapTolerance = m_toolSettings ? m_toolSettings->gapClosing() : 10;
+        sp.areaScaling = m_toolSettings ? m_toolSettings->areaScaling() : 1;
+        sp.edgeQuality = m_toolSettings ? m_toolSettings->edgeQuality() : 85;
+        sp.perceptualColor = !m_toolSettings || m_toolSettings->perceptualColor();
+        sp.alphaAware = !m_toolSettings || m_toolSettings->alphaAware();
+        sp.antialiasing = !m_toolSettings || m_toolSettings->antialiasing();
+        sp.colorBleeding = !m_toolSettings || m_toolSettings->colorBleeding();
+        sp.contiguous = !m_toolSettings || m_toolSettings->contiguous();
+        result = m_regionEngine.computeSmartFill(refs, sx, sy, sp, sel);
+    } else {
+        region::FillParams fp;
+        fp.tolerance = m_toolSettings ? m_toolSettings->tolerance() : 28;
+        fp.perceptualColor = !m_toolSettings || m_toolSettings->perceptualColor();
+        fp.alphaAware = !m_toolSettings || m_toolSettings->alphaAware();
+        fp.gapClosing = m_toolSettings ? m_toolSettings->gapClosing() : 0;
+        fp.areaScaling = m_toolSettings ? m_toolSettings->areaScaling() : 1;
+        fp.antialiasing = !m_toolSettings || m_toolSettings->antialiasing();
+        fp.colorBleeding = !m_toolSettings || m_toolSettings->colorBleeding();
+        fp.contiguous = !m_toolSettings || m_toolSettings->contiguous();
+        result = m_regionEngine.computeConventionalFill(refs, sx, sy, fp, sel);
+    }
+
+    if (result.empty()) return false;
+
+    const bool preview = isSmart && m_toolSettings && m_toolSettings->previewBeforeCommit();
+    if (preview) {
+        m_pendingRegion = std::move(result);
+        m_hasPendingRegion = true;
+        const int pct = static_cast<int>(std::lround(m_pendingRegion.confidence * 100.0));
+        if (m_pendingRegion.status == region::RegionStatus::AmbiguousLeak) {
+            m_regionPreviewStatus = QStringLiteral("Ambiguous / open contour (%1%) — adjust gap or sensitivity").arg(pct);
+        } else if (m_pendingRegion.status == region::RegionStatus::PartiallyEnclosed) {
+            m_regionPreviewStatus = QStringLiteral("Partially enclosed (%1% · %2 gap px bridged)").arg(pct).arg(m_pendingRegion.uncertainPixels);
+        } else {
+            m_regionPreviewStatus = QStringLiteral("Enclosed region (%1%)").arg(pct);
+        }
+        m_pendingRegionOverlay = buildRegionOverlayImage(
+            m_pendingRegion,
+            QColor(m_brushColor.red(), m_brushColor.green(), m_brushColor.blue(), 130),
+            QColor(245, 166, 35, 220));
+        emit regionPreviewChanged();
+        update();
+        return true;
+    }
+
+    QString err;
+    if (!CanvasToolExecutor::applyRegionFill(m_document.data(), m_history.data(),
+                                             m_brushSettings.data(), m_brushColor, result, &err)) {
+        if (!err.isEmpty()) emit strokeError(err);
+        return false;
+    }
+    return true;
+}
+
+bool CanvasViewport::commitPendingRegionFill()
+{
+    if (!m_hasPendingRegion || !m_document) return false;
+    QString err;
+    const bool ok = CanvasToolExecutor::applyRegionFill(
+        m_document.data(), m_history.data(), m_brushSettings.data(), m_brushColor, m_pendingRegion, &err);
+    if (!ok && !err.isEmpty()) emit strokeError(err);
+    cancelPendingRegionFill();
+    return ok;
+}
+
+void CanvasViewport::cancelPendingRegionFill()
+{
+    if (!m_hasPendingRegion && m_pendingRegionOverlay.isNull()) return;
+    m_hasPendingRegion = false;
+    m_pendingRegion = {};
+    m_regionPreviewStatus.clear();
+    m_pendingRegionOverlay = {};
+    emit regionPreviewChanged();
+    update();
+}
+
+bool CanvasViewport::applyMagicWandAt(qreal docX, qreal docY, int opOverride)
+{
+    if (!m_document) return false;
+    const std::int64_t sx = static_cast<std::int64_t>(std::floor(docX));
+    const std::int64_t sy = static_cast<std::int64_t>(std::floor(docY));
+    if (sx < 0 || sy < 0 || sx >= m_document->width() || sy >= m_document->height()) return false;
+
+    const int refMode = referenceModeToInt(m_toolSettings.data());
+    const auto refs = CanvasToolExecutor::buildReferenceSet(m_document.data(), refMode);
+
+    region::MagicWandParams wp;
+    wp.tolerance = m_toolSettings ? m_toolSettings->tolerance() : 26;
+    wp.perceptualColor = !m_toolSettings || m_toolSettings->perceptualColor();
+    wp.alphaAware = !m_toolSettings || m_toolSettings->alphaAware();
+    wp.gapClosing = m_toolSettings ? m_toolSettings->gapClosing() : 0;
+    wp.boundarySensitivity = m_toolSettings ? m_toolSettings->boundarySensitivity() : 65;
+    wp.areaScaling = m_toolSettings ? m_toolSettings->areaScaling() : 0;
+    wp.feather = m_toolSettings ? m_toolSettings->feather() : 0;
+    wp.antialiasing = !m_toolSettings || m_toolSettings->antialiasing();
+    wp.contiguous = !m_toolSettings || m_toolSettings->contiguous();
+
+    const region::RegionResult res = m_regionEngine.computeMagicWand(refs, sx, sy, wp, nullptr);
+    const auto op = (opOverride >= 0 && opOverride <= 3)
+        ? static_cast<region::SelectionOp>(opOverride)
+        : selectionOpFromToolSettings(m_toolSettings.data());
+
+    m_document->pushSelectionSnapshot();
+    if (res.empty()) {
+        if (op == region::SelectionOp::Replace) {
+            m_document->selection().clear();
+        }
+    } else {
+        m_document->selection().applyRectMask(
+            res.bounds.x, res.bounds.y, res.bounds.width, res.bounds.height, res.coverage, op);
+    }
+    m_document->notifySelectionChanged();
+    return !res.empty();
+}
+
+bool CanvasViewport::sampleProtectedRegionAt(qreal docX, qreal docY)
+{
+    if (!m_document) return false;
+    const std::int64_t sx = static_cast<std::int64_t>(std::floor(docX));
+    const std::int64_t sy = static_cast<std::int64_t>(std::floor(docY));
+    if (sx < 0 || sy < 0 || sx >= m_document->width() || sy >= m_document->height()) return false;
+
+    const int refMode = referenceModeToInt(m_toolSettings.data());
+    const auto refs = CanvasToolExecutor::buildReferenceSet(m_document.data(), refMode);
+    const region::SelectionMask* sel = m_document->selection().hasSelection() ? &m_document->selection() : nullptr;
+
+    region::ProtectedRegionParams pp;
+    pp.boundarySensitivity = m_toolSettings ? m_toolSettings->boundarySensitivity() : 65;
+    pp.gapTolerance = m_toolSettings ? m_toolSettings->gapClosing() : 8;
+    pp.tolerance = m_toolSettings ? m_toolSettings->tolerance() : 36;
+    pp.conservativeBoundary = !m_toolSettings || m_toolSettings->conservativeBoundary();
+    pp.rimProtectionPx = pp.conservativeBoundary ? 1 : 0;
+
+    region::RegionResult res = m_regionEngine.computeProtectedRegion(refs, sx, sy, pp, sel);
+    if (res.empty()) {
+        clearProtectedRegion();
+        return false;
+    }
+
+    m_protectedRegion = std::move(res);
+    m_hasProtectedRegion = true;
+    const int pct = static_cast<int>(std::lround(m_protectedRegion.confidence * 100.0));
+    m_protectedRegionStatus = (m_protectedRegion.status == region::RegionStatus::AmbiguousLeak)
+        ? QStringLiteral("Conservative protection (%1% · partial contour)").arg(pct)
+        : QStringLiteral("Protected region locked (%1%) — drag outside to erase").arg(pct);
+    m_protectedRegionOverlay = buildRegionOverlayImage(
+        m_protectedRegion,
+        QColor(52, 211, 153, 82),
+        QColor(245, 166, 35, 165));
+    emit protectedRegionChanged();
+    update();
+    return true;
+}
+
+void CanvasViewport::clearProtectedRegion()
+{
+    if (!m_hasProtectedRegion && m_protectedRegionOverlay.isNull()) return;
+    m_hasProtectedRegion = false;
+    m_protectedRegion = {};
+    m_protectedRegionStatus.clear();
+    m_protectedRegionOverlay = {};
+    emit protectedRegionChanged();
+    update();
+}
+
+bool CanvasViewport::applyGradient(qreal x0, qreal y0, qreal x1, qreal y1)
+{
+    if (!m_document) return false;
+    const QString gType = m_toolSettings ? m_toolSettings->gradientType() : QStringLiteral("linear");
+    QString err;
+    const bool ok = CanvasToolExecutor::applyGradient(
+        m_document.data(), m_history.data(), m_brushSettings.data(), m_brushColor,
+        x0, y0, x1, y1, gType, &err);
+    if (!ok && !err.isEmpty()) emit strokeError(err);
+    return ok;
+}
+
+bool CanvasViewport::applyShape(const QString& shapeType, qreal x0, qreal y0, qreal x1, qreal y1,
+                                qreal ctrlX, qreal ctrlY)
+{
+    if (!m_document) return false;
+    const QString sMode = m_toolSettings ? m_toolSettings->shapeMode() : QStringLiteral("stroke");
+    const int sWidth = m_toolSettings ? m_toolSettings->shapeStrokeWidth() : 4;
+    QString err;
+    const bool ok = CanvasToolExecutor::applyShape(
+        m_document.data(), m_history.data(), m_brushSettings.data(), m_brushColor,
+        shapeType, sMode, sWidth, x0, y0, x1, y1, ctrlX, ctrlY, &err);
+    if (!ok && !err.isEmpty()) emit strokeError(err);
+    return ok;
+}
+
+bool CanvasViewport::applyTextAt(qreal docX, qreal docY, const QString& text)
+{
+    if (!m_document) return false;
+    const int fSize = m_toolSettings ? m_toolSettings->fontSize() : 28;
+    QString err;
+    const bool ok = CanvasToolExecutor::applyText(
+        m_document.data(), m_history.data(), m_brushSettings.data(), m_brushColor,
+        docX, docY, text, fSize, &err);
+    if (!ok && !err.isEmpty()) emit strokeError(err);
+    dismissTextInput();
+    return ok;
+}
+
+void CanvasViewport::dismissTextInput()
+{
+    if (!m_textInputRequested) return;
+    m_textInputRequested = false;
+    emit textInputStateChanged();
+}
+
+bool CanvasViewport::clearSelectedContent()
+{
+    if (!m_document) return false;
+    QString err;
+    const bool ok = CanvasToolExecutor::clearSelectionContent(
+        m_document.data(), m_history.data(), m_brushSettings.data(), &err);
+    if (!ok && !err.isEmpty()) emit strokeError(err);
+    return ok;
+}
+
+bool CanvasViewport::applyMoveDelta(qreal dx, qreal dy)
+{
+    if (!m_document) return false;
+    QString err;
+    const bool ok = CanvasToolExecutor::moveOrTransform(
+        m_document.data(), m_history.data(), m_brushSettings.data(),
+        dx, dy, 1.0, 1.0, 0.0, &err);
+    if (!ok && !err.isEmpty()) emit strokeError(err);
+    return ok;
+}
+
+bool CanvasViewport::applyTransformRect(qreal scaleX, qreal scaleY, qreal rotationDeg,
+                                        qreal translateX, qreal translateY)
+{
+    if (!m_document) return false;
+    QString err;
+    const bool ok = CanvasToolExecutor::moveOrTransform(
+        m_document.data(), m_history.data(), m_brushSettings.data(),
+        translateX, translateY, scaleX, scaleY, rotationDeg, &err);
+    if (!ok && !err.isEmpty()) emit strokeError(err);
+    return ok;
+}
+
+void CanvasViewport::finalizePolygonLasso()
+{
+    if (!m_document || m_lassoPoints.size() < 3) {
+        m_lassoPoints.clear();
+        m_lassoPreviewSegment.clear();
+        m_lassoPolygonalActive = false;
+        update();
+        return;
+    }
+    const bool aa = !m_toolSettings || m_toolSettings->antialiasing();
+    const int feather = m_toolSettings ? m_toolSettings->feather() : 0;
+    const auto op = selectionOpFromToolSettings(m_toolSettings.data());
+    m_document->pushSelectionSnapshot();
+    m_document->selection().applyPolygon(m_lassoPoints, aa, feather, op);
+    m_document->notifySelectionChanged();
+    m_lassoPoints.clear();
+    m_lassoPreviewSegment.clear();
+    m_lassoPolygonalActive = false;
+    update();
+}
+
+void CanvasViewport::handleInteractiveToolSample(const input::PointerSample& sample)
+{
+    if (!m_document) return;
+    const QPointF docPt(sample.docX, sample.docY);
+
+    if (m_activeTool == QStringLiteral("fill")) {
+        if (sample.phase == input::PointerPhase::Up) {
+            applyFillAt(sample.docX, sample.docY);
+        }
+        return;
+    }
+
+    if (m_activeTool == QStringLiteral("wand")) {
+        if (sample.phase == input::PointerPhase::Down) {
+            applyMagicWandAt(sample.docX, sample.docY);
+        }
+        return;
+    }
+
+    if (m_activeTool == QStringLiteral("text")) {
+        if (sample.phase == input::PointerPhase::Down) {
+            m_textInputDocPos = docPt;
+            m_textInputRequested = true;
+            emit textInputStateChanged();
+        }
+        return;
+    }
+
+    if (m_activeTool == QStringLiteral("lasso")) {
+        const QString mode = m_toolSettings ? m_toolSettings->lassoMode() : QStringLiteral("freehand");
+        if (mode == QStringLiteral("freehand")) {
+            if (sample.phase == input::PointerPhase::Down) {
+                m_toolDragActive = true;
+                m_lassoPoints.clear();
+                m_lassoPoints.push_back({sample.docX, sample.docY});
+                update();
+            } else if (sample.phase == input::PointerPhase::Move && m_toolDragActive) {
+                const auto& back = m_lassoPoints.back();
+                if (std::hypot(sample.docX - back.x, sample.docY - back.y) >= 2.0) {
+                    m_lassoPoints.push_back({sample.docX, sample.docY});
+                    update();
+                }
+            } else if (sample.phase == input::PointerPhase::Up && m_toolDragActive) {
+                m_toolDragActive = false;
+                finalizePolygonLasso();
+            }
+            return;
+        }
+
+        // Polygonal or Magnetic Lasso
+        if (sample.phase == input::PointerPhase::Down) {
+            if (!m_lassoPolygonalActive) {
+                m_lassoPolygonalActive = true;
+                m_lassoPoints.clear();
+                m_lassoPreviewSegment.clear();
+                m_lassoPoints.push_back({sample.docX, sample.docY});
+            } else {
+                const auto& first = m_lassoPoints.front();
+                const double distToStart = std::hypot(sample.docX - first.x, sample.docY - first.y);
+                if (m_lassoPoints.size() >= 3 && distToStart <= 8.0 / std::max(0.25, m_zoom / 100.0)) {
+                    finalizePolygonLasso();
+                    return;
+                }
+                if (mode == QStringLiteral("magnetic")) {
+                    const int strength = m_toolSettings ? m_toolSettings->magneticStrength() : 65;
+                    const auto refs = CanvasToolExecutor::buildReferenceSet(
+                        m_document.data(), referenceModeToInt(m_toolSettings.data()));
+                    const auto seg = m_regionEngine.snapMagneticPath(
+                        refs, m_lassoPoints.back(), {sample.docX, sample.docY}, strength);
+                    for (std::size_t i = 1; i < seg.size(); ++i) m_lassoPoints.push_back(seg[i]);
+                } else {
+                    m_lassoPoints.push_back({sample.docX, sample.docY});
+                }
+                m_lassoPreviewSegment.clear();
+            }
+            update();
+        } else if ((sample.phase == input::PointerPhase::Hover || sample.phase == input::PointerPhase::Move) &&
+                   m_lassoPolygonalActive && !m_lassoPoints.empty()) {
+            if (mode == QStringLiteral("magnetic")) {
+                const int strength = m_toolSettings ? m_toolSettings->magneticStrength() : 65;
+                const auto refs = CanvasToolExecutor::buildReferenceSet(
+                    m_document.data(), referenceModeToInt(m_toolSettings.data()));
+                m_lassoPreviewSegment = m_regionEngine.snapMagneticPath(
+                    refs, m_lassoPoints.back(), {sample.docX, sample.docY}, strength);
+            } else {
+                m_lassoPreviewSegment = {m_lassoPoints.back(), {sample.docX, sample.docY}};
+            }
+            update();
+        }
+        return;
+    }
+
+    if (m_activeTool == QStringLiteral("curveline")) {
+        if (!m_curveBendStage) {
+            if (sample.phase == input::PointerPhase::Down) {
+                m_toolDragActive = true;
+                m_toolDragStartDoc = docPt;
+                m_toolDragEndDoc = docPt;
+                update();
+            } else if (sample.phase == input::PointerPhase::Move && m_toolDragActive) {
+                m_toolDragEndDoc = docPt;
+                update();
+            } else if (sample.phase == input::PointerPhase::Up && m_toolDragActive) {
+                m_toolDragActive = false;
+                m_toolDragEndDoc = docPt;
+                m_curveCtrlDoc = (m_toolDragStartDoc + m_toolDragEndDoc) * 0.5;
+                m_curveBendStage = true;
+                update();
+            }
+        } else {
+            if (sample.phase == input::PointerPhase::Hover || sample.phase == input::PointerPhase::Move) {
+                m_curveCtrlDoc = docPt;
+                update();
+            } else if (sample.phase == input::PointerPhase::Down) {
+                m_curveCtrlDoc = docPt;
+                m_curveBendStage = false;
+                applyShape(QStringLiteral("curveline"),
+                           m_toolDragStartDoc.x(), m_toolDragStartDoc.y(),
+                           m_toolDragEndDoc.x(), m_toolDragEndDoc.y(),
+                           m_curveCtrlDoc.x(), m_curveCtrlDoc.y());
+                update();
+            }
+        }
+        return;
+    }
+
+    // Drag-to-commit tools: selection, gradient, line, rectangle, circle, move, transform
+    if (sample.phase == input::PointerPhase::Down) {
+        m_toolDragActive = true;
+        m_toolDragStartDoc = docPt;
+        m_toolDragEndDoc = docPt;
+        update();
+    } else if (sample.phase == input::PointerPhase::Move && m_toolDragActive) {
+        m_toolDragEndDoc = docPt;
+        update();
+    } else if (sample.phase == input::PointerPhase::Up && m_toolDragActive) {
+        m_toolDragActive = false;
+        m_toolDragEndDoc = docPt;
+
+        if (m_activeTool == QStringLiteral("selection")) {
+            const auto shape = (m_toolSettings && m_toolSettings->selectionShape() == QStringLiteral("ellipse"))
+                ? region::SelectionShape::Ellipse : region::SelectionShape::Rectangle;
+            const bool aa = !m_toolSettings || m_toolSettings->antialiasing();
+            const int feather = m_toolSettings ? m_toolSettings->feather() : 0;
+            const auto op = selectionOpFromToolSettings(m_toolSettings.data());
+            m_document->pushSelectionSnapshot();
+            m_document->selection().applyShape(
+                shape, m_toolDragStartDoc.x(), m_toolDragStartDoc.y(),
+                m_toolDragEndDoc.x(), m_toolDragEndDoc.y(), aa, feather, op);
+            m_document->notifySelectionChanged();
+        } else if (m_activeTool == QStringLiteral("gradient")) {
+            applyGradient(m_toolDragStartDoc.x(), m_toolDragStartDoc.y(),
+                          m_toolDragEndDoc.x(), m_toolDragEndDoc.y());
+        } else if (m_activeTool == QStringLiteral("line") ||
+                   m_activeTool == QStringLiteral("rectangle") ||
+                   m_activeTool == QStringLiteral("circle")) {
+            applyShape(m_activeTool,
+                       m_toolDragStartDoc.x(), m_toolDragStartDoc.y(),
+                       m_toolDragEndDoc.x(), m_toolDragEndDoc.y());
+        } else if (m_activeTool == QStringLiteral("move")) {
+            applyMoveDelta(m_toolDragEndDoc.x() - m_toolDragStartDoc.x(),
+                           m_toolDragEndDoc.y() - m_toolDragStartDoc.y());
+        } else if (m_activeTool == QStringLiteral("transform")) {
+            const QPointF delta = m_toolDragEndDoc - m_toolDragStartDoc;
+            applyTransformRect(1.0, 1.0, 0.0, delta.x(), delta.y());
+        }
+        update();
+    }
+}
+
+void CanvasViewport::rebuildSelectionOverlayCache()
+{
+    if (!m_document || !m_document->hasSelection()) {
+        m_selectionOutlineOverlay = {};
+        m_cachedSelectionRevision = 0;
+        return;
+    }
+    const auto& sel = m_document->selection();
+    if (sel.revision() == m_cachedSelectionRevision && !m_selectionOutlineOverlay.isNull()) return;
+    m_cachedSelectionRevision = sel.revision();
+
+    // Render crisp boundary pixels in tight selection bounds (capped safely for huge docs).
+    const auto b = sel.bounds();
+    if (b.empty() || b.width * b.height > 4096LL * 4096LL) {
+        m_selectionOutlineOverlay = {};
+        return;
+    }
+    QImage img(static_cast<int>(b.width), static_cast<int>(b.height), QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    for (std::int64_t ly = 0; ly < b.height; ++ly) {
+        const std::int64_t gy = b.y + ly;
+        auto* row = reinterpret_cast<std::uint32_t*>(img.scanLine(static_cast<int>(ly)));
+        for (std::int64_t lx = 0; lx < b.width; ++lx) {
+            const std::int64_t gx = b.x + lx;
+            if (sel.at(gx, gy) < 128) continue;
+            const bool edge = sel.at(gx - 1, gy) < 128 || sel.at(gx + 1, gy) < 128
+                           || sel.at(gx, gy - 1) < 128 || sel.at(gx, gy + 1) < 128;
+            if (edge) {
+                row[lx] = (((gx + gy) & 4) == 0) ? 0xFFFFFFFFU : 0xFF101010U;
+            }
+        }
+    }
+    m_selectionOutlineOverlay = std::move(img);
+}
+
+void CanvasViewport::paintOverlays(QPainter* painter)
+{
+    if (!painter || !m_document) return;
+    const qreal scale = m_zoom / 100.0;
+
+    painter->save();
+    if (m_viewRotation != 0.0) {
+        const QPointF center(width() / 2.0, height() / 2.0);
+        painter->translate(center);
+        painter->rotate(m_viewRotation);
+        painter->translate(-center);
+    }
+    painter->translate(m_origin);
+    painter->scale(scale, scale);
+
+    // 1. Non-destructive Boundary-Aware Eraser Protected Region overlay
+    if (m_hasProtectedRegion && !m_protectedRegionOverlay.isNull()) {
+        painter->drawImage(QPointF(m_protectedRegion.bounds.x, m_protectedRegion.bounds.y),
+                           m_protectedRegionOverlay);
+    }
+
+    // 2. Non-destructive Smart Fill preview overlay
+    if (m_hasPendingRegion && !m_pendingRegionOverlay.isNull()) {
+        painter->drawImage(QPointF(m_pendingRegion.bounds.x, m_pendingRegion.bounds.y),
+                           m_pendingRegionOverlay);
+    }
+
+    // 3. Selection Marching Ants boundary
+    if (m_document->hasSelection()) {
+        const auto b = m_document->selection().bounds();
+        if (!m_selectionOutlineOverlay.isNull()) {
+            painter->drawImage(QPointF(b.x, b.y), m_selectionOutlineOverlay);
+        }
+        if (!b.empty()) {
+            QPen antPen(Qt::black, 1.0 / std::max(0.25, scale), Qt::DashLine);
+            antPen.setDashOffset(static_cast<qreal>(m_antsPhase) * 0.5);
+            painter->setPen(antPen);
+            painter->setBrush(Qt::NoBrush);
+            painter->drawRect(QRectF(b.x, b.y, b.width, b.height));
+        }
+    }
+
+    // 4. Active drag/lasso/shape/gradient guides
+    const qreal invScale = 1.0 / std::max(0.25, scale);
+    QPen guidePen(QColor(40, 150, 255), 1.5 * invScale, Qt::DashLine);
+    painter->setPen(guidePen);
+    painter->setBrush(Qt::NoBrush);
+
+    if (m_toolDragActive) {
+        if (m_activeTool == QStringLiteral("selection")) {
+            const QRectF r = QRectF(m_toolDragStartDoc, m_toolDragEndDoc).normalized();
+            if (m_toolSettings && m_toolSettings->selectionShape() == QStringLiteral("ellipse"))
+                painter->drawEllipse(r);
+            else
+                painter->drawRect(r);
+        } else if (m_activeTool == QStringLiteral("gradient") || m_activeTool == QStringLiteral("line")) {
+            painter->drawLine(m_toolDragStartDoc, m_toolDragEndDoc);
+        } else if (m_activeTool == QStringLiteral("rectangle")) {
+            painter->drawRect(QRectF(m_toolDragStartDoc, m_toolDragEndDoc).normalized());
+        } else if (m_activeTool == QStringLiteral("circle")) {
+            painter->drawEllipse(QRectF(m_toolDragStartDoc, m_toolDragEndDoc).normalized());
+        } else if (m_activeTool == QStringLiteral("move") || m_activeTool == QStringLiteral("transform")) {
+            painter->drawLine(m_toolDragStartDoc, m_toolDragEndDoc);
+        }
+    }
+
+    if (m_curveBendStage) {
+        QPainterPath p(m_toolDragStartDoc);
+        p.quadTo(m_curveCtrlDoc, m_toolDragEndDoc);
+        painter->drawPath(p);
+    }
+
+    if (!m_lassoPoints.empty()) {
+        QPolygonF poly;
+        poly.reserve(static_cast<int>(m_lassoPoints.size() + m_lassoPreviewSegment.size()));
+        for (const auto& pt : m_lassoPoints) poly << QPointF(pt.x, pt.y);
+        for (std::size_t i = 1; i < m_lassoPreviewSegment.size(); ++i) {
+            poly << QPointF(m_lassoPreviewSegment[i].x, m_lassoPreviewSegment[i].y);
+        }
+        painter->drawPolyline(poly);
+    }
+
+    painter->restore();
 }
 } // namespace komapaint

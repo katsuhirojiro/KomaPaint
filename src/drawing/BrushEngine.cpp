@@ -306,8 +306,12 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
                 const double dy = static_cast<double>(y) + 0.5 - p.y;
                 const std::size_t lyOffset = static_cast<std::size_t>(y - tileOriginY) * tileStride;
                 for (std::int64_t x = x0; x < x1; ++x) {
-                    const double coverage = computeCoverage(static_cast<double>(x) + 0.5 - p.x, dy, x, y);
+                    double coverage = computeCoverage(static_cast<double>(x) + 0.5 - p.x, dy, x, y);
                     if (coverage <= 0.0) continue;
+                    if (b.pixelMask) {
+                        coverage *= clamp01(b.pixelMask(b.pixelMaskContext, x, y));
+                        if (coverage <= 0.0) continue;
+                    }
                     const std::size_t idx = lyOffset + static_cast<std::size_t>(x - tileOriginX);
                     const std::uint32_t old = writePtr ? writePtr[idx] : (readPtr ? readPtr[idx] : 0U);
                     const double amount = coverage * opacityFlowPressure;

@@ -58,6 +58,7 @@ Rectangle {
         history: Workspace.history
         inputSettings: Workspace.inputSettings
         brushSettings: Workspace.brush
+        toolSettings: Workspace.toolSettings
         brushColor: Workspace.colors.foreground
         activeTool: Workspace.activeTool
         zoom: Workspace.zoom
@@ -69,6 +70,12 @@ Rectangle {
         onZoomRequested: function(value) { if (canvas.document === Workspace.document) Workspace.zoom = value }
         onViewChanged: { ws.rememberView(); ws.refreshPaper() }
         onStrokeError: function(message) { brushError.text = message; brushErrorDialog.open() }
+        onTextInputStateChanged: {
+            if (canvas.textInputRequested) {
+                inlineTextInput.text = ""
+                inlineTextInput.forceActiveFocus()
+            }
+        }
         onEyedropperPicked: function(picked) { Workspace.colors.foreground = picked }
         onBarrelActionRequested: function(action) {
             if (action === "right_click") {
@@ -180,6 +187,181 @@ Rectangle {
             }
         }
     }
+    // ---- Stage 11 Interactive Tool HUDs -------------------------------------
+    // Smart Fill Preview confirmation bar
+    Rectangle {
+        id: regionPreviewHud
+        objectName: "regionPreviewHud"
+        visible: canvas.hasPendingRegionPreview
+        anchors.top: parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.topMargin: KP.gapM
+        width: previewHudRow.implicitWidth + KP.gapM * 2
+        height: 32
+        radius: KP.radiusM
+        color: KP.floatingBg
+        border.width: 1
+        border.color: KP.accent
+        z: 4
+        RowLayout {
+            id: previewHudRow
+            anchors.centerIn: parent
+            spacing: KP.gapS
+            Text {
+                text: canvas.regionPreviewStatus
+                color: KP.text
+                font.pixelSize: KP.fontXS
+            }
+            KpButton {
+                objectName: "commitRegionFillButton"
+                small: true
+                variant: "primary"
+                label: qsTr("Commit Fill")
+                onClicked: canvas.commitPendingRegionFill()
+            }
+            KpButton {
+                objectName: "cancelRegionFillButton"
+                small: true
+                label: qsTr("Cancel")
+                onClicked: canvas.cancelPendingRegionFill()
+            }
+        }
+    }
+
+    // Boundary-Aware Eraser protection bar
+    Rectangle {
+        id: boundaryEraserHud
+        objectName: "boundaryEraserHud"
+        visible: Workspace.activeTool === "eraser"
+                 && Workspace.toolSettings
+                 && Workspace.toolSettings.executableTool === "boundary_eraser"
+        anchors.top: regionPreviewHud.visible ? regionPreviewHud.bottom : parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.topMargin: KP.gapM
+        width: boundaryHudRow.implicitWidth + KP.gapM * 2
+        height: 30
+        radius: KP.radiusM
+        color: KP.floatingBg
+        border.width: 1
+        border.color: canvas.hasProtectedRegion ? KP.accent : KP.border
+        z: 4
+        RowLayout {
+            id: boundaryHudRow
+            anchors.centerIn: parent
+            spacing: KP.gapS
+            Text {
+                text: canvas.hasProtectedRegion
+                      ? canvas.protectedRegionStatus
+                      : qsTr("Boundary-Aware Eraser: click inside region to protect (Alt+click to re-sample)")
+                color: canvas.hasProtectedRegion ? KP.textAccent : KP.textMuted
+                font.pixelSize: KP.fontXS
+            }
+            KpButton {
+                objectName: "clearProtectedRegionButton"
+                visible: canvas.hasProtectedRegion
+                small: true
+                label: qsTr("Clear")
+                onClicked: canvas.clearProtectedRegion()
+            }
+        }
+    }
+
+    // Active Selection quick-action bar
+    Rectangle {
+        id: selectionHud
+        objectName: "selectionActionHud"
+        visible: Workspace.hasSelection && !canvas.hasPendingRegionPreview
+        anchors.top: boundaryEraserHud.visible ? boundaryEraserHud.bottom : parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.topMargin: KP.gapM
+        width: selectionHudRow.implicitWidth + KP.gapM * 2
+        height: 30
+        radius: KP.radiusM
+        color: KP.floatingBg
+        border.width: 1
+        border.color: KP.border
+        z: 4
+        RowLayout {
+            id: selectionHudRow
+            anchors.centerIn: parent
+            spacing: KP.gapXS
+            KpButton { small: true; label: qsTr("Deselect"); onClicked: Workspace.deselect() }
+            KpButton { small: true; label: qsTr("Invert"); onClicked: Workspace.invertSelection() }
+            KpButton { small: true; label: qsTr("Expand"); onClicked: Workspace.expandSelection(2) }
+            KpButton { small: true; label: qsTr("Contract"); onClicked: Workspace.contractSelection(2) }
+            KpButton { small: true; label: qsTr("Feather"); onClicked: Workspace.featherSelection(3) }
+            KpButton { small: true; label: qsTr("Clear"); onClicked: canvas.clearSelectedContent() }
+        }
+    }
+
+    // Inline Text tool popover
+    Rectangle {
+        id: inlineTextPopover
+        objectName: "inlineTextPopover"
+        visible: canvas.textInputRequested
+        x: Math.max(8, Math.min(ws.width - width - 8, canvas.textInputViewPos.x))
+        y: Math.max(8, Math.min(ws.height - height - 8, canvas.textInputViewPos.y))
+        width: 240
+        height: 36
+        radius: KP.radiusS
+        color: KP.floatingBg
+        border.width: 1
+        border.color: KP.accent
+        z: 5
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 4
+            spacing: 4
+            Rectangle {
+                Layout.fillWidth: true
+                height: 26
+                radius: KP.radiusS
+                color: KP.inputBg
+                border.width: 1
+                border.color: inlineTextInput.activeFocus ? KP.accent : KP.border
+                TextInput {
+                    id: inlineTextInput
+                    objectName: "inlineTextInput"
+                    anchors.fill: parent
+                    anchors.leftMargin: 6
+                    anchors.rightMargin: 6
+                    verticalAlignment: TextInput.AlignVCenter
+                    color: KP.text
+                    font.pixelSize: KP.fontS
+                    clip: true
+                    selectByMouse: true
+                    onAccepted: {
+                        if (text.trim().length > 0)
+                            canvas.applyTextAt(canvas.textInputDocPos.x, canvas.textInputDocPos.y, text)
+                        else
+                            canvas.dismissTextInput()
+                    }
+                    Keys.onEscapePressed: canvas.dismissTextInput()
+                    Text {
+                        anchors.fill: parent
+                        verticalAlignment: Text.AlignVCenter
+                        visible: parent.text.length === 0
+                        text: qsTr("Type text & press Enter…")
+                        color: KP.textSubtle
+                        font.pixelSize: KP.fontS
+                        elide: Text.ElideRight
+                    }
+                }
+            }
+            KpButton {
+                small: true
+                variant: "primary"
+                label: qsTr("OK")
+                onClicked: {
+                    if (inlineTextInput.text.trim().length > 0)
+                        canvas.applyTextAt(canvas.textInputDocPos.x, canvas.textInputDocPos.y, inlineTextInput.text)
+                    else
+                        canvas.dismissTextInput()
+                }
+            }
+        }
+    }
+
     KpMenu {
         id: canvasContextMenu
         KpMenuItem {

@@ -265,6 +265,7 @@ void WorkspaceState::applyActiveTab()
     emit documentChanged();
     emit currentFileChanged();
     emit tabsChanged();
+    emit selectionChanged();
     if (toolChanged) emit activeToolChanged(m_activeTool);
     if (zoomChanged_) emit zoomChanged(m_zoom);
 }
@@ -290,6 +291,9 @@ void WorkspaceState::addDocument(CanvasDocument* document, const QString& path,
     connectLayerDeletion(document, history);
     connect(document, &CanvasDocument::titleChanged, this, &WorkspaceState::tabsChanged);
     connect(document, &CanvasDocument::modifiedChanged, this, &WorkspaceState::tabsChanged);
+    connect(document, &CanvasDocument::selectionChanged, this, [this, document] {
+        if (m_document == document) emit selectionChanged();
+    });
     Tab tab = makeTab(document, history, path);
     if (prepare) prepare(tab);
     m_tabs.push_back(tab);
@@ -520,7 +524,7 @@ void WorkspaceState::setActiveTool(const QString& tool)
 
 void WorkspaceState::setDefaultTool(const QString& tool)
 {
-    const bool supported = m_subTools->paints(tool) || tool == QStringLiteral("zoom")
+    const bool supported = m_subTools->usesSubTools(tool) || tool == QStringLiteral("zoom")
         || tool == QStringLiteral("hand") || tool == QStringLiteral("eyedropper");
     if (!supported || m_defaultTool == tool) return;
     m_defaultTool = tool;

@@ -52,7 +52,7 @@ bool SubToolLibrary::isStrokePaintToolName(const QString& t)
 {
     return t == QStringLiteral("pen") || t == QStringLiteral("pencil") ||
            t == QStringLiteral("brush") || t == QStringLiteral("airbrush") ||
-           t == QStringLiteral("eraser");
+           t == QStringLiteral("eraser") || t == QStringLiteral("smudge");
 }
 
 bool SubToolLibrary::isKnownViewOnlyTool(const QString& t)

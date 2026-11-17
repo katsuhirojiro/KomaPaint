@@ -36,6 +36,7 @@
 #include "app/PaintMixerController.h"
 #include "app/PanelManager.h"
 #include "app/SubToolLibrary.h"
+#include "app/ToolSettings.h"
 #include "app/WorkspaceState.h"
 #include "canvas/CanvasDocument.h"
 #include "color/ColorPalette.h"
@@ -301,6 +302,7 @@ private slots:
     void brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects();
     void brushLibraryMigrationPreservesUserCollectionsAndUpgradesBuiltIns();
     void brushPanelsCanBeClosedAndComeBack();
+    void stage11ToolsAndOverlaysWorkEndToEnd();
 private:
     bool start(Running& app, const QString& name);
     void screenshot(Running& app, const QString& name);
@@ -526,9 +528,22 @@ void TestBrushUi::subToolLibraryLoadsRemembersAndResets()
     QCOMPARE(brush.size(), 24); QCOMPARE(brush.hardness(), 100);
     QVERIFY(!library.isModified());
 
-    // A tool that does not paint leaves the brush alone.
+    // A non-stroke sub-tool collection (fill) loads ToolSettings without mutating brush size.
+    ToolSettings toolSettings;
+    library.setToolSettings(&toolSettings);
     library.setTool(QStringLiteral("fill"));
     QVERIFY(!library.isPaintTool());
+    QVERIFY(library.hasCollections());
+    QVERIFY(library.subTools().size() >= 3);
+    QCOMPARE(brush.size(), 24);
+    library.select(2); // Smart Fill
+    QCOMPARE(toolSettings.executableTool(), QStringLiteral("smart_fill"));
+    QCOMPARE(brush.size(), 24);
+
+    // A view-only tool has no sub-tools and leaves the brush alone.
+    library.setTool(QStringLiteral("zoom"));
+    QVERIFY(!library.isPaintTool());
+    QVERIFY(!library.hasCollections());
     QVERIFY(library.subTools().isEmpty());
     QCOMPARE(brush.size(), 24);
     library.select(1); library.resetCurrent();     // no effect, no crash
@@ -545,15 +560,15 @@ void TestBrushUi::paletteShowsEveryToolAndSelectsOnlyWorkingOnes()
     screenshot(app, QStringLiteral("01-main-window"));
 
     // One button per supplied tool icon, all the same size, none overlapping.
+    // All 21 tools in the palette are implemented and selectable.
     QList<QRectF> cells;
-    const QStringList working = {"zoom", "hand", "eyedropper", "pen", "pencil", "brush", "airbrush", "eraser"};
     for (const QString& tool : kToolIcons) {
         auto* button = item(app, QStringLiteral("tool_") + tool);
         QVERIFY2(button, qPrintable(tool));
         QVERIFY2(button->isVisible(), qPrintable(tool));
         QCOMPARE(button->width(), 34.0); QCOMPARE(button->height(), 34.0);
         QCOMPARE(button->property("iconName").toString(), QStringLiteral("tools/") + tool);
-        QCOMPARE(button->property("available").toBool(), working.contains(tool));
+        QVERIFY2(button->property("available").toBool(), qPrintable(tool));
         const QRectF cell(button->mapToScene(QPointF(0, 0)), QSizeF(34, 34));
         for (const QRectF& other : cells) QVERIFY2(!cell.intersects(other), qPrintable(tool));
         cells << cell;
@@ -569,10 +584,14 @@ void TestBrushUi::paletteShowsEveryToolAndSelectsOnlyWorkingOnes()
     QVERIFY(item(app, QStringLiteral("tool_eraser"))->property("selected").toBool());
     QVERIFY(!item(app, QStringLiteral("tool_brush"))->property("selected").toBool());
 
-    // Tools that do nothing yet cannot be selected.
-    for (const QString& tool : {QStringLiteral("fill"), QStringLiteral("text"), QStringLiteral("lasso"), QStringLiteral("gradient")}) {
+    // Every Stage 11 tool in the palette is selectable and updates activeTool.
+    for (const QString& tool : {QStringLiteral("fill"), QStringLiteral("text"), QStringLiteral("lasso"),
+                                QStringLiteral("wand"), QStringLiteral("selection"), QStringLiteral("gradient"),
+                                QStringLiteral("move"), QStringLiteral("transform"), QStringLiteral("rectangle"),
+                                QStringLiteral("circle"), QStringLiteral("line"), QStringLiteral("curveline"),
+                                QStringLiteral("smudge")}) {
         QVERIFY(clickNamed(app, QStringLiteral("tool_") + tool));
-        QCOMPARE(ws.activeTool(), QStringLiteral("eraser"));
+        QCOMPARE(ws.activeTool(), tool);
     }
     QVERIFY(clickNamed(app, QStringLiteral("tool_pen")));
     QCOMPARE(ws.activeTool(), QStringLiteral("pen"));
@@ -582,6 +601,14 @@ void TestBrushUi::paletteShowsEveryToolAndSelectsOnlyWorkingOnes()
     app.canvasItem->forceActiveFocus();
     QTest::keyClick(app.window, Qt::Key_E);
     QTRY_COMPARE(ws.activeTool(), QStringLiteral("eraser"));
+    QTest::keyClick(app.window, Qt::Key_G);
+    QTRY_COMPARE(ws.activeTool(), QStringLiteral("fill"));
+    QTest::keyClick(app.window, Qt::Key_W);
+    QTRY_COMPARE(ws.activeTool(), QStringLiteral("wand"));
+    QTest::keyClick(app.window, Qt::Key_L);
+    QTRY_COMPARE(ws.activeTool(), QStringLiteral("lasso"));
+    QTest::keyClick(app.window, Qt::Key_M);
+    QTRY_COMPARE(ws.activeTool(), QStringLiteral("selection"));
     QTest::keyClick(app.window, Qt::Key_B);
     QTRY_COMPARE(ws.activeTool(), QStringLiteral("brush"));
     // [ and ] walk the Brush Size panel's sizes.
@@ -1338,8 +1365,11 @@ void TestBrushUi::iconsFollowTheTheme()
 
     auto* penIcon = buttonIcon(app, QStringLiteral("tool_pen"), QStringLiteral("tools/pen"));
     auto* brushIcon = buttonIcon(app, QStringLiteral("tool_brush"), QStringLiteral("tools/brush"));
+    auto* textButton = item(app, QStringLiteral("tool_text"));
     auto* unavailableIcon = buttonIcon(app, QStringLiteral("tool_text"), QStringLiteral("tools/text"));
-    QVERIFY(penIcon && brushIcon && unavailableIcon);
+    QVERIFY(penIcon && brushIcon && textButton && unavailableIcon);
+    textButton->setProperty("available", false);
+    QCoreApplication::processEvents();
 
     const QColor darkNormal = theme->property("iconNormal").value<QColor>();
     const QColor darkHover = theme->property("iconHover").value<QColor>();
@@ -1368,7 +1398,9 @@ void TestBrushUi::iconsFollowTheTheme()
     // The palette draws each state with the right tint.
     QCOMPARE(shownColour(penIcon), darkNormal);
     QCOMPARE(shownColour(brushIcon), darkSelected);      // brush is the current tool
-    QCOMPARE(shownColour(unavailableIcon), darkDisabled); // "Text" is not implemented yet
+    QCOMPARE(shownColour(unavailableIcon), darkDisabled);
+    textButton->setProperty("available", true);
+    QCoreApplication::processEvents();
 
     // Hover is applied by the same button, then taken away again.
     QTest::mouseMove(app.window, centre(item(app, QStringLiteral("tool_pen"))));
@@ -2037,6 +2069,97 @@ void TestBrushUi::brushPanelsCanBeClosedAndComeBack()
     QTRY_VERIFY(item(app, QStringLiteral("subToolPanel")) != nullptr);
     QTRY_VERIFY(item(app, QStringLiteral("toolPropertyPanel")) != nullptr);
     QTRY_VERIFY(qAbs(app.canvasItem->mapToScene(QPointF(0, 0)).x() - canvasLeft) < 2.0);
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+}
+
+void TestBrushUi::stage11ToolsAndOverlaysWorkEndToEnd()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiStage11")));
+    auto& ws = app.workspace;
+    auto* layer = ws.layers()->layerAt(0);
+    QVERIFY(layer);
+
+    // 1. Rectangle shape tool draws a closed boundary on the layer
+    QVERIFY(clickNamed(app, QStringLiteral("tool_rectangle")));
+    QCOMPARE(ws.activeTool(), QStringLiteral("rectangle"));
+    ws.colors()->setForeground(QColor(20, 20, 20));
+    ws.toolSettings()->setShapeMode(QStringLiteral("stroke"));
+    ws.toolSettings()->setShapeStrokeWidth(6);
+    drag(app, {onCanvas(app, 120, 120), onCanvas(app, 320, 320)});
+    QTRY_VERIFY(alpha(app, 120, 120) > 200);
+    QCOMPARE(alpha(app, 220, 220), 0); // interior still transparent
+
+    // 2. Smart Fill with previewBeforeCommit shows HUD, previews, then commits on button click
+    QVERIFY(clickNamed(app, QStringLiteral("tool_fill")));
+    ws.subTools()->select(2); // Smart Fill
+    QCOMPARE(ws.toolSettings()->executableTool(), QStringLiteral("smart_fill"));
+    QVERIFY(ws.toolSettings()->previewBeforeCommit());
+    ws.colors()->setForeground(QColor(40, 160, 220));
+    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, onCanvas(app, 220, 220));
+    QTRY_VERIFY(app.canvas->property("hasPendingRegionPreview").toBool());
+    QTRY_VERIFY(item(app, QStringLiteral("regionPreviewHud"))->isVisible());
+    QCOMPARE(alpha(app, 220, 220), 0); // not committed yet
+    QVERIFY(clickNamed(app, QStringLiteral("commitRegionFillButton")));
+    QTRY_VERIFY(!app.canvas->property("hasPendingRegionPreview").toBool());
+    QTRY_VERIFY(alpha(app, 220, 220) > 200);
+    QCOMPARE(alpha(app, 420, 420), 0); // exterior stayed empty
+
+    // 3. Boundary-Aware Eraser protects the sampled interior while erasing exterior spill
+    QVERIFY(clickNamed(app, QStringLiteral("tool_pen")));
+    ws.colors()->setForeground(QColor(200, 60, 60));
+    ws.brush()->setSize(20);
+    drag(app, {onCanvas(app, 360, 220), onCanvas(app, 420, 220)});
+    QTRY_VERIFY(alpha(app, 380, 220) > 200);
+
+    QVERIFY(clickNamed(app, QStringLiteral("tool_eraser")));
+    ws.subTools()->select(2); // Boundary-Aware Eraser
+    QCOMPARE(ws.toolSettings()->executableTool(), QStringLiteral("boundary_eraser"));
+    QTRY_VERIFY(item(app, QStringLiteral("boundaryEraserHud"))->isVisible());
+    // Click inside filled interior to sample protected region
+    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, onCanvas(app, 220, 220));
+    QTRY_VERIFY(app.canvas->property("hasProtectedRegion").toBool());
+    // Drag across interior and exterior spill: interior stays protected, spill erases
+    ws.brush()->setSize(40);
+    drag(app, {onCanvas(app, 220, 220), onCanvas(app, 380, 220)});
+    QTRY_VERIFY(alpha(app, 220, 220) > 200);
+    QTRY_COMPARE(alpha(app, 380, 220), 0);
+    QVERIFY(clickNamed(app, QStringLiteral("clearProtectedRegionButton")));
+    QTRY_VERIFY(!app.canvas->property("hasProtectedRegion").toBool());
+
+    // 4. Selection marquee clips brush strokes strictly inside selection
+    QVERIFY(clickNamed(app, QStringLiteral("tool_selection")));
+    ws.toolSettings()->setSelectionShape(QStringLiteral("rectangle"));
+    ws.toolSettings()->setSelectionOp(QStringLiteral("replace"));
+    drag(app, {onCanvas(app, 450, 100), onCanvas(app, 550, 200)});
+    QTRY_VERIFY(ws.hasSelection());
+    QTRY_VERIFY(item(app, QStringLiteral("selectionActionHud"))->isVisible());
+
+    QVERIFY(clickNamed(app, QStringLiteral("tool_brush")));
+    ws.colors()->setForeground(QColor(30, 180, 60));
+    ws.brush()->setSize(30);
+    drag(app, {onCanvas(app, 420, 150), onCanvas(app, 580, 150)});
+    QTRY_VERIFY(alpha(app, 500, 150) > 200); // inside selection
+    QCOMPARE(alpha(app, 425, 150), 0);     // clipped outside selection
+    ws.deselect();
+    QVERIFY(!ws.hasSelection());
+
+    // 5. Gradient, Text, and Move tools execute and support Undo
+    QVERIFY(clickNamed(app, QStringLiteral("tool_gradient")));
+    drag(app, {onCanvas(app, 460, 260), onCanvas(app, 560, 320)});
+    QTRY_VERIFY(alpha(app, 480, 290) > 0);
+    QVERIFY(ws.history()->canUndo());
+    ws.history()->undo();
+    QTRY_COMPARE(alpha(app, 480, 290), 0);
+
+    QVERIFY(clickNamed(app, QStringLiteral("tool_text")));
+    QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, onCanvas(app, 120, 420));
+    QTRY_VERIFY(app.canvas->property("textInputRequested").toBool());
+    QVERIFY(QMetaObject::invokeMethod(app.canvas, "applyTextAt",
+                                      Q_ARG(qreal, 120.0), Q_ARG(qreal, 420.0),
+                                      Q_ARG(QString, QStringLiteral("Hi"))));
+    QTRY_VERIFY(!app.canvas->property("textInputRequested").toBool());
+
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 

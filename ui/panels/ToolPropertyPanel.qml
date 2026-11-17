@@ -17,15 +17,17 @@ Rectangle {
     color: KP.paneBg
 
     readonly property var brush: Workspace.brush
+    readonly property var ts: Workspace.toolSettings
     readonly property var library: Workspace.subTools
     readonly property var doc: Workspace.document
     readonly property bool painting: library.paintTool
+    readonly property bool hasSubToolProps: library.hasCollections && !painting
     readonly property bool realisticEngine: Workspace.realisticEngine
     function hint(tool) {
         if (tool === "zoom") return qsTr("Click to zoom in. Alt-click or right-click to zoom out.")
         if (tool === "hand") return qsTr("Drag to move the view.")
         if (tool === "eyedropper") return qsTr("Click or drag on the artwork to pick the drawing colour.")
-        return qsTr("This tool is not available yet.")
+        return qsTr("Select a tool to adjust its properties.")
     }
 
     ColumnLayout {
@@ -898,6 +900,85 @@ Rectangle {
                 }
 
                 PanelSection {
+                    objectName: "boundaryEraserSection"
+                    width: parent.width
+                    title: qsTr("Boundary-Aware Cleanup")
+                    hint: qsTr("protect interior")
+                    visible: Workspace.activeTool === "eraser"
+                             && panel.ts !== null
+                             && panel.ts.executableTool === "boundary_eraser"
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+
+                    Item {
+                        width: parent.width
+                        height: boundaryCol.height
+                        Column {
+                            id: boundaryCol
+                            width: parent.width
+                            spacing: KP.gapXS
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                spacing: KP.gapS
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Reference")
+                                    color: KP.text
+                                    font.pixelSize: KP.fontS + 1
+                                }
+                                SegmentedChoice {
+                                    Layout.preferredWidth: 150
+                                    options: [qsTr("Layer"), qsTr("All"), qsTr("Sel")]
+                                    currentIndex: {
+                                        if (!panel.ts) return 1
+                                        if (panel.ts.referenceMode === "current") return 0
+                                        if (panel.ts.referenceMode === "selected_and_below") return 2
+                                        return 1
+                                    }
+                                    onChosen: function(idx) {
+                                        if (panel.ts) panel.ts.referenceMode = ["current", "visible", "selected_and_below"][idx]
+                                    }
+                                }
+                            }
+                            PropertySlider {
+                                width: parent.width
+                                label: qsTr("Boundary sensitivity")
+                                unit: "%"
+                                from: 0; to: 100
+                                value: panel.ts ? panel.ts.boundarySensitivity : 65
+                                onEdited: function(v) { if (panel.ts) panel.ts.boundarySensitivity = v }
+                            }
+                            PropertySlider {
+                                width: parent.width
+                                label: qsTr("Gap tolerance")
+                                unit: "px"
+                                from: 0; to: 32
+                                value: panel.ts ? panel.ts.gapClosing : 8
+                                onEdited: function(v) { if (panel.ts) panel.ts.gapClosing = v }
+                            }
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                spacing: KP.gapM
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: qsTr("Conservative rim")
+                                    color: KP.text
+                                    font.pixelSize: KP.fontS + 1
+                                }
+                                SegmentedChoice {
+                                    Layout.preferredWidth: 112
+                                    options: [qsTr("Off"), qsTr("On")]
+                                    currentIndex: (!panel.ts || panel.ts.conservativeBoundary) ? 1 : 0
+                                    onChosen: function(idx) { if (panel.ts) panel.ts.conservativeBoundary = (idx === 1) }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                PanelSection {
                     width: parent.width
                     title: qsTr("Correction")
                     hint: qsTr("stabilisation")
@@ -926,11 +1007,365 @@ Rectangle {
             }
         }
 
-        // ---- A tool without brush properties
+        // ---- Universal Intelligent / Selection / Shape / Gradient / Text tool properties
+        Flickable {
+            id: toolPropScroll
+            objectName: "nonStrokePropertyScroll"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: panel.hasSubToolProps
+            clip: true
+            contentWidth: width
+            contentHeight: toolPropsCol.height + 2 * KP.gapM
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: KpScrollBar {
+                policy: toolPropScroll.contentHeight > toolPropScroll.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+            }
+
+            Column {
+                id: toolPropsCol
+                x: KP.panelInset
+                y: KP.gapS
+                width: toolPropScroll.width - 2 * KP.panelInset
+                spacing: KP.gapS
+
+                readonly property string t: Workspace.activeTool
+                readonly property string exec: panel.ts ? panel.ts.executableTool : t
+                readonly property bool isRegionTool: t === "fill" || t === "wand"
+                readonly property bool isSmartFill: exec === "smart_fill"
+                readonly property bool isSelectionTool: t === "selection" || t === "lasso" || t === "wand"
+                readonly property bool isShapeTool: t === "line" || t === "curveline" || t === "rectangle" || t === "circle"
+
+                Rectangle {
+                    width: parent.width
+                    height: 28
+                    radius: KP.radiusS
+                    color: KP.paneBgAlt
+                    border.width: 1
+                    border.color: KP.hairline
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: KP.gapS
+                        anchors.rightMargin: KP.gapS
+                        Text {
+                            Layout.fillWidth: true
+                            text: panel.library.currentName || toolPropsCol.t
+                            color: KP.text
+                            font.pixelSize: KP.fontXS
+                            font.weight: Font.DemiBold
+                            elide: Text.ElideRight
+                        }
+                        IconButton {
+                            glyph: "reset"
+                            iconSize: 12
+                            cell: 20
+                            tooltip: qsTr("Return this preset to its default settings")
+                            enabled: panel.library.modified && panel.library.currentBrushBuiltIn
+                            onActivated: panel.library.resetCurrent()
+                        }
+                    }
+                }
+
+                // Region Reference & Detection (Fill, Smart Fill, Wand, Magnetic Lasso)
+                PanelSection {
+                    width: parent.width
+                    title: toolPropsCol.isSmartFill ? qsTr("Smart Region Analysis") : qsTr("Detection & Reference")
+                    visible: toolPropsCol.isRegionTool || (toolPropsCol.t === "lasso" && panel.ts && panel.ts.lassoMode === "magnetic")
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+                    Item {
+                        width: parent.width
+                        height: regionCol.height
+                        Column {
+                            id: regionCol
+                            width: parent.width
+                            spacing: KP.gapXS
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                spacing: KP.gapS
+                                Text { Layout.fillWidth: true; text: qsTr("Reference"); color: KP.text; font.pixelSize: KP.fontS + 1 }
+                                SegmentedChoice {
+                                    Layout.preferredWidth: 150
+                                    options: [qsTr("Layer"), qsTr("All"), qsTr("Sel")]
+                                    currentIndex: {
+                                        if (!panel.ts) return 1
+                                        if (panel.ts.referenceMode === "current") return 0
+                                        if (panel.ts.referenceMode === "selected_and_below") return 2
+                                        return 1
+                                    }
+                                    onChosen: function(idx) {
+                                        if (panel.ts) panel.ts.referenceMode = ["current", "visible", "selected_and_below"][idx]
+                                    }
+                                }
+                            }
+                            PropertySlider {
+                                objectName: "toolToleranceSlider"
+                                width: parent.width
+                                visible: toolPropsCol.isRegionTool
+                                label: qsTr("Color tolerance")
+                                from: 0; to: 255
+                                value: panel.ts ? panel.ts.tolerance : 28
+                                onEdited: function(v) { if (panel.ts) panel.ts.tolerance = v }
+                            }
+                            PropertySlider {
+                                objectName: "toolBoundarySensitivitySlider"
+                                width: parent.width
+                                visible: toolPropsCol.isSmartFill || toolPropsCol.t === "wand"
+                                label: qsTr("Boundary sensitivity")
+                                unit: "%"
+                                from: 0; to: 100
+                                value: panel.ts ? panel.ts.boundarySensitivity : 65
+                                onEdited: function(v) { if (panel.ts) panel.ts.boundarySensitivity = v }
+                            }
+                            PropertySlider {
+                                objectName: "toolGapClosingSlider"
+                                width: parent.width
+                                visible: toolPropsCol.isRegionTool
+                                label: toolPropsCol.isSmartFill ? qsTr("Gap tolerance") : qsTr("Close gap")
+                                unit: "px"
+                                from: 0; to: 32
+                                value: panel.ts ? panel.ts.gapClosing : 0
+                                onEdited: function(v) { if (panel.ts) panel.ts.gapClosing = v }
+                            }
+                            PropertySlider {
+                                objectName: "toolAreaScalingSlider"
+                                width: parent.width
+                                visible: toolPropsCol.isRegionTool
+                                label: qsTr("Area scaling")
+                                unit: "px"
+                                from: -16; to: 16
+                                value: panel.ts ? panel.ts.areaScaling : 1
+                                onEdited: function(v) { if (panel.ts) panel.ts.areaScaling = v }
+                            }
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                visible: toolPropsCol.isRegionTool
+                                Text { Layout.fillWidth: true; text: qsTr("Contiguous"); color: KP.text; font.pixelSize: KP.fontS + 1 }
+                                SegmentedChoice {
+                                    Layout.preferredWidth: 112
+                                    options: [qsTr("All"), qsTr("Region")]
+                                    currentIndex: (!panel.ts || panel.ts.contiguous) ? 1 : 0
+                                    onChosen: function(idx) { if (panel.ts) panel.ts.contiguous = (idx === 1) }
+                                }
+                            }
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                visible: toolPropsCol.isSmartFill
+                                Text { Layout.fillWidth: true; text: qsTr("Preview before commit"); color: KP.text; font.pixelSize: KP.fontS + 1 }
+                                SegmentedChoice {
+                                    Layout.preferredWidth: 112
+                                    options: [qsTr("Instant"), qsTr("Preview")]
+                                    currentIndex: (panel.ts && panel.ts.previewBeforeCommit) ? 1 : 0
+                                    onChosen: function(idx) { if (panel.ts) panel.ts.previewBeforeCommit = (idx === 1) }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Selection Options (Selection / Lasso / Wand)
+                PanelSection {
+                    width: parent.width
+                    title: qsTr("Selection")
+                    visible: toolPropsCol.isSelectionTool
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+                    Item {
+                        width: parent.width
+                        height: selCol.height
+                        Column {
+                            id: selCol
+                            width: parent.width
+                            spacing: KP.gapXS
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                Text { Layout.fillWidth: true; text: qsTr("Mode"); color: KP.text; font.pixelSize: KP.fontS + 1 }
+                                SegmentedChoice {
+                                    Layout.preferredWidth: 170
+                                    options: [qsTr("New"), qsTr("Add"), qsTr("Sub"), qsTr("Int")]
+                                    currentIndex: {
+                                        if (!panel.ts) return 0
+                                        if (panel.ts.selectionOp === "add") return 1
+                                        if (panel.ts.selectionOp === "subtract") return 2
+                                        if (panel.ts.selectionOp === "intersect") return 3
+                                        return 0
+                                    }
+                                    onChosen: function(idx) {
+                                        if (!panel.ts) return
+                                        panel.ts.selectionOp = ["replace", "add", "subtract", "intersect"][idx]
+                                    }
+                                }
+                            }
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                visible: toolPropsCol.t === "selection"
+                                Text { Layout.fillWidth: true; text: qsTr("Shape"); color: KP.text; font.pixelSize: KP.fontS + 1 }
+                                SegmentedChoice {
+                                    Layout.preferredWidth: 140
+                                    options: [qsTr("Rect"), qsTr("Ellipse")]
+                                    currentIndex: (panel.ts && panel.ts.selectionShape === "ellipse") ? 1 : 0
+                                    onChosen: function(idx) { if (panel.ts) panel.ts.selectionShape = idx === 1 ? "ellipse" : "rectangle" }
+                                }
+                            }
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                visible: toolPropsCol.t === "lasso"
+                                Text { Layout.fillWidth: true; text: qsTr("Lasso"); color: KP.text; font.pixelSize: KP.fontS + 1 }
+                                SegmentedChoice {
+                                    Layout.preferredWidth: 168
+                                    options: [qsTr("Free"), qsTr("Poly"), qsTr("Mag")]
+                                    currentIndex: {
+                                        if (!panel.ts) return 0
+                                        if (panel.ts.lassoMode === "polygonal") return 1
+                                        if (panel.ts.lassoMode === "magnetic") return 2
+                                        return 0
+                                    }
+                                    onChosen: function(idx) {
+                                        if (panel.ts) panel.ts.lassoMode = ["freehand", "polygonal", "magnetic"][idx]
+                                    }
+                                }
+                            }
+                            PropertySlider {
+                                width: parent.width
+                                visible: toolPropsCol.t === "lasso" && panel.ts && panel.ts.lassoMode === "magnetic"
+                                label: qsTr("Edge snap strength")
+                                unit: "%"
+                                from: 0; to: 100
+                                value: panel.ts ? panel.ts.magneticStrength : 65
+                                onEdited: function(v) { if (panel.ts) panel.ts.magneticStrength = v }
+                            }
+                            PropertySlider {
+                                width: parent.width
+                                label: qsTr("Feather")
+                                unit: "px"
+                                from: 0; to: 64
+                                value: panel.ts ? panel.ts.feather : 0
+                                onEdited: function(v) { if (panel.ts) panel.ts.feather = v }
+                            }
+                            RowLayout {
+                                width: parent.width
+                                spacing: KP.gapXS
+                                KpButton { Layout.fillWidth: true; small: true; label: qsTr("All"); onClicked: Workspace.selectAll() }
+                                KpButton { Layout.fillWidth: true; small: true; label: qsTr("Invert"); enabled: Workspace.hasSelection; onClicked: Workspace.invertSelection() }
+                                KpButton { Layout.fillWidth: true; small: true; label: qsTr("Deselect"); enabled: Workspace.hasSelection; onClicked: Workspace.deselect() }
+                            }
+                        }
+                    }
+                }
+
+                // Gradient Options
+                PanelSection {
+                    width: parent.width
+                    title: qsTr("Gradient")
+                    visible: toolPropsCol.t === "gradient"
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+                    RowLayout {
+                        width: parent.width
+                        height: KP.controlHeight
+                        Text { Layout.fillWidth: true; text: qsTr("Type"); color: KP.text; font.pixelSize: KP.fontS + 1 }
+                        SegmentedChoice {
+                            Layout.preferredWidth: 140
+                            options: [qsTr("Linear"), qsTr("Radial")]
+                            currentIndex: (panel.ts && panel.ts.gradientType === "radial") ? 1 : 0
+                            onChosen: function(idx) { if (panel.ts) panel.ts.gradientType = idx === 1 ? "radial" : "linear" }
+                        }
+                    }
+                }
+
+                // Shape Options
+                PanelSection {
+                    width: parent.width
+                    title: qsTr("Shape")
+                    visible: toolPropsCol.isShapeTool
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+                    Item {
+                        width: parent.width
+                        height: shapeCol.height
+                        Column {
+                            id: shapeCol
+                            width: parent.width
+                            spacing: KP.gapXS
+                            RowLayout {
+                                width: parent.width
+                                height: KP.controlHeight
+                                visible: toolPropsCol.t === "rectangle" || toolPropsCol.t === "circle"
+                                Text { Layout.fillWidth: true; text: qsTr("Style"); color: KP.text; font.pixelSize: KP.fontS + 1 }
+                                SegmentedChoice {
+                                    Layout.preferredWidth: 165
+                                    options: [qsTr("Line"), qsTr("Fill"), qsTr("Both")]
+                                    currentIndex: {
+                                        if (!panel.ts) return 0
+                                        if (panel.ts.shapeMode === "fill") return 1
+                                        if (panel.ts.shapeMode === "both") return 2
+                                        return 0
+                                    }
+                                    onChosen: function(idx) {
+                                        if (panel.ts) panel.ts.shapeMode = ["stroke", "fill", "both"][idx]
+                                    }
+                                }
+                            }
+                            PropertySlider {
+                                width: parent.width
+                                label: qsTr("Stroke width")
+                                unit: "px"
+                                from: 1; to: 128
+                                value: panel.ts ? panel.ts.shapeStrokeWidth : 4
+                                onEdited: function(v) { if (panel.ts) panel.ts.shapeStrokeWidth = v }
+                            }
+                        }
+                    }
+                }
+
+                // Text Options
+                PanelSection {
+                    width: parent.width
+                    title: qsTr("Text")
+                    visible: toolPropsCol.t === "text"
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+                    PropertySlider {
+                        width: parent.width
+                        label: qsTr("Font size")
+                        unit: "px"
+                        from: 8; to: 200
+                        value: panel.ts ? panel.ts.fontSize : 28
+                        onEdited: function(v) { if (panel.ts) panel.ts.fontSize = v }
+                    }
+                }
+
+                // Move / Transform Options
+                PanelSection {
+                    width: parent.width
+                    title: toolPropsCol.t === "transform" ? qsTr("Transform") : qsTr("Move")
+                    visible: toolPropsCol.t === "move" || toolPropsCol.t === "transform"
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+                    Text {
+                        width: parent.width
+                        text: Workspace.hasSelection
+                              ? qsTr("Drag on the canvas to move the active selection and its pixels.")
+                              : qsTr("Drag on the canvas to reposition the active layer artwork.")
+                        color: KP.textMuted
+                        font.pixelSize: KP.fontXS
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+        }
+
+        // ---- A view/eyedropper tool without sub-tool properties
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: !panel.painting
+            visible: !panel.painting && !panel.hasSubToolProps
             ColumnLayout {
                 anchors.centerIn: parent
                 width: Math.min(parent.width - 2 * KP.panelInset, 260)

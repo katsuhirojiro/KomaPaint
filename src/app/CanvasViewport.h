@@ -5,6 +5,8 @@
 #include "../input/PointerInput.h"
 #include "../input/WinTabBackend.h"
 #include "../material/MaterialEngine.h"
+#include "../region/RegionEngine.h"
+#include "CanvasToolExecutor.h"
 #include <array>
 #include <memory>
 #include <QQuickPaintedItem>
@@ -33,6 +35,7 @@ class TabletInputSettings;
 class BrushSettings;
 class CanvasDocument;
 class Layer;
+class ToolSettings;
 class UndoStack;
 class CanvasViewport : public QQuickPaintedItem {
     Q_OBJECT
@@ -40,8 +43,17 @@ class CanvasViewport : public QQuickPaintedItem {
     Q_PROPERTY(QObject* history READ history WRITE setHistory NOTIFY historyChanged)
     Q_PROPERTY(QObject* inputSettings READ inputSettings WRITE setInputSettings NOTIFY inputSettingsChanged)
     Q_PROPERTY(QObject* brushSettings READ brushSettings WRITE setBrushSettings NOTIFY brushSettingsChanged)
+    Q_PROPERTY(QObject* toolSettings READ toolSettings WRITE setToolSettings NOTIFY toolSettingsChanged)
     Q_PROPERTY(QColor brushColor READ brushColor WRITE setBrushColor NOTIFY brushColorChanged)
     Q_PROPERTY(QString activeTool READ activeTool WRITE setActiveTool NOTIFY activeToolChanged)
+    Q_PROPERTY(bool hasPendingRegionPreview READ hasPendingRegionPreview NOTIFY regionPreviewChanged)
+    Q_PROPERTY(QString regionPreviewStatus READ regionPreviewStatus NOTIFY regionPreviewChanged)
+    Q_PROPERTY(qreal regionPreviewConfidence READ regionPreviewConfidence NOTIFY regionPreviewChanged)
+    Q_PROPERTY(bool hasProtectedRegion READ hasProtectedRegion NOTIFY protectedRegionChanged)
+    Q_PROPERTY(QString protectedRegionStatus READ protectedRegionStatus NOTIFY protectedRegionChanged)
+    Q_PROPERTY(bool textInputRequested READ textInputRequested NOTIFY textInputStateChanged)
+    Q_PROPERTY(QPointF textInputDocPos READ textInputDocPos NOTIFY textInputStateChanged)
+    Q_PROPERTY(QPointF textInputViewPos READ textInputViewPos NOTIFY textInputStateChanged)
     Q_PROPERTY(qreal zoom READ zoom WRITE setZoom NOTIFY zoomChanged)
     Q_PROPERTY(qreal viewRotation READ viewRotation WRITE setViewRotation NOTIFY viewRotationChanged)
     // Document point shown at the centre of the viewport. Together with zoom
@@ -73,6 +85,8 @@ public:
     void setInputSettings(QObject* settings);
     QObject* brushSettings() const;
     void setBrushSettings(QObject* settings);
+    QObject* toolSettings() const;
+    void setToolSettings(QObject* settings);
     QColor brushColor() const { return m_brushColor; }
     void setBrushColor(const QColor& color);
     QString activeTool() const { return m_activeTool; }
@@ -112,6 +126,32 @@ public:
     Q_INVOKABLE void continueStroke(qreal x, qreal y, qreal pressure);
     Q_INVOKABLE void endStroke(qreal x, qreal y, qreal pressure);
     Q_INVOKABLE void cancelStroke();
+
+    // Intelligent region, fill, selection, cleanup, gradient, shape, move/transform & text invokables
+    bool hasPendingRegionPreview() const { return m_hasPendingRegion; }
+    QString regionPreviewStatus() const { return m_regionPreviewStatus; }
+    qreal regionPreviewConfidence() const { return m_pendingRegion.confidence; }
+    bool hasProtectedRegion() const { return m_hasProtectedRegion; }
+    QString protectedRegionStatus() const { return m_protectedRegionStatus; }
+    bool textInputRequested() const { return m_textInputRequested; }
+    QPointF textInputDocPos() const { return m_textInputDocPos; }
+    QPointF textInputViewPos() const;
+
+    Q_INVOKABLE bool applyFillAt(qreal docX, qreal docY);
+    Q_INVOKABLE bool commitPendingRegionFill();
+    Q_INVOKABLE void cancelPendingRegionFill();
+    Q_INVOKABLE bool applyMagicWandAt(qreal docX, qreal docY, int opOverride = -1);
+    Q_INVOKABLE bool sampleProtectedRegionAt(qreal docX, qreal docY);
+    Q_INVOKABLE void clearProtectedRegion();
+    Q_INVOKABLE bool applyGradient(qreal x0, qreal y0, qreal x1, qreal y1);
+    Q_INVOKABLE bool applyShape(const QString& shapeType, qreal x0, qreal y0, qreal x1, qreal y1,
+                                qreal ctrlX = 0.0, qreal ctrlY = 0.0);
+    Q_INVOKABLE bool applyTextAt(qreal docX, qreal docY, const QString& text);
+    Q_INVOKABLE void dismissTextInput();
+    Q_INVOKABLE bool clearSelectedContent();
+    Q_INVOKABLE bool applyMoveDelta(qreal dx, qreal dy);
+    Q_INVOKABLE bool applyTransformRect(qreal scaleX, qreal scaleY, qreal rotationDeg,
+                                        qreal translateX, qreal translateY);
     // Colour of the composed artwork under a viewport position, as an opaque
     // QColor. Empty (undefined in QML) outside the document and where the
     // artwork is fully transparent, so the eyedropper never picks the desk or
@@ -131,8 +171,12 @@ signals:
     void historyChanged();
     void inputSettingsChanged();
     void brushSettingsChanged();
+    void toolSettingsChanged();
     void brushColorChanged();
     void activeToolChanged();
+    void regionPreviewChanged();
+    void protectedRegionChanged();
+    void textInputStateChanged();
     void zoomChanged();
     void viewRotationChanged();
     void zoomRequested(qreal zoom);
@@ -149,6 +193,7 @@ protected:
     void mousePressEvent(QMouseEvent* e) override;
     void mouseMoveEvent(QMouseEvent* e) override;
     void mouseReleaseEvent(QMouseEvent* e) override;
+    void mouseDoubleClickEvent(QMouseEvent* e) override;
     void mouseUngrabEvent() override;
     void hoverEnterEvent(QHoverEvent* e) override;
     void hoverMoveEvent(QHoverEvent* e) override;
@@ -174,6 +219,12 @@ private:
     void updateCursorState(const input::PointerSample& sample, bool visible);
     void clearCursorState();
     bool activeToolIsPaintable() const;
+    bool activeToolUsesStrokeEngine() const;
+    bool isBoundaryEraserActive() const;
+    void handleInteractiveToolSample(const input::PointerSample& sample);
+    void finalizePolygonLasso();
+    void rebuildSelectionOverlayCache();
+    void paintOverlays(QPainter* painter);
     void processArbiterResult(const input::ProcessResult& res);
     void handleTabletEvent(QTabletEvent* e);
     void handleTouchNavigation(const QTouchEvent* e);
@@ -193,12 +244,39 @@ private:
     QPointer<UndoStack> m_history;
     QPointer<input::TabletInputSettings> m_inputSettings;
     QPointer<BrushSettings> m_brushSettings;
+    QPointer<ToolSettings> m_toolSettings;
     QColor m_brushColor = QColor(Qt::black);
     QString m_activeTool = QStringLiteral("brush");
     QPointer<Layer> m_strokeLayer;
     std::unique_ptr<BrushStroke> m_stroke;
     std::unique_ptr<material::MaterialStroke> m_materialStroke;
     std::unique_ptr<material::BrushReservoir> m_materialReservoir;
+    PixelMaskContext m_strokeMaskContext{};
+    region::RegionEngine m_regionEngine;
+    region::RegionResult m_pendingRegion;
+    bool m_hasPendingRegion = false;
+    QString m_regionPreviewStatus;
+    region::RegionResult m_protectedRegion;
+    bool m_hasProtectedRegion = false;
+    QString m_protectedRegionStatus;
+    QImage m_pendingRegionOverlay;
+    QImage m_protectedRegionOverlay;
+    QImage m_selectionOutlineOverlay;
+    std::uint64_t m_cachedSelectionRevision = 0;
+    QTimer* m_antsTimer = nullptr;
+    int m_antsPhase = 0;
+
+    // Interactive non-stroke tool drag/polygon state
+    bool m_toolDragActive = false;
+    QPointF m_toolDragStartDoc;
+    QPointF m_toolDragEndDoc;
+    std::vector<region::Vec2> m_lassoPoints;
+    std::vector<region::Vec2> m_lassoPreviewSegment;
+    bool m_lassoPolygonalActive = false;
+    bool m_curveBendStage = false;
+    QPointF m_curveCtrlDoc;
+    bool m_textInputRequested = false;
+    QPointF m_textInputDocPos;
     quint64 m_loadedMixtureRevision = 0;
     QTimer* m_materialTimer = nullptr;
     QTimer* m_diagnosticsTimer = nullptr;

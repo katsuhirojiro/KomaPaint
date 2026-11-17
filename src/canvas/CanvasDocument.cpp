@@ -63,7 +63,11 @@ void CanvasDocument::setWidth(int w)
     if (!validSize(QSize(w, height())) || w == m_size.width()) return;
     if (!m_layers->resizeEmptyLayers(QSize(w, height()))) return;
     m_size.setWidth(w);
+    m_selection.reset(w, m_size.height());
+    m_selectionUndo.clear();
+    m_selectionRedo.clear();
     emit sizeChanged();
+    emit selectionChanged();
 }
 
 void CanvasDocument::setHeight(int h)
@@ -71,7 +75,11 @@ void CanvasDocument::setHeight(int h)
     if (!validSize(QSize(width(), h)) || h == m_size.height()) return;
     if (!m_layers->resizeEmptyLayers(QSize(width(), h))) return;
     m_size.setHeight(h);
+    m_selection.reset(m_size.width(), h);
+    m_selectionUndo.clear();
+    m_selectionRedo.clear();
     emit sizeChanged();
+    emit selectionChanged();
 }
 
 void CanvasDocument::setSize(const QSize& size)
@@ -79,7 +87,11 @@ void CanvasDocument::setSize(const QSize& size)
     if (!validSize(size) || size == m_size) return;
     if (!m_layers->resizeEmptyLayers(size)) return;
     m_size = size;
+    m_selection.reset(size.width(), size.height());
+    m_selectionUndo.clear();
+    m_selectionRedo.clear();
     emit sizeChanged();
+    emit selectionChanged();
 }
 
 void CanvasDocument::setDpi(qreal dpi)
@@ -242,6 +254,89 @@ void CanvasDocument::setSurfaceRewetting(int value)
     if (std::abs(m_surface.rewetting - next) <= 1e-9) return;
     m_surface.rewetting = next;
     emit surfaceChanged();
+}
+
+QRectF CanvasDocument::selectionBounds() const
+{
+    const auto b = m_selection.bounds();
+    if (b.empty()) return {};
+    return QRectF(static_cast<qreal>(b.x), static_cast<qreal>(b.y),
+                  static_cast<qreal>(b.width), static_cast<qreal>(b.height));
+}
+
+void CanvasDocument::pushSelectionSnapshot()
+{
+    m_selectionUndo.push_back(m_selection.snapshot());
+    if (m_selectionUndo.size() > 64) {
+        m_selectionUndo.erase(m_selectionUndo.begin());
+    }
+    m_selectionRedo.clear();
+}
+
+bool CanvasDocument::undoSelection()
+{
+    if (m_selectionUndo.empty()) return false;
+    m_selectionRedo.push_back(m_selection.snapshot());
+    m_selection.restore(m_selectionUndo.back());
+    m_selectionUndo.pop_back();
+    emit selectionChanged();
+    return true;
+}
+
+bool CanvasDocument::redoSelection()
+{
+    if (m_selectionRedo.empty()) return false;
+    m_selectionUndo.push_back(m_selection.snapshot());
+    m_selection.restore(m_selectionRedo.back());
+    m_selectionRedo.pop_back();
+    emit selectionChanged();
+    return true;
+}
+
+void CanvasDocument::selectAll()
+{
+    pushSelectionSnapshot();
+    m_selection.selectAll();
+    emit selectionChanged();
+}
+
+void CanvasDocument::deselect()
+{
+    if (m_selection.empty()) return;
+    pushSelectionSnapshot();
+    m_selection.clear();
+    emit selectionChanged();
+}
+
+void CanvasDocument::invertSelection()
+{
+    pushSelectionSnapshot();
+    m_selection.invert();
+    emit selectionChanged();
+}
+
+void CanvasDocument::expandSelection(int radiusPx)
+{
+    if (m_selection.empty() || radiusPx <= 0) return;
+    pushSelectionSnapshot();
+    m_selection.expand(radiusPx);
+    emit selectionChanged();
+}
+
+void CanvasDocument::contractSelection(int radiusPx)
+{
+    if (m_selection.empty() || radiusPx <= 0) return;
+    pushSelectionSnapshot();
+    m_selection.contract(radiusPx);
+    emit selectionChanged();
+}
+
+void CanvasDocument::featherSelection(int radiusPx)
+{
+    if (m_selection.empty() || radiusPx <= 0) return;
+    pushSelectionSnapshot();
+    m_selection.feather(radiusPx);
+    emit selectionChanged();
 }
 
 }  // namespace komapaint

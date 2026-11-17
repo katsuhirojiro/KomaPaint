@@ -16,7 +16,7 @@ Item {
 
     // Tools implemented by CanvasWorkspace itself.
     readonly property var viewTools: ["zoom", "hand", "eyedropper"]
-    function isAvailable(tool) { return Workspace.subTools.paints(tool) || viewTools.indexOf(tool) >= 0 }
+    function isAvailable(tool) { return Workspace.subTools.usesSubTools(tool) || viewTools.indexOf(tool) >= 0 }
     function labelFor(tool) {
         for (let g = 0; g < groups.length; ++g)
             for (let i = 0; i < groups[g].length; ++i)
