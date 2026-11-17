@@ -141,12 +141,45 @@ void TestTabletViewport::tabletPenEraserTiltRotationAndUndo()
     QVERIFY((afterErase >> 24U) < (painted >> 24U));
 
     // Undo restores erased paint, undo again clears pen stroke cleanly.
-    QVERIFY(history.undo());
+    history.undo();
     QCOMPARE(tiles.pixel({qRound(midDoc.x()), qRound(midDoc.y())}).value_or(0), painted);
-    QVERIFY(history.undo());
+    history.undo();
     QCOMPARE(tiles.pixel({qRound(midDoc.x()), qRound(midDoc.y())}).value_or(0), 0U);
-    QVERIFY(history.redo());
+    history.redo();
     QCOMPARE(tiles.pixel({qRound(midDoc.x()), qRound(midDoc.y())}).value_or(0), painted);
+
+    // 4. Realistic material brush stroke via QTabletEvent with tilt, speed & rotation.
+    brush.setBrushEngine(QStringLiteral("realistic"));
+    brush.setTraditionalMedia(true);
+    brush.setMediumId(QStringLiteral("gouache"));
+    brush.setMaterialPresetId(QStringLiteral("gouache-round"));
+    brush.setSize(18);
+    {
+        QTabletEvent rDown(QEvent::TabletPress, &penDev, QPointF(60, 200), QPointF(60, 200),
+                           0.65, 25.0F, 12.0F, 0.0, 40.0, 0.0F,
+                           Qt::NoModifier, Qt::LeftButton, Qt::LeftButton);
+        rDown.setTimestamp(300);
+        QCoreApplication::sendEvent(&view, &rDown);
+
+        QTabletEvent rMove(QEvent::TabletMove, &penDev, QPointF(140, 200), QPointF(140, 200),
+                           0.85, 32.0F, -10.0F, 0.0, 75.0, 0.0F,
+                           Qt::NoModifier, Qt::NoButton, Qt::LeftButton);
+        rMove.setTimestamp(312);
+        QCoreApplication::sendEvent(&view, &rMove);
+
+        QTabletEvent rUp(QEvent::TabletRelease, &penDev, QPointF(140, 200), QPointF(140, 200),
+                         0.0, 32.0F, -10.0F, 0.0, 75.0, 0.0F,
+                         Qt::NoModifier, Qt::LeftButton, Qt::NoButton);
+        rUp.setTimestamp(324);
+        QCoreApplication::sendEvent(&view, &rUp);
+    }
+    const QPointF matDoc = view.viewportToDocument(100, 200);
+    const auto matBatch = doc.layers()->layerAt(0)->materialTiles().batchAt(
+        {qRound(matDoc.x()), qRound(matDoc.y())});
+    QVERIFY(matBatch.has_value() && matBatch->totalMass() > 0.0);
+    history.undo();
+    QVERIFY(!doc.layers()->layerAt(0)->materialTiles().batchAt(
+        {qRound(matDoc.x()), qRound(matDoc.y())}).has_value());
 }
 
 void TestTabletViewport::tabletMissingReleaseAndSynthesizedMouseSuppression()
