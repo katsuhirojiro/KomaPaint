@@ -9,8 +9,8 @@ import "../themes"
 // Three ways to set the same value, in the order they are used:
 //   1. the readout at the top — a live disc of the actual tip, a stepper and a
 //      field, for "40 px, exactly";
-//   2. the rail underneath — drag to sweep the whole 1–256 range on a
-//      logarithmic scale, which is what the eye and hand want;
+//   2. the rail underneath — drag to sweep the whole range the engine allows
+//      (1–8192 px) on a logarithmic scale, which is what the eye and hand want;
 //   3. the ladder — the fixed sizes an artist returns to, one click each, shown
 //      as discs at their real relative size.
 //
@@ -24,8 +24,9 @@ Rectangle {
     readonly property var brush: Workspace.brush
     readonly property bool painting: Workspace.subTools.paintTool
     readonly property int columns: 7
-    // All inside the engine's range (1–256 px); the same ladder the [ and ]
-    // shortcuts walk. The host window passes the same list in.
+    // A convenience list of the sizes an artist returns to, not a limit: the
+    // readout and the rail reach the engine's full 1–8192 px range. This is the
+    // same ladder the [ and ] shortcuts walk; the host window passes it in.
     property var sizes: [1, 2, 3, 4, 5, 6, 7,
                          8, 10, 12, 15, 17, 20, 25,
                          30, 40, 50, 60, 70, 80, 100,

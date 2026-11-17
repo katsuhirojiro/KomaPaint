@@ -154,7 +154,7 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
 {
     using R = SparseTileStore::WriteResult;
     if (!valid(p) || !std::isfinite(b.size) || !std::isfinite(b.opacity) || !std::isfinite(b.flow)
-        || b.size < 1 || b.size > 256 || b.opacity < 0 || b.opacity > 1 || b.flow < 0 || b.flow > 1
+        || b.size < 1 || b.opacity < 0 || b.opacity > 1 || b.flow < 0 || b.flow > 1
         || !std::isfinite(b.hardness) || b.hardness < 0 || b.hardness > 1
         || !std::isfinite(b.aspectRatio) || !std::isfinite(b.angleRadians)
         || !std::isfinite(b.pressureSize) || !std::isfinite(b.pressureOpacity)
@@ -176,7 +176,10 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const double tiltScale = (p.hasTilt && b.tiltSize > 0.0)
         ? (1.0 + clamp01(b.tiltSize) * tiltMag * 1.5)
         : 1.0;
-    const double effectiveSize = std::clamp(b.size * sizeScale * tiltScale, 0.5, 256.0);
+    // Only a lower bound: a large brush paints whatever part of the canvas it
+    // covers, which is clipped below. The old 256 px ceiling silently failed
+    // every stroke drawn with a bigger tip.
+    const double effectiveSize = std::max(0.5, b.size * sizeScale * tiltScale);
     const double radius = effectiveSize / 2.0;
 
     const double pOpWeight = clamp01(b.pressureOpacity);
@@ -230,6 +233,12 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const unsigned colorB = b.color & 255U;
     const std::size_t tileStride = static_cast<std::size_t>(g.tileSize());
 
+    // Inside this radius a hard tip is fully covered, so the square root is only
+    // needed on the antialiased rim. The inner test is exact: (radiusPlusHalf -
+    // dist) is at least 1 there, which clamp01 turns into exactly 1.
+    const double hardInnerSq = softness > 0.0 ? -1.0
+        : (radiusPlusHalf - 1.0 > 0.0 ? (radiusPlusHalf - 1.0) * (radiusPlusHalf - 1.0) : -1.0);
+
     auto computeCoverage = [&](double dx, double dy, std::int64_t x, std::int64_t y) noexcept -> double {
         double lx = dx;
         double ly = dy;
@@ -240,9 +249,14 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
         const double sy = ly * aspect;
         const double distSq = lx * lx + sy * sy;
         if (distSq >= maxDistSq) return 0.0;
-        const double dist = std::sqrt(distSq);
-        double coverage = clamp01((radiusPlusHalf - dist) * invBand);
-        if (softness > 0.0) coverage += softness * (coverage * coverage * (3.0 - 2.0 * coverage) - coverage);
+        double coverage;
+        if (distSq <= hardInnerSq) {
+            coverage = 1.0;
+        } else {
+            const double dist = std::sqrt(distSq);
+            coverage = clamp01((radiusPlusHalf - dist) * invBand);
+            if (softness > 0.0) coverage += softness * (coverage * coverage * (3.0 - 2.0 * coverage) - coverage);
+        }
         if (coverage <= 0.0) return 0.0;
 
         switch (b.tip) {
@@ -305,7 +319,23 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
             for (std::int64_t y = y0; y < y1; ++y) {
                 const double dy = static_cast<double>(y) + 0.5 - p.y;
                 const std::size_t lyOffset = static_cast<std::size_t>(y - tileOriginY) * tileStride;
-                for (std::int64_t x = x0; x < x1; ++x) {
+                // Horizontal extent of the rotated ellipse on this row. A rotated
+                // tip keeps the full row because its span needs the general
+                // quadratic; the unrotated case covers nearly every brush.
+                std::int64_t rowBegin = x0, rowEnd = x1;
+                if (!hasRotation) {
+                    const double axis = dy * aspect;
+                    const double remaining = maxDistSq - axis * axis;
+                    if (remaining <= 0.0) continue;
+                    const double halfSpan = std::sqrt(remaining);
+                    // One extra pixel on each side keeps the exact coverage test
+                    // inside the loop authoritative.
+                    const double lo = p.x - halfSpan - 0.5;
+                    const double hi = p.x + halfSpan - 0.5;
+                    rowBegin = std::max(x0, static_cast<std::int64_t>(std::ceil(lo)) - 1);
+                    rowEnd = std::min(x1, static_cast<std::int64_t>(std::floor(hi)) + 2);
+                }
+                for (std::int64_t x = rowBegin; x < rowEnd; ++x) {
                     double coverage = computeCoverage(static_cast<double>(x) + 0.5 - p.x, dy, x, y);
                     if (coverage <= 0.0) continue;
                     if (b.pixelMask) {
@@ -361,7 +391,7 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
 
 BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush) : m_store(store), m_brush(brush) {
     if (std::isfinite(brush.size) && std::isfinite(brush.spacing)
-        && brush.size >= 1 && brush.size <= 256 && brush.spacing >= 0.05 && brush.spacing <= 0.5) {
+        && brush.size >= 1 && brush.spacing >= 0.05 && brush.spacing <= 0.5) {
         m_spacing = std::max(0.25, brush.size * brush.spacing);
     } else {
         m_failed = true;

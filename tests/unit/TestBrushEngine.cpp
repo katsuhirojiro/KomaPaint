@@ -170,5 +170,29 @@ int main() {
         CHECK((smeared >> 24) > 0);
         CHECK(((smeared >> 16) & 255U) > (smeared & 255U));
     }
+    // Brush size is not capped: wide washes and background blocking need tips
+    // far larger than the old 256 px ceiling, which used to reject the stroke.
+    {
+        SparseTileStore wide(600, 600, 64);
+        BrushDefinition big;
+        big.size = 400; big.hardness = 1.0; big.color = 0xff00ff00; big.spacing = 0.15;
+        BrushStroke wideStroke(wide, big);
+        CHECK(wideStroke.begin({300, 300, 1.0}));
+        CHECK(!wideStroke.failed());
+        CHECK(wideStroke.end({300, 300, 1.0}));
+        CHECK((wide.pixel({300, 300}).value() >> 24) == 0xffU);
+        // The tip is round, so the rim of the square bounding box stays clear.
+        CHECK(wide.pixel({300, 60}).value() == 0U);
+        CHECK((wide.pixel({300, 140}).value() >> 24) > 0U);
+
+        BrushDefinition huge;
+        huge.size = 2000; huge.color = 0xff0000ff;
+        BrushStroke hugeStroke(wide, huge);
+        CHECK(hugeStroke.begin({300, 300, 1.0}));
+        CHECK(!hugeStroke.failed());
+        CHECK(hugeStroke.end({300, 300, 1.0}));
+        CHECK((wide.pixel({5, 300}).value() >> 24) > 0U); // clipped to the canvas, still painted
+    }
+
     std::cout << "Brush engine tests passed\n";
 }

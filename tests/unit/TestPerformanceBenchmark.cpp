@@ -215,6 +215,12 @@ int main()
                  benchmarkRuns(2, 11, [&] { runDigitalStroke(BrushTip::Round, 36.0, 0.20, 0.6, 0.7, 400.0, 2); }));
         printRow("Digital", "stroke_round_128px_400px", "400px stroke sp=0.15 size=128", 7,
                  benchmarkRuns(1, 7, [&] { runDigitalStroke(BrushTip::Round, 128.0, 0.15, 0.6, 0.0, 400.0, 2); }));
+        // Wide washes and background blocking: sizes above the old 256 px
+        // ceiling used to fail outright, so this row is also a limit check.
+        printRow("Digital", "stroke_round_400px_400px", "400px stroke sp=0.15 size=400", 5,
+                 benchmarkRuns(1, 5, [&] { runDigitalStroke(BrushTip::Round, 400.0, 0.15, 0.7, 0.0, 400.0, 2); }));
+        printRow("Digital", "stroke_soft_400px_400px", "400px soft stroke size=400", 5,
+                 benchmarkRuns(1, 5, [&] { runDigitalStroke(BrushTip::Round, 400.0, 0.15, 0.15, 0.0, 400.0, 2); }));
     }
 
     // ---- 2. CPU Tile Compositor & Dirty Regions ----
