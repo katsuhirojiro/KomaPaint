@@ -587,13 +587,18 @@ void TestWorkspaceUi::sessionRestoresProjectsAndLayoutAtStartup()
         app.parts.panels.setVisible(QStringLiteral("timeline"), true);
         app.parts.panels.setVisible(QStringLiteral("color"), false);
         QVERIFY(!app.parts.panels.isVisible(QStringLiteral("color")));
+        QCoreApplication::processEvents();
+        QTest::qWait(50);
         auto* dock = app.parts.panels.dockModel();
-        auto* layersGroup = findInWindow(app.window, QStringLiteral("dockGroup%1").arg(dock->groupOf(QStringLiteral("layers"))));
-        QVERIFY(layersGroup);
+        QQuickItem* layersGroup = nullptr;
+        QTRY_VERIFY((layersGroup = findInWindow(app.window,
+            QStringLiteral("dockGroup%1").arg(dock->groupOf(QStringLiteral("layers")))))
+            && layersGroup->width() > 50);
         rightColumnWidth = layersGroup->width();
         const int rootSplitId = dock->tree().value(QStringLiteral("id")).toInt();
         auto* handle = findInWindow(app.window, QStringLiteral("dockHandle%1_1").arg(rootSplitId));
         QVERIFY(handle);
+        QTRY_VERIFY(handle->height() > 50 && handle->x() > 50);
         const QVariantList startFractions = dock->fractionsOf(rootSplitId);
         const QPoint grab = handle->mapToScene(QPointF(handle->width() / 2, handle->height() / 2)).toPoint();
         QTest::mousePress(app.window, Qt::LeftButton, Qt::NoModifier, grab);
@@ -607,7 +612,8 @@ void TestWorkspaceUi::sessionRestoresProjectsAndLayoutAtStartup()
             QStringLiteral("dockGroup%1").arg(dock->groupOf(QStringLiteral("layers")))))
             && layersGroup->width() >= rightColumnWidth + 20);
         rightColumnWidth = layersGroup->width();
-        // The layout is written back on a short debounce.
+        // Wait for the 350ms debounced layout write after the resize.
+        QTest::qWait(450);
         QTRY_VERIFY_WITH_TIMEOUT(!m_settings->value(QStringLiteral("workspace/layout")).toString().isEmpty(), 3000);
         app.window->close();  // nothing is modified: no question
         QTRY_VERIFY(!app.window->isVisible());
@@ -637,11 +643,10 @@ void TestWorkspaceUi::sessionRestoresProjectsAndLayoutAtStartup()
     QVERIFY(app.parts.panels.isVisible(QStringLiteral("timeline")));
     QVERIFY(!app.parts.panels.isVisible(QStringLiteral("color")));
     QVERIFY(app.parts.panels.isVisible(QStringLiteral("layers")));
-    auto* restoredGroup = findInWindow(app.window, QStringLiteral("dockGroup%1")
-                                           .arg(app.parts.panels.dockModel()->groupOf(QStringLiteral("layers"))));
-    QVERIFY(restoredGroup);
-    QVERIFY2(qAbs(restoredGroup->width() - rightColumnWidth) < 3.0,
-             qPrintable(QStringLiteral("restored %1, saved %2").arg(restoredGroup->width()).arg(rightColumnWidth)));
+    QQuickItem* restoredGroup = nullptr;
+    QTRY_VERIFY((restoredGroup = findInWindow(app.window, QStringLiteral("dockGroup%1")
+                                           .arg(app.parts.panels.dockModel()->groupOf(QStringLiteral("layers")))))
+                && qAbs(restoredGroup->width() - rightColumnWidth) < 3.0);
     // A normal start asks no recovery question.
     QVERIFY(!app.root->findChild<QObject*>(QStringLiteral("recoveryChoiceDialog"))->property("visible").toBool());
 }

@@ -760,9 +760,13 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
     auto* tip = item(app, QStringLiteral("brushTipChoice"));
     QVERIFY(tip && tip->isVisible());
     QVERIFY(!brush->textured());
+    scrollIntoView(tip);
+    QCoreApplication::processEvents();
     QPoint at = tip->mapToScene(QPointF(tip->width() * 0.75, tip->height() / 2)).toPoint();
     QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, at);
     QTRY_VERIFY(brush->textured());
+    scrollIntoView(tip);
+    QCoreApplication::processEvents();
     at = tip->mapToScene(QPointF(tip->width() * 0.25, tip->height() / 2)).toPoint();
     QTest::mouseClick(app.window, Qt::LeftButton, Qt::NoModifier, at);
     QTRY_VERIFY(!brush->textured());
