@@ -255,6 +255,9 @@ jobs:
               }
             }
           }
+          # Remove vc_redist installer exe if windeployqt copied it (we ship the CRT DLLs directly).
+          $redistExe = Join-Path "${{ env.STAGE_DIR }}" "vc_redist.x64.exe"
+          if (Test-Path $redistExe) { Remove-Item $redistExe -Force }
           Write-Host "Bundled MSVC CRT DLLs: $($crtCopied -join ', ')"
 
       - name: Verify no test-only DLLs leaked into the package

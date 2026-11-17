@@ -205,6 +205,18 @@ int KomaPaintApp::run()
 
 void KomaPaintApp::runPackagedVerification()
 {
+    auto findVisual = [](auto& self, QQuickItem* from, const QString& name) -> QQuickItem* {
+        if (!from) return nullptr;
+        if (from->objectName() == name) return from;
+        for (auto* child : from->childItems()) {
+            if (auto* found = self(self, child, name)) return found;
+        }
+        return nullptr;
+    };
+    auto visual = [&](const QString& name) -> QQuickItem* {
+        return m_window ? findVisual(findVisual, m_window->contentItem(), name) : nullptr;
+    };
+
     QStringList report;
     auto fail = [&](const QString& reason) {
         report << (QStringLiteral("FAIL: ") + reason);
@@ -257,7 +269,7 @@ void KomaPaintApp::runPackagedVerification()
     }
     QCoreApplication::processEvents();
 
-    auto* canvas = m_window->findChild<CanvasViewport*>(QStringLiteral("canvasViewport"));
+    auto* canvas = qobject_cast<CanvasViewport*>(visual(QStringLiteral("canvasViewport")));
     if (!canvas) {
         fail(QStringLiteral("CanvasViewport ('canvasViewport') not created in live QML workspace."));
         return;
@@ -270,8 +282,8 @@ void KomaPaintApp::runPackagedVerification()
              "move", "transform", "gradient", "line", "curveline",
              "rectangle", "circle", "text", "smudge"
          }) {
-        const QString name = QStringLiteral("tool_") + QLatin1String(toolId);
-        auto* btn = m_window->findChild<QQuickItem*>(name);
+        const QString name = QStringLiteral("tool_") + QString::fromLatin1(toolId);
+        auto* btn = visual(name);
         if (!btn || !btn->property("available").toBool()) {
             fail(QStringLiteral("Tool button '%1' missing or unavailable.").arg(name));
             return;
@@ -283,7 +295,7 @@ void KomaPaintApp::runPackagedVerification()
     m_dock.showPanel(QStringLiteral("toolproperty"));
     m_dock.showPanel(QStringLiteral("color"));
     QCoreApplication::processEvents();
-    auto* colorWheel = m_window->findChild<QQuickItem*>(QStringLiteral("colorWheel"));
+    auto* colorWheel = visual(QStringLiteral("colorWheel"));
     if (!colorWheel) {
         fail(QStringLiteral("ColorWheel not accessible in Color dock panel."));
         return;
@@ -291,7 +303,7 @@ void KomaPaintApp::runPackagedVerification()
 
     m_dock.showPanel(QStringLiteral("colormixer"));
     QCoreApplication::processEvents();
-    auto* mixerSurface = m_window->findChild<QQuickItem*>(QStringLiteral("mixerSurface"));
+    auto* mixerSurface = visual(QStringLiteral("mixerSurface"));
     if (!mixerSurface) {
         fail(QStringLiteral("MixerSurfaceItem not accessible in Color Mixer dock panel."));
         return;
