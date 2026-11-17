@@ -24,6 +24,8 @@ private slots:
     void ownerDestroyedDuringCallbacks();
     void accountingLifetimes();
     void unchangedTilesReleaseHistoryCharge();
+    void unlimitedByDefault();
+    void historyTrimsOldestWhenMemoryRunsOut();
 };
 static std::vector<std::uint32_t> snapshot(const SparseTileStore& s, TilePoint p) {
     auto pixels = s.tilePixels(p); return {pixels.begin(), pixels.end()};
