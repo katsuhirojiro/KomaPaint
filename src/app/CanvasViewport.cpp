@@ -288,13 +288,10 @@ void CanvasViewport::setToolSettings(QObject* settings)
     if (m_toolSettings) disconnect(m_toolSettings, nullptr, this, nullptr);
     m_toolSettings = next;
     if (m_toolSettings) {
-        connect(m_toolSettings, &ToolSettings::executableToolChanged, this, [this] {
-            m_toolDragActive = false;
-            m_lassoPolygonalActive = false;
-            m_lassoPoints.clear();
-            m_lassoPreviewSegment.clear();
-            m_curveBendStage = false;
-            update();
+        connect(m_toolSettings, &ToolSettings::changed, this, [this] {
+            if (!activeToolUsesStrokeEngine()) {
+                update();
+            }
         });
     }
     emit toolSettingsChanged();

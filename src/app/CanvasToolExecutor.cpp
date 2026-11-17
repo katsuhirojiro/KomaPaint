@@ -65,7 +65,7 @@ material::PaintBatch buildMaterialColorBatch(const BrushSettings* brush, const Q
 {
     const std::string mediumId = (brush && brush->mediumId() == QStringLiteral("watercolour"))
         ? std::string("watercolour") : std::string("gouache");
-    const double alpha = std::max(0.05, color.alphaF()) * std::clamp(coverage01, 0.0, 1.0);
+    const double alpha = std::max(0.05, static_cast<double>(color.alphaF())) * std::clamp(coverage01, 0.0, 1.0);
     const double conc = brush ? brush->pigmentConcentration() / 100.0 : 0.7;
     const double waterRatio = brush ? brush->waterAmount() / 100.0 : 0.35;
     const double bodyRatio = brush ? brush->paintBody() / 100.0 : 0.5;
