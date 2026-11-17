@@ -137,5 +137,192 @@
         }
       ]
     }
+  },
+  "toolCollections": {
+    "eraser": {
+      "defaultTabId": "eraser-default",
+      "tabs": [
+        {
+          "id": "eraser-default",
+          "name": "Default",
+          "presets": [
+            { "id": "eraser-hard", "name": "Hard eraser", "category": "Eraser", "executableTool": "eraser", "erase": true, "size": 24, "opacity": 100, "flow": 100, "spacing": 10, "hardness": 100, "stabilization": 0, "textured": false, "tipStyle": "round" },
+            { "id": "eraser-soft", "name": "Soft eraser", "category": "Eraser", "executableTool": "eraser", "erase": true, "size": 60, "opacity": 100, "flow": 35, "spacing": 10, "hardness": 20, "stabilization": 0, "textured": false, "tipStyle": "round" },
+            { "id": "eraser-boundary-aware", "name": "Boundary-Aware Eraser", "category": "Cleanup", "executableTool": "boundary_eraser", "erase": true, "size": 48, "opacity": 100, "flow": 100, "spacing": 10, "hardness": 95, "stabilization": 0, "textured": false, "tipStyle": "round", "pressureSize": 25, "pressureOpacity": 30, "toolParams": { "referenceMode": "visible", "gapClosing": 8, "boundarySensitivity": 65, "protectInterior": true, "conservativeBoundary": true } }
+          ]
+        },
+        {
+          "id": "eraser-cleanup",
+          "name": "Cleanup",
+          "presets": [
+            { "id": "eraser-cleanup-boundary", "name": "Boundary-Aware Eraser", "category": "Cleanup", "executableTool": "boundary_eraser", "erase": true, "size": 48, "opacity": 100, "flow": 100, "spacing": 10, "hardness": 95, "stabilization": 0, "textured": false, "tipStyle": "round", "toolParams": { "referenceMode": "visible", "gapClosing": 8, "boundarySensitivity": 65, "protectInterior": true, "conservativeBoundary": true } },
+            { "id": "eraser-cleanup-sketch", "name": "Sketch Boundary Eraser", "category": "Cleanup", "executableTool": "boundary_eraser", "erase": true, "size": 56, "opacity": 100, "flow": 100, "spacing": 10, "hardness": 90, "stabilization": 0, "textured": false, "tipStyle": "round", "toolParams": { "referenceMode": "visible", "gapClosing": 12, "boundarySensitivity": 55, "protectInterior": true, "conservativeBoundary": true } }
+          ]
+        }
+      ]
+    },
+    "fill": {
+      "defaultTabId": "fill-default",
+      "tabs": [
+        {
+          "id": "fill-default",
+          "name": "Default",
+          "presets": [
+            { "id": "fill-conventional", "name": "Conventional Fill", "category": "Fill", "executableTool": "fill", "toolParams": { "referenceMode": "visible", "tolerance": 28, "perceptualColor": true, "alphaAware": true, "gapClosing": 0, "areaScaling": 1, "antialiasing": true, "colorBleeding": true, "contiguous": true, "fillTarget": "active", "previewBeforeCommit": false } },
+            { "id": "fill-refer-current", "name": "Fill Current Layer", "category": "Fill", "executableTool": "fill", "toolParams": { "referenceMode": "current", "tolerance": 24, "perceptualColor": true, "alphaAware": true, "gapClosing": 0, "areaScaling": 0, "antialiasing": true, "colorBleeding": false, "contiguous": true, "fillTarget": "active", "previewBeforeCommit": false } },
+            { "id": "fill-smart", "name": "Smart Fill", "category": "Smart Fill", "executableTool": "smart_fill", "toolParams": { "referenceMode": "visible", "tolerance": 34, "perceptualColor": true, "alphaAware": true, "gapClosing": 10, "boundarySensitivity": 65, "areaScaling": 1, "antialiasing": true, "colorBleeding": true, "edgeQuality": 85, "contiguous": true, "fillTarget": "active", "previewBeforeCommit": true } }
+          ]
+        },
+        {
+          "id": "fill-smart-tab",
+          "name": "Smart Fill",
+          "presets": [
+            { "id": "fill-smart-lineart", "name": "Smart Fill (Line Art)", "category": "Smart Fill", "executableTool": "smart_fill", "toolParams": { "referenceMode": "visible", "tolerance": 34, "perceptualColor": true, "alphaAware": true, "gapClosing": 10, "boundarySensitivity": 65, "areaScaling": 1, "antialiasing": true, "colorBleeding": true, "edgeQuality": 85, "contiguous": true, "fillTarget": "active", "previewBeforeCommit": true } },
+            { "id": "fill-smart-sketchy", "name": "Smart Fill (Sketchy)", "category": "Smart Fill", "executableTool": "smart_fill", "toolParams": { "referenceMode": "visible", "tolerance": 42, "perceptualColor": true, "alphaAware": true, "gapClosing": 16, "boundarySensitivity": 52, "areaScaling": 1, "antialiasing": true, "colorBleeding": true, "edgeQuality": 80, "contiguous": true, "fillTarget": "active", "previewBeforeCommit": true } },
+            { "id": "fill-smart-flat-layer", "name": "Flat Color New Layer", "category": "Smart Fill", "executableTool": "smart_fill", "toolParams": { "referenceMode": "visible", "tolerance": 36, "perceptualColor": true, "alphaAware": true, "gapClosing": 10, "boundarySensitivity": 65, "areaScaling": 1, "antialiasing": true, "colorBleeding": true, "edgeQuality": 90, "contiguous": true, "fillTarget": "new_layer", "previewBeforeCommit": false } }
+          ]
+        }
+      ]
+    },
+    "wand": {
+      "defaultTabId": "wand-default",
+      "tabs": [
+        {
+          "id": "wand-default",
+          "name": "Default",
+          "presets": [
+            { "id": "wand-contiguous", "name": "Contiguous Wand", "category": "Selection", "executableTool": "wand", "toolParams": { "referenceMode": "visible", "tolerance": 26, "perceptualColor": true, "alphaAware": true, "gapClosing": 0, "areaScaling": 0, "antialiasing": true, "contiguous": true, "feather": 0, "selectionOp": "replace" } },
+            { "id": "wand-all-regions", "name": "All Matching Regions", "category": "Selection", "executableTool": "wand", "toolParams": { "referenceMode": "visible", "tolerance": 28, "perceptualColor": true, "alphaAware": true, "gapClosing": 0, "areaScaling": 0, "antialiasing": true, "contiguous": false, "feather": 0, "selectionOp": "replace" } },
+            { "id": "wand-gap-aware", "name": "Gap-Aware Wand", "category": "Selection", "executableTool": "wand", "toolParams": { "referenceMode": "visible", "tolerance": 30, "perceptualColor": true, "alphaAware": true, "gapClosing": 8, "boundarySensitivity": 65, "areaScaling": 0, "antialiasing": true, "contiguous": true, "feather": 0, "selectionOp": "replace" } }
+          ]
+        }
+      ]
+    },
+    "lasso": {
+      "defaultTabId": "lasso-default",
+      "tabs": [
+        {
+          "id": "lasso-default",
+          "name": "Default",
+          "presets": [
+            { "id": "lasso-freehand", "name": "Freehand Lasso", "category": "Lasso", "executableTool": "lasso", "toolParams": { "lassoMode": "freehand", "antialiasing": true, "feather": 0, "selectionOp": "replace", "magneticStrength": 0 } },
+            { "id": "lasso-polygonal", "name": "Polygonal Lasso", "category": "Lasso", "executableTool": "lasso", "toolParams": { "lassoMode": "polygonal", "antialiasing": true, "feather": 0, "selectionOp": "replace", "magneticStrength": 0 } },
+            { "id": "lasso-magnetic", "name": "Magnetic Edge Lasso", "category": "Lasso", "executableTool": "lasso", "toolParams": { "lassoMode": "magnetic", "antialiasing": true, "feather": 0, "selectionOp": "replace", "magneticStrength": 70, "referenceMode": "visible" } }
+          ]
+        }
+      ]
+    },
+    "selection": {
+      "defaultTabId": "selection-default",
+      "tabs": [
+        {
+          "id": "selection-default",
+          "name": "Default",
+          "presets": [
+            { "id": "selection-rect", "name": "Rectangle Select", "category": "Selection", "executableTool": "selection", "toolParams": { "selectionShape": "rectangle", "antialiasing": true, "feather": 0, "selectionOp": "replace" } },
+            { "id": "selection-ellipse", "name": "Ellipse Select", "category": "Selection", "executableTool": "selection", "toolParams": { "selectionShape": "ellipse", "antialiasing": true, "feather": 0, "selectionOp": "replace" } }
+          ]
+        }
+      ]
+    },
+    "move": {
+      "defaultTabId": "move-default",
+      "tabs": [
+        {
+          "id": "move-default",
+          "name": "Default",
+          "presets": [
+            { "id": "move-selection-layer", "name": "Move Selection / Layer", "category": "Move", "executableTool": "move", "toolParams": {} }
+          ]
+        }
+      ]
+    },
+    "transform": {
+      "defaultTabId": "transform-default",
+      "tabs": [
+        {
+          "id": "transform-default",
+          "name": "Default",
+          "presets": [
+            { "id": "transform-free", "name": "Free Transform", "category": "Transform", "executableTool": "transform", "toolParams": {} }
+          ]
+        }
+      ]
+    },
+    "gradient": {
+      "defaultTabId": "gradient-default",
+      "tabs": [
+        {
+          "id": "gradient-default",
+          "name": "Default",
+          "presets": [
+            { "id": "gradient-linear", "name": "Linear Gradient", "category": "Gradient", "executableTool": "gradient", "opacity": 100, "toolParams": { "gradientType": "linear" } },
+            { "id": "gradient-radial", "name": "Radial Gradient", "category": "Gradient", "executableTool": "gradient", "opacity": 100, "toolParams": { "gradientType": "radial" } }
+          ]
+        }
+      ]
+    },
+    "line": {
+      "defaultTabId": "line-default",
+      "tabs": [
+        {
+          "id": "line-default",
+          "name": "Default",
+          "presets": [
+            { "id": "figure-line", "name": "Straight Line", "category": "Figure", "executableTool": "line", "size": 4, "opacity": 100, "toolParams": { "shapeMode": "stroke", "shapeStrokeWidth": 4, "antialiasing": true } }
+          ]
+        }
+      ]
+    },
+    "curveline": {
+      "defaultTabId": "curveline-default",
+      "tabs": [
+        {
+          "id": "curveline-default",
+          "name": "Default",
+          "presets": [
+            { "id": "figure-curve", "name": "Smooth Curve", "category": "Figure", "executableTool": "curveline", "size": 4, "opacity": 100, "toolParams": { "shapeMode": "stroke", "shapeStrokeWidth": 4, "antialiasing": true } }
+          ]
+        }
+      ]
+    },
+    "rectangle": {
+      "defaultTabId": "rectangle-default",
+      "tabs": [
+        {
+          "id": "rectangle-default",
+          "name": "Default",
+          "presets": [
+            { "id": "figure-rect-stroke", "name": "Rectangle Outline", "category": "Figure", "executableTool": "rectangle", "size": 4, "opacity": 100, "toolParams": { "shapeMode": "stroke", "shapeStrokeWidth": 4, "antialiasing": true } },
+            { "id": "figure-rect-fill", "name": "Filled Rectangle", "category": "Figure", "executableTool": "rectangle", "size": 4, "opacity": 100, "toolParams": { "shapeMode": "fill", "shapeStrokeWidth": 4, "antialiasing": true } }
+          ]
+        }
+      ]
+    },
+    "circle": {
+      "defaultTabId": "circle-default",
+      "tabs": [
+        {
+          "id": "circle-default",
+          "name": "Default",
+          "presets": [
+            { "id": "figure-ellipse-stroke", "name": "Ellipse Outline", "category": "Figure", "executableTool": "circle", "size": 4, "opacity": 100, "toolParams": { "shapeMode": "stroke", "shapeStrokeWidth": 4, "antialiasing": true } },
+            { "id": "figure-ellipse-fill", "name": "Filled Ellipse", "category": "Figure", "executableTool": "circle", "size": 4, "opacity": 100, "toolParams": { "shapeMode": "fill", "shapeStrokeWidth": 4, "antialiasing": true } }
+          ]
+        }
+      ]
+    },
+    "text": {
+      "defaultTabId": "text-default",
+      "tabs": [
+        {
+          "id": "text-default",
+          "name": "Default",
+          "presets": [
+            { "id": "text-standard", "name": "Comic Dialogue", "category": "Text", "executableTool": "text", "opacity": 100, "toolParams": { "fontSize": 24, "antialiasing": true } }
+          ]
+        }
+      ]
+    }
   }
 }

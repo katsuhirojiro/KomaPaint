@@ -1,6 +1,7 @@
 #pragma once
 #include <QJsonObject>
 #include <QList>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 #include <QVariantMap>
@@ -18,10 +19,15 @@ struct BrushPresetValues {
     QString tipStyle = QStringLiteral("round");
     int pressureSize = 0;
     int pressureOpacity = 100;
+    int pressureFlow = 0;
     int pressureGamma = 100;
     int minSizeRatio = 15;
+    int tiltSize = 0;
+    bool tiltAngle = false;
+    bool stylusRotation = false;
     int blendStrength = 0;
     int colorMix = 100;
+    bool erase = false;
     bool traditionalMedia = false;
     bool persistentReservoir = false;
     QString mediumId = QStringLiteral("gouache");
@@ -42,6 +48,11 @@ struct BrushPresetValues {
     int pressureToAmount = 62;
     int pressureToContact = 35;
     QVariantMap materialMixture;
+    // Universal sub-tool fields: executableTool decouples collection placement
+    // from underlying tool behavior; toolParams stores non-brush / intelligent
+    // tool configuration (Fill, Smart Fill, Wand, Lasso, Boundary-Aware Eraser, etc.).
+    QString executableTool;
+    QVariantMap toolParams;
     bool operator==(const BrushPresetValues&) const = default;
 };
 
@@ -71,6 +82,7 @@ struct BrushLibraryDocument {
     QStringList knownBuiltInIds;
     EngineCollectionData digital;
     EngineCollectionData realistic;
+    QMap<QString, EngineCollectionData> toolCollections;
 };
 
 class BrushLibraryStore {

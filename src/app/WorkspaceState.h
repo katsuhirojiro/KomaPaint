@@ -12,6 +12,7 @@
 #include "ProjectCreationService.h"
 #include "SessionStore.h"
 #include "SubToolLibrary.h"
+#include "ToolSettings.h"
 
 #include <QDateTime>
 #include <QJsonObject>
@@ -49,6 +50,7 @@ class WorkspaceState : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(BrushSettings* brush READ brush CONSTANT)
+    Q_PROPERTY(ToolSettings* toolSettings READ toolSettings CONSTANT)
     Q_PROPERTY(komapaint::input::TabletInputSettings* inputSettings READ inputSettings CONSTANT)
     Q_PROPERTY(SubToolLibrary* subTools READ subTools CONSTANT)
     Q_PROPERTY(CanvasDocument* document  READ document  NOTIFY documentChanged)
@@ -74,6 +76,7 @@ public:
     explicit WorkspaceState(QObject* parent = nullptr);
 
     BrushSettings* brush() const { return m_brush; }
+    ToolSettings* toolSettings() const { return m_toolSettings; }
     input::TabletInputSettings* inputSettings() const { return m_inputSettings; }
     void bindInputSettings(Settings* settings);
     SubToolLibrary* subTools() const { return m_subTools; }
@@ -292,6 +295,7 @@ private:
     bool m_sessionRestorePending = false;  // restoreSession() has not run yet
     bool m_sessionBatch = false;       // suppress saves while restoring
     BrushSettings* m_brush = nullptr;
+    ToolSettings* m_toolSettings = nullptr;
     input::TabletInputSettings* m_inputSettings = nullptr;
     SubToolLibrary* m_subTools = nullptr;
     LayerModel* m_emptyLayers = nullptr; // empty compatibility model; never a document

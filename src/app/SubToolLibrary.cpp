@@ -1,5 +1,6 @@
 #include "SubToolLibrary.h"
 #include "BrushSettings.h"
+#include "ToolSettings.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -25,7 +26,40 @@ QString makeId(const QString& prefix)
         + QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
 }
 
+bool isStrokeBrushTool(const QString& t)
+{
+    return t == QStringLiteral("pen") || t == QStringLiteral("pencil") ||
+           t == QStringLiteral("brush") || t == QStringLiteral("airbrush") ||
+           t == QStringLiteral("eraser") || t == QStringLiteral("boundary_eraser") ||
+           t == QStringLiteral("smudge");
+}
+
+bool isSelectionTool(const QString& t)
+{
+    return t == QStringLiteral("selection") || t == QStringLiteral("lasso") ||
+           t == QStringLiteral("wand");
+}
+
+bool isShapeTool(const QString& t)
+{
+    return t == QStringLiteral("line") || t == QStringLiteral("curveline") ||
+           t == QStringLiteral("rectangle") || t == QStringLiteral("circle");
+}
+
 } // namespace
+
+bool SubToolLibrary::isStrokePaintToolName(const QString& t)
+{
+    return t == QStringLiteral("pen") || t == QStringLiteral("pencil") ||
+           t == QStringLiteral("brush") || t == QStringLiteral("airbrush") ||
+           t == QStringLiteral("eraser");
+}
+
+bool SubToolLibrary::isKnownViewOnlyTool(const QString& t)
+{
+    return t.isEmpty() || t == QStringLiteral("zoom") ||
+           t == QStringLiteral("hand") || t == QStringLiteral("eyedropper");
+}
 
 SubToolLibrary::SubToolLibrary(BrushSettings* brush, QObject* parent)
     : QObject(parent), m_brush(brush)
@@ -43,67 +77,58 @@ SubToolLibrary::SubToolLibrary(BrushSettings* brush, QObject* parent)
             || root.value(QStringLiteral("version")).toInt(-1) != 1 || groups.isEmpty()) {
             m_loadError = QStringLiteral("The bundled brush preset catalog is invalid.");
         } else {
-            for (const QJsonValue& groupValue : groups) {
-                const QJsonObject object = groupValue.toObject();
-                const QString tool = object.value(QStringLiteral("tool")).toString();
-                const QJsonArray presets = object.value(QStringLiteral("presets")).toArray();
-                if (tool.isEmpty() || !object.value(QStringLiteral("erase")).isBool() || presets.isEmpty()
-                    || groupIndex(tool) >= 0) {
-                    m_loadError = QStringLiteral("The bundled brush preset catalog contains an invalid tool group.");
-                    m_groups.clear();
-                    break;
-                }
-                Group group;
-                group.tool = tool;
-                group.erase = object.value(QStringLiteral("erase")).toBool();
-                for (const QJsonValue& presetValue : presets) {
-                    const QJsonObject preset = presetValue.toObject();
-                    const QString name = preset.value(QStringLiteral("name")).toString().trimmed();
-                    const QString category = preset.value(QStringLiteral("category")).toString().trimmed();
-                    Values values;
-                    if (!presetValue.isObject() || name.isEmpty() || category.isEmpty()
-                        || !BrushLibraryStore::parseValues(preset, &values)) {
-                        m_loadError = QStringLiteral("The bundled brush preset catalog contains an invalid preset.");
-                        m_groups.clear();
-                        break;
-                    }
-                    group.entries.push_back({name, category, values, values});
-                }
-                if (!m_loadError.isEmpty()) break;
-                m_groups.push_back(std::move(group));
-            }
-            if (m_loadError.isEmpty()) {
-                QString colErr;
-                if (!BrushLibraryStore::loadBundledCollections(root, &m_bundledCollections, &colErr)) {
-                    m_loadError = colErr;
-                } else {
-                    m_collections = m_bundledCollections;
-                }
+            QString colErr;
+            if (!BrushLibraryStore::loadBundledCollections(root, &m_bundledCollections, &colErr)) {
+                m_loadError = colErr;
+            } else {
+                m_collections = m_bundledCollections;
             }
         }
     }
     if (!m_loadError.isEmpty()) qWarning("[KomaPaint] %s", qUtf8Printable(m_loadError));
 
-    auto onBrushMutated = [this] {
+    auto onSettingsMutated = [this] {
         if (m_applying) return;
-        if (!isPaintTool()) return;
+        if (!hasCollections()) return;
         capture();
-        if (isBrushTool()) persist();
-        emit subToolsChanged();
-    };
-    connect(m_brush, &BrushSettings::changed, this, onBrushMutated);
-    connect(m_brush, &BrushSettings::materialMixtureChanged, this, onBrushMutated);
-
-    connect(m_brush, &BrushSettings::brushEngineChanged, this, [this] {
-        if (!m_categoryFilter.isEmpty() && !categories().contains(m_categoryFilter)) {
-            m_categoryFilter.clear();
-            emit filterChanged();
-        }
-        if (isBrushTool()) apply();
-        emit tabsChanged();
+        persist();
         emit subToolsChanged();
         emit currentChanged();
-    });
+    };
+    if (m_brush) {
+        connect(m_brush, &BrushSettings::changed, this, onSettingsMutated);
+        connect(m_brush, &BrushSettings::materialMixtureChanged, this, onSettingsMutated);
+        connect(m_brush, &BrushSettings::brushEngineChanged, this, [this] {
+            if (!m_categoryFilter.isEmpty() && !categories().contains(m_categoryFilter)) {
+                m_categoryFilter.clear();
+                emit filterChanged();
+            }
+            if (isBrushTool()) apply();
+            emit tabsChanged();
+            emit subToolsChanged();
+            emit currentChanged();
+        });
+    }
+    if (m_toolSettings) {
+        connect(m_toolSettings, &ToolSettings::changed, this, onSettingsMutated);
+    }
+}
+
+void SubToolLibrary::setToolSettings(ToolSettings* toolSettings)
+{
+    if (m_toolSettings == toolSettings) return;
+    if (m_toolSettings) disconnect(m_toolSettings, nullptr, this, nullptr);
+    m_toolSettings = toolSettings;
+    if (m_toolSettings) {
+        connect(m_toolSettings, &ToolSettings::changed, this, [this] {
+            if (m_applying || !hasCollections()) return;
+            capture();
+            persist();
+            emit subToolsChanged();
+            emit currentChanged();
+        });
+    }
+    if (hasCollections()) apply();
 }
 
 bool SubToolLibrary::initializePersistence(const QString& filePath)
@@ -122,28 +147,78 @@ bool SubToolLibrary::initializePersistence(const QString& filePath)
         setLastError({});
     }
     if (!existed) persist();
-    if (isBrushTool()) apply();
+    if (hasCollections()) apply();
     emit tabsChanged();
     emit subToolsChanged();
     emit currentChanged();
     return err.isEmpty();
 }
 
-int SubToolLibrary::groupIndex(const QString& tool) const
+bool SubToolLibrary::isPaintTool() const
 {
-    for (std::size_t i = 0; i < m_groups.size(); ++i)
-        if (m_groups[i].tool == tool) return static_cast<int>(i);
-    return -1;
+    return isStrokePaintToolName(m_tool);
 }
 
-EngineCollectionData& SubToolLibrary::activeCollection()
+bool SubToolLibrary::hasCollections() const
 {
-    return (m_brush && m_brush->isRealisticEngine()) ? m_collections.realistic : m_collections.digital;
+    return !m_tool.isEmpty() && (isBrushTool() || m_collections.toolCollections.contains(m_tool));
 }
 
-const EngineCollectionData& SubToolLibrary::activeCollection() const
+QString SubToolLibrary::executableTool() const
 {
-    return (m_brush && m_brush->isRealisticEngine()) ? m_collections.realistic : m_collections.digital;
+    const auto* tab = currentTabPtr();
+    const int idx = currentBrushIndexInTab(tab);
+    if (tab && idx >= 0) {
+        const auto& exec = tab->brushes[idx].current.executableTool;
+        if (!exec.isEmpty()) return exec;
+    }
+    return m_tool;
+}
+
+QString SubToolLibrary::currentCollectionKey() const
+{
+    if (isBrushTool()) {
+        return (m_brush && m_brush->isRealisticEngine())
+            ? QStringLiteral("brush:realistic")
+            : QStringLiteral("brush:digital");
+    }
+    return m_tool;
+}
+
+EngineCollectionData* SubToolLibrary::collectionForTool(const QString& toolFamily, const QString& engineOverride)
+{
+    if (toolFamily == QStringLiteral("brush")) {
+        const bool realistic = !engineOverride.isEmpty()
+            ? (engineOverride == QStringLiteral("realistic"))
+            : (m_brush && m_brush->isRealisticEngine());
+        return realistic ? &m_collections.realistic : &m_collections.digital;
+    }
+    auto it = m_collections.toolCollections.find(toolFamily);
+    if (it != m_collections.toolCollections.end()) return &it.value();
+    return nullptr;
+}
+
+const EngineCollectionData* SubToolLibrary::collectionForTool(const QString& toolFamily, const QString& engineOverride) const
+{
+    if (toolFamily == QStringLiteral("brush")) {
+        const bool realistic = !engineOverride.isEmpty()
+            ? (engineOverride == QStringLiteral("realistic"))
+            : (m_brush && m_brush->isRealisticEngine());
+        return realistic ? &m_collections.realistic : &m_collections.digital;
+    }
+    auto it = m_collections.toolCollections.constFind(toolFamily);
+    if (it != m_collections.toolCollections.constEnd()) return &it.value();
+    return nullptr;
+}
+
+EngineCollectionData* SubToolLibrary::activeCollectionPtr()
+{
+    return collectionForTool(m_tool);
+}
+
+const EngineCollectionData* SubToolLibrary::activeCollectionPtr() const
+{
+    return collectionForTool(m_tool);
 }
 
 int SubToolLibrary::findTabIndex(const EngineCollectionData& col, const QString& tabId) const
@@ -155,23 +230,23 @@ int SubToolLibrary::findTabIndex(const EngineCollectionData& col, const QString&
 
 BrushTabData* SubToolLibrary::currentTabPtr()
 {
-    if (!isBrushTool()) return nullptr;
-    auto& col = activeCollection();
-    int idx = findTabIndex(col, col.currentTabId);
-    if (idx < 0 && !col.tabs.isEmpty()) {
+    auto* col = activeCollectionPtr();
+    if (!col) return nullptr;
+    int idx = findTabIndex(*col, col->currentTabId);
+    if (idx < 0 && !col->tabs.isEmpty()) {
         idx = 0;
-        col.currentTabId = col.tabs[0].id;
+        col->currentTabId = col->tabs[0].id;
     }
-    return idx >= 0 ? &col.tabs[idx] : nullptr;
+    return idx >= 0 ? &col->tabs[idx] : nullptr;
 }
 
 const BrushTabData* SubToolLibrary::currentTabPtr() const
 {
-    if (!isBrushTool()) return nullptr;
-    const auto& col = activeCollection();
-    int idx = findTabIndex(col, col.currentTabId);
-    if (idx < 0 && !col.tabs.isEmpty()) idx = 0;
-    return idx >= 0 ? &col.tabs[idx] : nullptr;
+    const auto* col = activeCollectionPtr();
+    if (!col) return nullptr;
+    int idx = findTabIndex(*col, col->currentTabId);
+    if (idx < 0 && !col->tabs.isEmpty()) idx = 0;
+    return idx >= 0 ? &col->tabs[idx] : nullptr;
 }
 
 int SubToolLibrary::currentBrushIndexInTab(const BrushTabData* tab) const
@@ -189,26 +264,104 @@ QString SubToolLibrary::activeEngine() const
 
 bool SubToolLibrary::paints(const QString& tool) const
 {
-    return tool == QStringLiteral("brush") || groupIndex(tool) >= 0;
+    return isStrokePaintToolName(tool);
+}
+
+bool SubToolLibrary::usesSubTools(const QString& tool) const
+{
+    if (isKnownViewOnlyTool(tool)) return false;
+    return tool == QStringLiteral("brush") || m_collections.toolCollections.contains(tool);
 }
 
 QStringList SubToolLibrary::paintTools() const
 {
-    QStringList list;
-    for (const auto& group : m_groups) list << group.tool;
-    return list;
+    return {
+        QStringLiteral("pen"),
+        QStringLiteral("pencil"),
+        QStringLiteral("brush"),
+        QStringLiteral("airbrush"),
+        QStringLiteral("eraser")
+    };
+}
+
+QStringList SubToolLibrary::supportedTools() const
+{
+    QStringList out = m_collections.toolCollections.keys();
+    if (!out.contains(QStringLiteral("brush"))) out.append(QStringLiteral("brush"));
+    out.sort();
+    return out;
+}
+
+QStringList SubToolLibrary::compatibleToolsFor(const QString& toolOrExecutable) const
+{
+    const QString t = toolOrExecutable.trimmed();
+    if (isStrokeBrushTool(t)) {
+        return {
+            QStringLiteral("pen"),
+            QStringLiteral("pencil"),
+            QStringLiteral("brush"),
+            QStringLiteral("airbrush"),
+            QStringLiteral("eraser")
+        };
+    }
+    if (isSelectionTool(t)) {
+        return { QStringLiteral("selection"), QStringLiteral("lasso"), QStringLiteral("wand") };
+    }
+    if (isShapeTool(t)) {
+        return { QStringLiteral("line"), QStringLiteral("curveline"),
+                 QStringLiteral("rectangle"), QStringLiteral("circle") };
+    }
+    if (t == QStringLiteral("smart_fill") || t == QStringLiteral("fill")) {
+        return { QStringLiteral("fill") };
+    }
+    if (!t.isEmpty() && m_collections.toolCollections.contains(t)) {
+        return { t };
+    }
+    return {};
+}
+
+bool SubToolLibrary::ensureToolCollection(const QString& toolFamily)
+{
+    const QString key = toolFamily.trimmed();
+    if (key.isEmpty() || isKnownViewOnlyTool(key) || key == QStringLiteral("brush")) return false;
+    if (m_collections.toolCollections.contains(key)) return true;
+
+    EngineCollectionData col;
+    BrushTabData tab;
+    tab.id = QStringLiteral("%1-default").arg(key);
+    tab.name = QStringLiteral("Default");
+    BrushEntryData entry;
+    entry.id = QStringLiteral("builtin-%1-default").arg(key);
+    entry.name = key;
+    entry.category = QStringLiteral("Default");
+    entry.builtIn = true;
+    entry.defaults.executableTool = key;
+    entry.current = entry.defaults;
+    tab.brushes.append(entry);
+    tab.currentBrushId = entry.id;
+    col.defaultTabId = tab.id;
+    col.currentTabId = tab.id;
+    col.tabs.append(tab);
+    m_collections.toolCollections.insert(key, std::move(col));
+    persist();
+    if (m_tool == key) {
+        emit toolChanged();
+        emit tabsChanged();
+        emit subToolsChanged();
+        emit currentChanged();
+    }
+    return true;
 }
 
 void SubToolLibrary::setTool(const QString& tool)
 {
     if (tool == m_tool) return;
     m_tool = tool;
-    m_group = groupIndex(tool);
     if (!m_categoryFilter.isEmpty() && !categories().contains(m_categoryFilter)) {
         m_categoryFilter.clear();
         emit filterChanged();
     }
-    if (isPaintTool()) apply();
+    if (hasCollections()) apply();
     emit toolChanged();
     emit tabsChanged();
     emit subToolsChanged();
@@ -237,31 +390,42 @@ void SubToolLibrary::setCategoryFilter(const QString& category)
 QStringList SubToolLibrary::categories() const
 {
     QStringList result;
-    if (isBrushTool()) {
-        const auto* tab = currentTabPtr();
-        if (!tab) return result;
-        for (const auto& b : tab->brushes)
-            if (!result.contains(b.category)) result.append(b.category);
-        return result;
-    }
-    if (m_group < 0) return result;
-    for (const auto& entry : m_groups[static_cast<std::size_t>(m_group)].entries)
-        if (!result.contains(entry.category)) result.append(entry.category);
+    const auto* tab = currentTabPtr();
+    if (!tab) return result;
+    for (const auto& b : tab->brushes)
+        if (!result.contains(b.category)) result.append(b.category);
     return result;
 }
 
 QVariantList SubToolLibrary::engineTabs() const
 {
     QVariantList list;
-    const auto& col = activeCollection();
-    for (int i = 0; i < col.tabs.size(); ++i) {
-        const auto& tab = col.tabs[i];
+    const auto* col = activeCollectionPtr();
+    if (!col) return list;
+    for (int i = 0; i < col->tabs.size(); ++i) {
+        const auto& tab = col->tabs[i];
         QVariantMap item;
         item.insert(QStringLiteral("index"), i);
         item.insert(QStringLiteral("id"), tab.id);
         item.insert(QStringLiteral("name"), tab.name);
-        item.insert(QStringLiteral("isDefault"), tab.id == col.defaultTabId);
+        item.insert(QStringLiteral("isDefault"), tab.id == col->defaultTabId);
         item.insert(QStringLiteral("brushCount"), tab.brushes.size());
+        list.push_back(item);
+    }
+    return list;
+}
+
+QVariantList SubToolLibrary::tabsForTool(const QString& targetTool) const
+{
+    QVariantList list;
+    const auto* col = collectionForTool(targetTool);
+    if (!col) return list;
+    for (int i = 0; i < col->tabs.size(); ++i) {
+        QVariantMap item;
+        item.insert(QStringLiteral("index"), i);
+        item.insert(QStringLiteral("id"), col->tabs[i].id);
+        item.insert(QStringLiteral("name"), col->tabs[i].name);
+        item.insert(QStringLiteral("brushCount"), col->tabs[i].brushes.size());
         list.push_back(item);
     }
     return list;
@@ -269,41 +433,43 @@ QVariantList SubToolLibrary::engineTabs() const
 
 int SubToolLibrary::currentTabIndex() const
 {
-    const auto& col = activeCollection();
-    const int idx = findTabIndex(col, col.currentTabId);
-    return idx >= 0 ? idx : (col.tabs.isEmpty() ? -1 : 0);
+    const auto* col = activeCollectionPtr();
+    if (!col) return -1;
+    const int idx = findTabIndex(*col, col->currentTabId);
+    return idx >= 0 ? idx : (col->tabs.isEmpty() ? -1 : 0);
 }
 
 QString SubToolLibrary::currentTabId() const
 {
-    const auto& col = activeCollection();
+    const auto* col = activeCollectionPtr();
     const int idx = currentTabIndex();
-    return idx >= 0 ? col.tabs[idx].id : QString();
+    return (col && idx >= 0) ? col->tabs[idx].id : QString();
 }
 
 QString SubToolLibrary::currentTabName() const
 {
-    const auto& col = activeCollection();
+    const auto* col = activeCollectionPtr();
     const int idx = currentTabIndex();
-    return idx >= 0 ? col.tabs[idx].name : QString();
+    return (col && idx >= 0) ? col->tabs[idx].name : QString();
 }
 
 QString SubToolLibrary::defaultTabId() const
 {
-    return activeCollection().defaultTabId;
+    const auto* col = activeCollectionPtr();
+    return col ? col->defaultTabId : QString();
 }
 
 void SubToolLibrary::selectTab(int index)
 {
-    auto& col = activeCollection();
-    if (index < 0 || index >= col.tabs.size()) return;
-    if (col.currentTabId == col.tabs[index].id) return;
-    col.currentTabId = col.tabs[index].id;
+    auto* col = activeCollectionPtr();
+    if (!col || index < 0 || index >= col->tabs.size()) return;
+    if (col->currentTabId == col->tabs[index].id) return;
+    col->currentTabId = col->tabs[index].id;
     if (!m_categoryFilter.isEmpty()) {
         m_categoryFilter.clear();
         emit filterChanged();
     }
-    if (isBrushTool()) apply();
+    if (hasCollections()) apply();
     emit tabsChanged();
     emit subToolsChanged();
     emit currentChanged();
@@ -311,7 +477,9 @@ void SubToolLibrary::selectTab(int index)
 
 void SubToolLibrary::selectTabById(const QString& tabId)
 {
-    const int idx = findTabIndex(activeCollection(), tabId);
+    const auto* col = activeCollectionPtr();
+    if (!col) return;
+    const int idx = findTabIndex(*col, tabId);
     if (idx >= 0) selectTab(idx);
 }
 
@@ -322,14 +490,20 @@ QString SubToolLibrary::createTab(const QString& name)
         setLastError(QStringLiteral("Tab name cannot be empty."));
         return {};
     }
-    auto& col = activeCollection();
+    auto* col = activeCollectionPtr();
+    if (!col) {
+        if (!ensureToolCollection(m_tool)) return {};
+        col = activeCollectionPtr();
+    }
+    if (!col) return {};
+
     BrushTabData tab;
     tab.id = makeId(QStringLiteral("tab"));
     tab.name = trimmed;
-    col.tabs.append(tab);
-    col.currentTabId = tab.id;
+    col->tabs.append(tab);
+    col->currentTabId = tab.id;
     persist();
-    if (isBrushTool()) apply();
+    if (hasCollections()) apply();
     emit tabsChanged();
     emit subToolsChanged();
     emit currentChanged();
@@ -343,11 +517,12 @@ bool SubToolLibrary::renameTab(const QString& tabId, const QString& newName)
         setLastError(QStringLiteral("Tab name cannot be empty."));
         return false;
     }
-    auto& col = activeCollection();
-    const int idx = findTabIndex(col, tabId);
+    auto* col = activeCollectionPtr();
+    if (!col) return false;
+    const int idx = findTabIndex(*col, tabId);
     if (idx < 0) return false;
-    if (col.tabs[idx].name == trimmed) return true;
-    col.tabs[idx].name = trimmed;
+    if (col->tabs[idx].name == trimmed) return true;
+    col->tabs[idx].name = trimmed;
     persist();
     emit tabsChanged();
     return true;
@@ -355,13 +530,13 @@ bool SubToolLibrary::renameTab(const QString& tabId, const QString& newName)
 
 bool SubToolLibrary::moveTab(int fromIndex, int toIndex)
 {
-    auto& col = activeCollection();
-    if (fromIndex < 0 || fromIndex >= col.tabs.size()
-        || toIndex < 0 || toIndex >= col.tabs.size()
+    auto* col = activeCollectionPtr();
+    if (!col || fromIndex < 0 || fromIndex >= col->tabs.size()
+        || toIndex < 0 || toIndex >= col->tabs.size()
         || fromIndex == toIndex) {
         return false;
     }
-    col.tabs.move(fromIndex, toIndex);
+    col->tabs.move(fromIndex, toIndex);
     persist();
     emit tabsChanged();
     return true;
@@ -369,17 +544,19 @@ bool SubToolLibrary::moveTab(int fromIndex, int toIndex)
 
 bool SubToolLibrary::moveTabById(const QString& tabId, int delta)
 {
-    const int idx = findTabIndex(activeCollection(), tabId);
+    const auto* col = activeCollectionPtr();
+    if (!col) return false;
+    const int idx = findTabIndex(*col, tabId);
     if (idx < 0) return false;
     return moveTab(idx, idx + delta);
 }
 
 bool SubToolLibrary::setDefaultTab(const QString& tabId)
 {
-    auto& col = activeCollection();
-    if (findTabIndex(col, tabId) < 0) return false;
-    if (col.defaultTabId == tabId) return true;
-    col.defaultTabId = tabId;
+    auto* col = activeCollectionPtr();
+    if (!col || findTabIndex(*col, tabId) < 0) return false;
+    if (col->defaultTabId == tabId) return true;
+    col->defaultTabId = tabId;
     persist();
     emit tabsChanged();
     return true;
@@ -387,21 +564,58 @@ bool SubToolLibrary::setDefaultTab(const QString& tabId)
 
 bool SubToolLibrary::deleteTab(const QString& tabId)
 {
-    auto& col = activeCollection();
-    const int idx = findTabIndex(col, tabId);
+    auto* col = activeCollectionPtr();
+    if (!col) return false;
+    const int idx = findTabIndex(*col, tabId);
     if (idx < 0) return false;
-    if (col.tabs.size() <= 1) {
+    if (col->tabs.size() <= 1) {
         setLastError(QStringLiteral("At least one collection tab is required."));
         return false;
     }
-    const bool wasCurrent = (col.currentTabId == tabId);
-    const bool wasDefault = (col.defaultTabId == tabId);
-    col.tabs.removeAt(idx);
-    const int fallbackIdx = qBound(0, idx, col.tabs.size() - 1);
-    if (wasDefault) col.defaultTabId = col.tabs[fallbackIdx].id;
-    if (wasCurrent) col.currentTabId = col.tabs[fallbackIdx].id;
+    const bool wasCurrent = (col->currentTabId == tabId);
+    const bool wasDefault = (col->defaultTabId == tabId);
+
+    m_deletedTabBackup.collectionKey = currentCollectionKey();
+    m_deletedTabBackup.index = idx;
+    m_deletedTabBackup.tab = col->tabs.at(idx);
+    m_deletedTabBackup.wasDefault = wasDefault;
+    m_deletedTabBackup.wasCurrent = wasCurrent;
+    m_hasDeletedTabBackup = true;
+
+    col->tabs.removeAt(idx);
+    const int fallbackIdx = qBound(0, idx, col->tabs.size() - 1);
+    if (wasDefault) col->defaultTabId = col->tabs[fallbackIdx].id;
+    if (wasCurrent) col->currentTabId = col->tabs[fallbackIdx].id;
     persist();
-    if (wasCurrent && isBrushTool()) apply();
+    if (wasCurrent && hasCollections()) apply();
+    emit tabsChanged();
+    emit subToolsChanged();
+    emit currentChanged();
+    return true;
+}
+
+bool SubToolLibrary::undoDeleteTab()
+{
+    if (!m_hasDeletedTabBackup) return false;
+    EngineCollectionData* col = nullptr;
+    if (m_deletedTabBackup.collectionKey == QStringLiteral("brush:digital")) {
+        col = &m_collections.digital;
+    } else if (m_deletedTabBackup.collectionKey == QStringLiteral("brush:realistic")) {
+        col = &m_collections.realistic;
+    } else {
+        col = collectionForTool(m_deletedTabBackup.collectionKey);
+    }
+    if (!col) return false;
+
+    const int insertIdx = qBound(0, m_deletedTabBackup.index, col->tabs.size());
+    col->tabs.insert(insertIdx, m_deletedTabBackup.tab);
+    if (m_deletedTabBackup.wasDefault) col->defaultTabId = m_deletedTabBackup.tab.id;
+    if (m_deletedTabBackup.wasCurrent) col->currentTabId = m_deletedTabBackup.tab.id;
+    m_hasDeletedTabBackup = false;
+    persist();
+    if (m_deletedTabBackup.collectionKey == currentCollectionKey() && hasCollections()) {
+        apply();
+    }
     emit tabsChanged();
     emit subToolsChanged();
     emit currentChanged();
@@ -410,21 +624,11 @@ bool SubToolLibrary::deleteTab(const QString& tabId)
 
 void SubToolLibrary::select(int index)
 {
-    if (isBrushTool()) {
-        auto* tab = currentTabPtr();
-        if (!tab || index < 0 || index >= tab->brushes.size()) return;
-        const QString nextId = tab->brushes[index].id;
-        if (tab->currentBrushId == nextId) return;
-        tab->currentBrushId = nextId;
-        apply();
-        emit subToolsChanged();
-        emit currentChanged();
-        return;
-    }
-    if (m_group < 0) return;
-    auto& group = m_groups[static_cast<std::size_t>(m_group)];
-    if (index < 0 || index >= static_cast<int>(group.entries.size()) || index == group.current) return;
-    group.current = index;
+    auto* tab = currentTabPtr();
+    if (!tab || index < 0 || index >= tab->brushes.size()) return;
+    const QString nextId = tab->brushes[index].id;
+    if (tab->currentBrushId == nextId) return;
+    tab->currentBrushId = nextId;
     apply();
     emit subToolsChanged();
     emit currentChanged();
@@ -432,7 +636,6 @@ void SubToolLibrary::select(int index)
 
 void SubToolLibrary::selectById(const QString& brushId)
 {
-    if (!isBrushTool()) return;
     auto* tab = currentTabPtr();
     if (!tab) return;
     for (int i = 0; i < tab->brushes.size(); ++i) {
@@ -445,32 +648,24 @@ void SubToolLibrary::selectById(const QString& brushId)
 
 void SubToolLibrary::resetCurrent()
 {
-    if (isBrushTool()) {
-        const QString id = currentBrushId();
-        if (!id.isEmpty()) resetBrush(id);
-        return;
-    }
-    if (m_group < 0) return;
-    auto& group = m_groups[static_cast<std::size_t>(m_group)];
-    auto& entry = group.entries[static_cast<std::size_t>(group.current)];
-    if (entry.current == entry.defaults) return;
-    entry.current = entry.defaults;
-    apply();
-    emit subToolsChanged();
+    const QString id = currentBrushId();
+    if (!id.isEmpty()) resetBrush(id);
 }
 
 void SubToolLibrary::resetBrush(const QString& brushId)
 {
-    auto& col = activeCollection();
-    for (auto& tab : col.tabs) {
+    auto* col = activeCollectionPtr();
+    if (!col) return;
+    for (auto& tab : col->tabs) {
         for (int i = 0; i < tab.brushes.size(); ++i) {
             if (tab.brushes[i].id == brushId) {
                 if (tab.brushes[i].current == tab.brushes[i].defaults) return;
                 tab.brushes[i].current = tab.brushes[i].defaults;
                 persist();
-                if (isBrushTool() && tab.id == currentTabId() && tab.currentBrushId == brushId)
+                if (tab.id == currentTabId() && tab.currentBrushId == brushId)
                     apply();
                 emit subToolsChanged();
+                emit currentChanged();
                 return;
             }
         }
@@ -496,13 +691,21 @@ QString SubToolLibrary::createBrushFromCurrent(const QString& name)
 {
     auto* tab = currentTabPtr();
     if (!tab) return {};
-    const bool isRealistic = (m_brush && m_brush->isRealisticEngine());
-    const Values captured = captureFromBrush(isRealistic);
+    const bool isRealistic = isBrushTool() && m_brush && m_brush->isRealisticEngine();
+    QString execHint = executableTool();
+    if (execHint.isEmpty()) execHint = m_tool;
+    bool eraseHint = (m_tool == QStringLiteral("eraser")) ||
+                     (m_brush && m_brush->erase());
+    const int idx = currentBrushIndexInTab(tab);
+    if (idx >= 0) {
+        eraseHint = tab->brushes[idx].current.erase;
+    }
+    const Values captured = captureFromSettings(isRealistic, execHint, eraseHint);
     const QString base = name.trimmed().isEmpty()
-        ? (currentName().isEmpty() ? QStringLiteral("Custom Brush") : currentName() + QStringLiteral(" Copy"))
+        ? (currentName().isEmpty() ? QStringLiteral("Custom Sub-Tool") : currentName() + QStringLiteral(" Copy"))
         : name.trimmed();
     BrushEntryData entry;
-    entry.id = makeId(QStringLiteral("brush"));
+    entry.id = makeId(QStringLiteral("subtool"));
     entry.name = uniqueBrushName(*tab, base);
     entry.category = tab->name;
     entry.builtIn = false;
@@ -511,7 +714,7 @@ QString SubToolLibrary::createBrushFromCurrent(const QString& name)
     tab->brushes.append(entry);
     tab->currentBrushId = entry.id;
     persist();
-    if (isBrushTool()) apply();
+    apply();
     emit tabsChanged();
     emit subToolsChanged();
     emit currentChanged();
@@ -532,14 +735,14 @@ QString SubToolLibrary::duplicateBrushById(const QString& brushId)
     for (int i = 0; i < tab->brushes.size(); ++i) {
         if (tab->brushes[i].id != brushId) continue;
         BrushEntryData copy = tab->brushes[i];
-        copy.id = makeId(QStringLiteral("brush"));
+        copy.id = makeId(QStringLiteral("subtool"));
         copy.builtIn = false;
         copy.name = uniqueBrushName(*tab, copy.name + QStringLiteral(" Copy"));
         copy.defaults = copy.current;
         tab->brushes.insert(i + 1, copy);
         tab->currentBrushId = copy.id;
         persist();
-        if (isBrushTool()) apply();
+        apply();
         emit tabsChanged();
         emit subToolsChanged();
         emit currentChanged();
@@ -552,11 +755,12 @@ bool SubToolLibrary::renameBrush(const QString& brushId, const QString& newName)
 {
     const QString trimmed = newName.trimmed();
     if (trimmed.isEmpty()) {
-        setLastError(QStringLiteral("Brush name cannot be empty."));
+        setLastError(QStringLiteral("Sub-tool name cannot be empty."));
         return false;
     }
-    auto& col = activeCollection();
-    for (auto& tab : col.tabs) {
+    auto* col = activeCollectionPtr();
+    if (!col) return false;
+    for (auto& tab : col->tabs) {
         for (auto& b : tab.brushes) {
             if (b.id == brushId) {
                 if (b.name == trimmed) return true;
@@ -573,8 +777,9 @@ bool SubToolLibrary::renameBrush(const QString& brushId, const QString& newName)
 
 bool SubToolLibrary::deleteBrush(const QString& brushId)
 {
-    auto& col = activeCollection();
-    for (auto& tab : col.tabs) {
+    auto* col = activeCollectionPtr();
+    if (!col) return false;
+    for (auto& tab : col->tabs) {
         for (int i = 0; i < tab.brushes.size(); ++i) {
             if (tab.brushes[i].id != brushId) continue;
             const bool wasCurrent = (tab.id == currentTabId() && tab.currentBrushId == brushId);
@@ -585,7 +790,7 @@ bool SubToolLibrary::deleteBrush(const QString& brushId)
                 tab.currentBrushId = tab.brushes[qBound(0, i, tab.brushes.size() - 1)].id;
             }
             persist();
-            if (wasCurrent && isBrushTool()) apply();
+            if (wasCurrent) apply();
             emit tabsChanged();
             emit subToolsChanged();
             emit currentChanged();
@@ -597,26 +802,48 @@ bool SubToolLibrary::deleteBrush(const QString& brushId)
 
 bool SubToolLibrary::moveBrushToTab(const QString& brushId, const QString& targetTabId)
 {
-    auto& col = activeCollection();
-    const int dstIdx = findTabIndex(col, targetTabId);
+    return moveSubToolTo(brushId, m_tool, targetTabId);
+}
+
+QString SubToolLibrary::copyBrushToTab(const QString& brushId, const QString& targetTabId)
+{
+    return copySubToolTo(brushId, m_tool, targetTabId);
+}
+
+bool SubToolLibrary::moveSubToolTo(const QString& brushId, const QString& targetTool,
+                                   const QString& targetTabId)
+{
+    auto* srcCol = activeCollectionPtr();
+    auto* dstCol = collectionForTool(targetTool);
+    if (!srcCol || !dstCol) return false;
+    const int dstIdx = findTabIndex(*dstCol, targetTabId);
     if (dstIdx < 0) return false;
-    for (int srcIdx = 0; srcIdx < col.tabs.size(); ++srcIdx) {
-        if (srcIdx == dstIdx) continue;
-        auto& src = col.tabs[srcIdx];
+
+    for (int srcIdx = 0; srcIdx < srcCol->tabs.size(); ++srcIdx) {
+        if (srcCol == dstCol && srcIdx == dstIdx) continue;
+        auto& src = srcCol->tabs[srcIdx];
         for (int i = 0; i < src.brushes.size(); ++i) {
             if (src.brushes[i].id != brushId) continue;
+            const QString exec = src.brushes[i].current.executableTool.isEmpty()
+                ? m_tool : src.brushes[i].current.executableTool;
+            if (targetTool != m_tool && !compatibleToolsFor(exec).contains(targetTool)) {
+                setLastError(QStringLiteral("This sub-tool is not compatible with %1.").arg(targetTool));
+                return false;
+            }
             BrushEntryData moved = src.brushes.takeAt(i);
+            if (moved.defaults.executableTool.isEmpty()) moved.defaults.executableTool = exec;
+            if (moved.current.executableTool.isEmpty()) moved.current.executableTool = exec;
             if (src.brushes.isEmpty()) {
                 src.currentBrushId.clear();
             } else if (src.currentBrushId == brushId) {
                 src.currentBrushId = src.brushes[qBound(0, i, src.brushes.size() - 1)].id;
             }
-            auto& dst = col.tabs[dstIdx];
+            auto& dst = dstCol->tabs[dstIdx];
             moved.name = uniqueBrushName(dst, moved.name);
             dst.brushes.append(moved);
             if (dst.currentBrushId.isEmpty()) dst.currentBrushId = moved.id;
             persist();
-            if (isBrushTool() && src.id == currentTabId()) apply();
+            if (src.id == currentTabId()) apply();
             emit tabsChanged();
             emit subToolsChanged();
             emit currentChanged();
@@ -626,18 +853,30 @@ bool SubToolLibrary::moveBrushToTab(const QString& brushId, const QString& targe
     return false;
 }
 
-QString SubToolLibrary::copyBrushToTab(const QString& brushId, const QString& targetTabId)
+QString SubToolLibrary::copySubToolTo(const QString& brushId, const QString& targetTool,
+                                      const QString& targetTabId)
 {
-    auto& col = activeCollection();
-    const int dstIdx = findTabIndex(col, targetTabId);
+    const auto* srcCol = activeCollectionPtr();
+    auto* dstCol = collectionForTool(targetTool);
+    if (!srcCol || !dstCol) return {};
+    const int dstIdx = findTabIndex(*dstCol, targetTabId);
     if (dstIdx < 0) return {};
-    for (const auto& src : col.tabs) {
+
+    for (const auto& src : srcCol->tabs) {
         for (const auto& b : src.brushes) {
             if (b.id != brushId) continue;
-            auto& dst = col.tabs[dstIdx];
+            const QString exec = b.current.executableTool.isEmpty()
+                ? m_tool : b.current.executableTool;
+            if (targetTool != m_tool && !compatibleToolsFor(exec).contains(targetTool)) {
+                setLastError(QStringLiteral("This sub-tool is not compatible with %1.").arg(targetTool));
+                return {};
+            }
+            auto& dst = dstCol->tabs[dstIdx];
             BrushEntryData copy = b;
-            copy.id = makeId(QStringLiteral("brush"));
+            copy.id = makeId(QStringLiteral("subtool"));
             copy.builtIn = false;
+            if (copy.defaults.executableTool.isEmpty()) copy.defaults.executableTool = exec;
+            if (copy.current.executableTool.isEmpty()) copy.current.executableTool = exec;
             copy.name = uniqueBrushName(dst, b.name);
             copy.defaults = copy.current;
             dst.brushes.append(copy);
@@ -666,117 +905,142 @@ bool SubToolLibrary::reorderBrush(int fromIndex, int toIndex)
     return true;
 }
 
-void SubToolLibrary::applyValuesToBrush(const Values& values, bool erase)
+void SubToolLibrary::applyValuesToSettings(const Values& values, bool fallbackErase)
 {
     m_applying = true;
-    m_brush->setSize(values.size);
-    m_brush->setOpacity(values.opacity);
-    m_brush->setFlow(values.flow);
-    m_brush->setSpacing(values.spacing);
-    m_brush->setHardness(values.hardness);
-    m_brush->setStabilization(values.stabilization);
-    m_brush->setTipStyle(values.tipStyle);
-    m_brush->setTextured(values.textured);
-    m_brush->setPressureSize(values.pressureSize);
-    m_brush->setPressureOpacity(values.pressureOpacity);
-    m_brush->setPressureGamma(values.pressureGamma);
-    m_brush->setMinSizeRatio(values.minSizeRatio);
-    m_brush->setBlendStrength(values.blendStrength);
-    m_brush->setColorMix(values.colorMix);
-    m_brush->setTraditionalMedia(values.traditionalMedia);
-    m_brush->setPersistentReservoir(values.persistentReservoir);
-    m_brush->setMaterialPresetId(values.materialPresetId);
-    m_brush->setMediumId(values.mediumId);
-    m_brush->setPaintLoad(values.paintLoad);
-    m_brush->setPigmentConcentration(values.pigmentConcentration);
-    m_brush->setWaterAmount(values.waterAmount);
-    m_brush->setPaintBody(values.paintBody);
-    m_brush->setPickup(values.pickup);
-    m_brush->setAspectRatio(values.aspectRatio);
-    m_brush->setTipAngle(values.tipAngle);
-    m_brush->setFollowDirection(values.followDirection);
-    m_brush->setDepletion(values.depletion);
-    m_brush->setEdgeAccumulation(values.edgeAccumulation);
-    m_brush->setToothResponse(values.toothResponse);
-    m_brush->setGranulation(values.granulation);
-    m_brush->setDryingSpeed(values.dryingSpeed);
-    m_brush->setPressureToAmount(values.pressureToAmount);
-    m_brush->setPressureToContact(values.pressureToContact);
-    if (values.materialMixture.isEmpty()) m_brush->clearMaterialMixture();
-    else m_brush->loadMaterialMixture(values.materialMixture);
-    m_brush->setErase(erase);
+    if (m_brush) {
+        m_brush->setSize(values.size);
+        m_brush->setOpacity(values.opacity);
+        m_brush->setFlow(values.flow);
+        m_brush->setSpacing(values.spacing);
+        m_brush->setHardness(values.hardness);
+        m_brush->setStabilization(values.stabilization);
+        m_brush->setTipStyle(values.tipStyle);
+        m_brush->setTextured(values.textured);
+        m_brush->setPressureSize(values.pressureSize);
+        m_brush->setPressureOpacity(values.pressureOpacity);
+        m_brush->setPressureFlow(values.pressureFlow);
+        m_brush->setPressureGamma(values.pressureGamma);
+        m_brush->setMinSizeRatio(values.minSizeRatio);
+        m_brush->setTiltSize(values.tiltSize);
+        m_brush->setTiltAngle(values.tiltAngle);
+        m_brush->setStylusRotation(values.stylusRotation);
+        m_brush->setBlendStrength(values.blendStrength);
+        m_brush->setColorMix(values.colorMix);
+        m_brush->setTraditionalMedia(values.traditionalMedia);
+        m_brush->setPersistentReservoir(values.persistentReservoir);
+        m_brush->setMaterialPresetId(values.materialPresetId);
+        m_brush->setMediumId(values.mediumId);
+        m_brush->setPaintLoad(values.paintLoad);
+        m_brush->setPigmentConcentration(values.pigmentConcentration);
+        m_brush->setWaterAmount(values.waterAmount);
+        m_brush->setPaintBody(values.paintBody);
+        m_brush->setPickup(values.pickup);
+        m_brush->setAspectRatio(values.aspectRatio);
+        m_brush->setTipAngle(values.tipAngle);
+        m_brush->setFollowDirection(values.followDirection);
+        m_brush->setDepletion(values.depletion);
+        m_brush->setEdgeAccumulation(values.edgeAccumulation);
+        m_brush->setToothResponse(values.toothResponse);
+        m_brush->setGranulation(values.granulation);
+        m_brush->setDryingSpeed(values.dryingSpeed);
+        m_brush->setPressureToAmount(values.pressureToAmount);
+        m_brush->setPressureToContact(values.pressureToContact);
+        if (values.materialMixture.isEmpty()) m_brush->clearMaterialMixture();
+        else m_brush->loadMaterialMixture(values.materialMixture);
+        const bool effectiveErase = values.erase || fallbackErase ||
+            values.executableTool == QStringLiteral("eraser") ||
+            values.executableTool == QStringLiteral("boundary_eraser");
+        m_brush->setErase(effectiveErase);
+    }
+    if (m_toolSettings) {
+        const QString exec = values.executableTool.isEmpty() ? m_tool : values.executableTool;
+        m_toolSettings->fromMap(exec, values.toolParams);
+    }
     m_applying = false;
 }
 
-SubToolLibrary::Values SubToolLibrary::captureFromBrush(bool traditionalMedia) const
+SubToolLibrary::Values SubToolLibrary::captureFromSettings(bool traditionalMedia,
+                                                           const QString& execToolHint,
+                                                           bool eraseHint) const
 {
     Values values;
-    values.size = m_brush->size();
-    values.opacity = m_brush->opacity();
-    values.flow = m_brush->flow();
-    values.spacing = m_brush->spacing();
-    values.hardness = m_brush->hardness();
-    values.stabilization = m_brush->stabilization();
-    values.textured = m_brush->textured();
-    values.tipStyle = m_brush->tipStyle();
-    values.pressureSize = m_brush->pressureSize();
-    values.pressureOpacity = m_brush->pressureOpacity();
-    values.pressureGamma = m_brush->pressureGamma();
-    values.minSizeRatio = m_brush->minSizeRatio();
-    values.blendStrength = m_brush->blendStrength();
-    values.colorMix = m_brush->colorMix();
-    values.traditionalMedia = traditionalMedia;
-    values.persistentReservoir = m_brush->persistentReservoir();
-    values.mediumId = m_brush->mediumId();
-    values.materialPresetId = m_brush->materialPresetId();
-    values.paintLoad = m_brush->paintLoad();
-    values.pigmentConcentration = m_brush->pigmentConcentration();
-    values.waterAmount = m_brush->waterAmount();
-    values.paintBody = m_brush->paintBody();
-    values.pickup = m_brush->pickup();
-    values.aspectRatio = m_brush->aspectRatio();
-    values.tipAngle = m_brush->tipAngle();
-    values.followDirection = m_brush->followDirection();
-    values.depletion = m_brush->depletion();
-    values.edgeAccumulation = m_brush->edgeAccumulation();
-    values.toothResponse = m_brush->toothResponse();
-    values.granulation = m_brush->granulation();
-    values.dryingSpeed = m_brush->dryingSpeed();
-    values.pressureToAmount = m_brush->pressureToAmount();
-    values.pressureToContact = m_brush->pressureToContact();
-    values.materialMixture = m_brush->materialMixture();
+    if (m_brush) {
+        values.size = m_brush->size();
+        values.opacity = m_brush->opacity();
+        values.flow = m_brush->flow();
+        values.spacing = m_brush->spacing();
+        values.hardness = m_brush->hardness();
+        values.stabilization = m_brush->stabilization();
+        values.textured = m_brush->textured();
+        values.tipStyle = m_brush->tipStyle();
+        values.pressureSize = m_brush->pressureSize();
+        values.pressureOpacity = m_brush->pressureOpacity();
+        values.pressureFlow = m_brush->pressureFlow();
+        values.pressureGamma = m_brush->pressureGamma();
+        values.minSizeRatio = m_brush->minSizeRatio();
+        values.tiltSize = m_brush->tiltSize();
+        values.tiltAngle = m_brush->tiltAngle();
+        values.stylusRotation = m_brush->stylusRotation();
+        values.blendStrength = m_brush->blendStrength();
+        values.colorMix = m_brush->colorMix();
+        values.erase = m_brush->erase() || eraseHint;
+        values.traditionalMedia = traditionalMedia;
+        values.persistentReservoir = m_brush->persistentReservoir();
+        values.mediumId = m_brush->mediumId();
+        values.materialPresetId = m_brush->materialPresetId();
+        values.paintLoad = m_brush->paintLoad();
+        values.pigmentConcentration = m_brush->pigmentConcentration();
+        values.waterAmount = m_brush->waterAmount();
+        values.paintBody = m_brush->paintBody();
+        values.pickup = m_brush->pickup();
+        values.aspectRatio = m_brush->aspectRatio();
+        values.tipAngle = m_brush->tipAngle();
+        values.followDirection = m_brush->followDirection();
+        values.depletion = m_brush->depletion();
+        values.edgeAccumulation = m_brush->edgeAccumulation();
+        values.toothResponse = m_brush->toothResponse();
+        values.granulation = m_brush->granulation();
+        values.dryingSpeed = m_brush->dryingSpeed();
+        values.pressureToAmount = m_brush->pressureToAmount();
+        values.pressureToContact = m_brush->pressureToContact();
+        values.materialMixture = m_brush->materialMixture();
+    } else {
+        values.erase = eraseHint;
+        values.traditionalMedia = traditionalMedia;
+    }
+    values.executableTool = execToolHint;
+    if (m_toolSettings) {
+        if (!m_toolSettings->executableTool().isEmpty()) {
+            values.executableTool = m_toolSettings->executableTool();
+        }
+        values.toolParams = m_toolSettings->toMap();
+    }
     return values;
 }
 
 void SubToolLibrary::apply()
 {
-    if (isBrushTool()) {
-        auto* tab = currentTabPtr();
-        if (!tab || tab->brushes.isEmpty()) return;
-        const int idx = currentBrushIndexInTab(tab);
-        if (idx < 0) return;
-        tab->currentBrushId = tab->brushes[idx].id;
-        applyValuesToBrush(tab->brushes[idx].current, false);
-        return;
-    }
-    if (m_group < 0) return;
-    const auto& group = m_groups[static_cast<std::size_t>(m_group)];
-    applyValuesToBrush(group.entries[static_cast<std::size_t>(group.current)].current, group.erase);
+    auto* tab = currentTabPtr();
+    if (!tab || tab->brushes.isEmpty()) return;
+    const int idx = currentBrushIndexInTab(tab);
+    if (idx < 0) return;
+    tab->currentBrushId = tab->brushes[idx].id;
+    const bool fallbackErase = (m_tool == QStringLiteral("eraser"));
+    applyValuesToSettings(tab->brushes[idx].current, fallbackErase);
 }
 
 void SubToolLibrary::capture()
 {
-    if (isBrushTool()) {
-        auto* tab = currentTabPtr();
-        const int idx = currentBrushIndexInTab(tab);
-        if (!tab || idx < 0) return;
-        tab->brushes[idx].current = captureFromBrush(m_brush && m_brush->isRealisticEngine());
-        return;
-    }
-    if (m_group < 0) return;
-    auto& group = m_groups[static_cast<std::size_t>(m_group)];
-    group.entries[static_cast<std::size_t>(group.current)].current =
-        captureFromBrush(m_brush->traditionalMedia());
+    auto* tab = currentTabPtr();
+    const int idx = currentBrushIndexInTab(tab);
+    if (!tab || idx < 0) return;
+    auto& entry = tab->brushes[idx];
+    const bool trad = isBrushTool()
+        ? (m_brush && m_brush->isRealisticEngine())
+        : (m_brush ? m_brush->traditionalMedia() : entry.current.traditionalMedia);
+    const QString execHint = entry.current.executableTool.isEmpty() ? m_tool : entry.current.executableTool;
+    entry.current = captureFromSettings(trad, execHint, entry.current.erase);
 }
 
 bool SubToolLibrary::persist()
@@ -801,15 +1065,25 @@ void SubToolLibrary::setLastError(const QString& message)
 QVariantList SubToolLibrary::subTools() const
 {
     QVariantList list;
-    auto appendItem = [&](const QString& id, int index, const QString& name,
-                          const QString& category, bool builtIn,
-                          const Values& cur, const Values& def) {
+    const auto* tab = currentTabPtr();
+    if (!tab) return list;
+
+    for (int index = 0; index < tab->brushes.size(); ++index) {
+        const auto& entry = tab->brushes[index];
+        const auto& cur = entry.current;
+        const auto& def = entry.defaults;
+        if (!m_categoryFilter.isEmpty() && entry.category != m_categoryFilter) continue;
+        if (!m_searchText.isEmpty() && !entry.name.contains(m_searchText, Qt::CaseInsensitive)
+            && !entry.category.contains(m_searchText, Qt::CaseInsensitive)) continue;
+
         QVariantMap item;
-        item.insert(QStringLiteral("id"), id);
+        item.insert(QStringLiteral("id"), entry.id);
         item.insert(QStringLiteral("index"), index);
-        item.insert(QStringLiteral("name"), name);
-        item.insert(QStringLiteral("category"), category);
-        item.insert(QStringLiteral("builtIn"), builtIn);
+        item.insert(QStringLiteral("name"), entry.name);
+        item.insert(QStringLiteral("category"), entry.category);
+        item.insert(QStringLiteral("builtIn"), entry.builtIn);
+        item.insert(QStringLiteral("executableTool"), cur.executableTool.isEmpty() ? m_tool : cur.executableTool);
+        item.insert(QStringLiteral("erase"), cur.erase);
         item.insert(QStringLiteral("size"), cur.size);
         item.insert(QStringLiteral("opacity"), cur.opacity);
         item.insert(QStringLiteral("flow"), cur.flow);
@@ -827,45 +1101,20 @@ QVariantList SubToolLibrary::subTools() const
         item.insert(QStringLiteral("traditionalMedia"), cur.traditionalMedia);
         item.insert(QStringLiteral("realisticOnly"), def.traditionalMedia);
         item.insert(QStringLiteral("mediumId"), cur.mediumId);
+        item.insert(QStringLiteral("toolParams"), cur.toolParams);
         item.insert(QStringLiteral("modified"), !(cur == def));
         list.push_back(item);
-    };
-
-    if (isBrushTool()) {
-        const auto* tab = currentTabPtr();
-        if (!tab) return list;
-        for (int index = 0; index < tab->brushes.size(); ++index) {
-            const auto& entry = tab->brushes[index];
-            if (!m_categoryFilter.isEmpty() && entry.category != m_categoryFilter) continue;
-            if (!m_searchText.isEmpty() && !entry.name.contains(m_searchText, Qt::CaseInsensitive)
-                && !entry.category.contains(m_searchText, Qt::CaseInsensitive)) continue;
-            appendItem(entry.id, index, entry.name, entry.category, entry.builtIn, entry.current, entry.defaults);
-        }
-        return list;
-    }
-
-    if (m_group < 0) return list;
-    const auto& entries = m_groups[static_cast<std::size_t>(m_group)].entries;
-    for (std::size_t index = 0; index < entries.size(); ++index) {
-        const auto& entry = entries[index];
-        if (!m_categoryFilter.isEmpty() && entry.category != m_categoryFilter) continue;
-        if (!m_searchText.isEmpty() && !entry.name.contains(m_searchText, Qt::CaseInsensitive)
-            && !entry.category.contains(m_searchText, Qt::CaseInsensitive)) continue;
-        appendItem(QString(), static_cast<int>(index), entry.name, entry.category, true,
-                   entry.current, entry.defaults);
     }
     return list;
 }
 
 int SubToolLibrary::currentIndex() const
 {
-    if (isBrushTool()) return currentBrushIndexInTab(currentTabPtr());
-    return m_group < 0 ? -1 : m_groups[static_cast<std::size_t>(m_group)].current;
+    return currentBrushIndexInTab(currentTabPtr());
 }
 
 QString SubToolLibrary::currentBrushId() const
 {
-    if (!isBrushTool()) return {};
     const auto* tab = currentTabPtr();
     const int idx = currentBrushIndexInTab(tab);
     return (tab && idx >= 0) ? tab->brushes[idx].id : QString();
@@ -873,19 +1122,13 @@ QString SubToolLibrary::currentBrushId() const
 
 QString SubToolLibrary::currentName() const
 {
-    if (isBrushTool()) {
-        const auto* tab = currentTabPtr();
-        const int idx = currentBrushIndexInTab(tab);
-        return (tab && idx >= 0) ? tab->brushes[idx].name : QString();
-    }
-    if (m_group < 0) return {};
-    const auto& group = m_groups[static_cast<std::size_t>(m_group)];
-    return group.entries[static_cast<std::size_t>(group.current)].name;
+    const auto* tab = currentTabPtr();
+    const int idx = currentBrushIndexInTab(tab);
+    return (tab && idx >= 0) ? tab->brushes[idx].name : QString();
 }
 
 bool SubToolLibrary::currentBrushBuiltIn() const
 {
-    if (!isBrushTool()) return true;
     const auto* tab = currentTabPtr();
     const int idx = currentBrushIndexInTab(tab);
     return (tab && idx >= 0) ? tab->brushes[idx].builtIn : false;
@@ -894,24 +1137,18 @@ bool SubToolLibrary::currentBrushBuiltIn() const
 bool SubToolLibrary::currentRequiresRealistic() const
 {
     if (isBrushTool()) return activeEngine() == QStringLiteral("realistic");
-    if (m_group < 0) return false;
-    const auto& group = m_groups[static_cast<std::size_t>(m_group)];
-    return group.entries[static_cast<std::size_t>(group.current)].defaults.traditionalMedia;
+    const auto* tab = currentTabPtr();
+    const int idx = currentBrushIndexInTab(tab);
+    return (tab && idx >= 0) ? tab->brushes[idx].defaults.traditionalMedia : false;
 }
 
 bool SubToolLibrary::isModified() const
 {
-    if (isBrushTool()) {
-        const auto* tab = currentTabPtr();
-        const int idx = currentBrushIndexInTab(tab);
-        if (!tab || idx < 0) return false;
-        const auto& e = tab->brushes[idx];
-        return !(e.current == e.defaults);
-    }
-    if (m_group < 0) return false;
-    const auto& group = m_groups[static_cast<std::size_t>(m_group)];
-    const auto& entry = group.entries[static_cast<std::size_t>(group.current)];
-    return !(entry.current == entry.defaults);
+    const auto* tab = currentTabPtr();
+    const int idx = currentBrushIndexInTab(tab);
+    if (!tab || idx < 0) return false;
+    const auto& e = tab->brushes[idx];
+    return !(e.current == e.defaults);
 }
 
 } // namespace komapaint

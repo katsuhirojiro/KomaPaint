@@ -26,6 +26,7 @@ Rectangle {
     readonly property bool isBrushTool: Boolean(library && library.brushTool)
     property string toolLabel: Workspace.activeTool
     readonly property bool painting: Boolean(library && library.paintTool)
+    readonly property bool hasCollections: Boolean(library && library.hasCollections)
     readonly property int rowHeight: 40
 
     property bool showLockedBanner: false
@@ -35,11 +36,52 @@ Rectangle {
     property int targetTabBrushCount: 0
     property string brushDialogMode: "create" // "create" | "rename"
     property string targetBrushId: ""
+    property string targetBrushExecTool: ""
     property int targetBrushIndex: -1
 
     function presetSize(preset) { return Math.round(preset.size) }
 
+    function isStrokeRow(preset) {
+        const exec = preset.executableTool || Workspace.activeTool
+        return exec === "pen" || exec === "pencil" || exec === "brush"
+            || exec === "airbrush" || exec === "eraser" || exec === "boundary_eraser"
+            || exec === "smudge"
+    }
+
+    function presetBadgeText(preset) {
+        const exec = preset.executableTool || Workspace.activeTool
+        if (isStrokeRow(preset)) {
+            if (exec === "boundary_eraser") return qsTr("Boundary")
+            return panel.presetSize(preset) + " px"
+        }
+        const params = preset.toolParams || {}
+        if (exec === "smart_fill") return qsTr("Smart")
+        if (exec === "fill") return qsTr("Bucket")
+        if (exec === "wand") return params.contiguous === false ? qsTr("Global") : qsTr("Region")
+        if (exec === "lasso") return params.lassoMode || qsTr("Free")
+        return ""
+    }
+
     function tipLabel(preset) {
+        const exec = preset.executableTool || Workspace.activeTool
+        if (exec === "boundary_eraser") return qsTr("boundary-aware")
+        if (exec === "smart_fill") {
+            const p = preset.toolParams || {}
+            return qsTr("gap %1px").arg(p.gapClosing !== undefined ? p.gapClosing : 10)
+        }
+        if (exec === "fill") {
+            const p = preset.toolParams || {}
+            return qsTr("tol %1").arg(p.tolerance !== undefined ? p.tolerance : 28)
+        }
+        if (exec === "wand") {
+            const p = preset.toolParams || {}
+            return qsTr("tol %1").arg(p.tolerance !== undefined ? p.tolerance : 26)
+        }
+        if (exec === "lasso") {
+            const p = preset.toolParams || {}
+            return p.lassoMode || qsTr("freehand")
+        }
+        if (!isStrokeRow(preset)) return preset.category || exec
         if (panel.isBrushTool && panel.realisticEngine)
             return preset.mediumId === "watercolour" ? qsTr("Watercolour") : qsTr("Gouache")
         if (preset.blendStrength > 0) return qsTr("blend")
@@ -112,7 +154,7 @@ Rectangle {
         Item {
             Layout.fillWidth: true
             implicitHeight: 32
-            visible: panel.painting
+            visible: panel.hasCollections
 
             RowLayout {
                 anchors.fill: parent
@@ -138,7 +180,7 @@ Rectangle {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: panel.library.currentName || qsTr("No brush selected")
+                        text: panel.library.currentName || qsTr("No sub-tool selected")
                         color: KP.textSubtle
                         font.pixelSize: KP.fontMicro
                         elide: Text.ElideRight
@@ -146,11 +188,11 @@ Rectangle {
                 }
                 IconButton {
                     objectName: "createBrushButton"
-                    visible: panel.isBrushTool
+                    visible: panel.hasCollections
                     glyph: "plus"
                     iconSize: 12
                     cell: KP.controlHeightSmall
-                    tooltip: qsTr("Save current settings as a new brush")
+                    tooltip: qsTr("Save current settings as a new sub-tool")
                     onActivated: panel.openCreateBrushDialog()
                 }
                 IconButton {
@@ -159,7 +201,7 @@ Rectangle {
                     iconSize: 12
                     cell: KP.controlHeightSmall
                     tooltip: qsTr("Return this preset to its default settings")
-                    enabled: panel.library.modified && (!panel.isBrushTool || panel.library.currentBrushBuiltIn)
+                    enabled: panel.library.modified && panel.library.currentBrushBuiltIn
                     onActivated: panel.library.resetCurrent()
                 }
             }
@@ -332,13 +374,13 @@ Rectangle {
             }
         }
 
-        // ---- Level 2 Persistent Secondary User Collection Tabs
+        // ---- Level 2 Persistent Secondary User Collection Tabs (universal for every tool family)
         Rectangle {
             objectName: "collectionTabBar"
             Layout.fillWidth: true
             Layout.maximumWidth: panel.width
             implicitHeight: visible ? 26 : 0
-            visible: panel.painting && panel.isBrushTool
+            visible: panel.hasCollections
             clip: true
             color: KP.paneBg
 
@@ -463,7 +505,41 @@ Rectangle {
             }
         }
 
-        // ---- Search & (for non-brush tools) Category filter
+        // ---- Undo deleted tab banner
+        Rectangle {
+            objectName: "undoTabDeleteBanner"
+            Layout.fillWidth: true
+            Layout.leftMargin: KP.gapS
+            Layout.rightMargin: KP.gapS
+            Layout.topMargin: KP.gapXS
+            visible: panel.hasCollections && panel.library.canUndoTabDelete
+            implicitHeight: visible ? 24 : 0
+            radius: KP.radiusXS
+            color: KP.paneBgAlt
+            border.width: 1
+            border.color: KP.hairline
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: KP.gapS
+                anchors.rightMargin: KP.gapXS
+                spacing: KP.gapXS
+                Text {
+                    Layout.fillWidth: true
+                    text: qsTr("Collection tab deleted")
+                    color: KP.textMuted
+                    font.pixelSize: KP.fontMicro
+                    elide: Text.ElideRight
+                }
+                KpButton {
+                    objectName: "undoTabDeleteButton"
+                    small: true
+                    label: qsTr("Undo")
+                    onClicked: panel.library.undoDeleteTab()
+                }
+            }
+        }
+
+        // ---- Search & Category filter
         RowLayout {
             objectName: "subToolFilters"
             Layout.fillWidth: true
@@ -472,7 +548,7 @@ Rectangle {
             Layout.rightMargin: KP.gapS
             Layout.preferredHeight: 28
             spacing: KP.gapS
-            visible: panel.painting
+            visible: panel.hasCollections
 
             KpTextField {
                 id: searchField
@@ -480,14 +556,14 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
                 Layout.preferredHeight: 22
-                placeholder: panel.isBrushTool ? qsTr("Search brushes in tab") : qsTr("Search subtools")
+                placeholder: qsTr("Search sub-tools in tab")
                 text: panel.library.searchText
                 onEdited: function(value) { panel.library.searchText = value }
             }
             ComboBox {
                 id: categoryChoice
                 objectName: "subToolCategory"
-                visible: !panel.isBrushTool
+                visible: false
                 Layout.preferredWidth: 108
                 Layout.preferredHeight: 22
                 model: [qsTr("All categories")].concat(panel.library.categories)
@@ -529,7 +605,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: KP.gapS
             Layout.rightMargin: KP.gapS
-            visible: panel.painting && panel.library.lastError.length > 0
+            visible: panel.hasCollections && panel.library.lastError.length > 0
             implicitHeight: visible ? 22 : 0
             color: KP.rowSelected
             radius: KP.radiusXS
@@ -545,14 +621,14 @@ Rectangle {
             }
         }
 
-        // ---- Brush Preset List
+        // ---- Sub-Tool Preset List
         ListView {
             id: list
             objectName: "subToolList"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            visible: panel.painting
+            visible: panel.hasCollections
             model: panel.library.subTools
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: KpScrollBar { policy: ScrollBar.AsNeeded }
@@ -575,8 +651,8 @@ Rectangle {
                 TapHandler {
                     acceptedButtons: Qt.RightButton
                     onTapped: {
-                        if (!panel.isBrushTool) return
                         panel.targetBrushId = row.modelData.id
+                        panel.targetBrushExecTool = row.modelData.executableTool || Workspace.activeTool
                         panel.targetBrushIndex = row.presetIndex
                         brushContextMenu.popup()
                     }
@@ -611,7 +687,7 @@ Rectangle {
 
                     Rectangle {
                         Layout.alignment: Qt.AlignVCenter
-                        Layout.preferredWidth: 54
+                        Layout.preferredWidth: panel.isStrokeRow(row.modelData) ? 54 : 32
                         Layout.preferredHeight: 24
                         radius: KP.radiusXS
                         color: KP.isDark ? Qt.rgba(0, 0, 0, 0.22) : Qt.rgba(255, 255, 255, 0.65)
@@ -619,6 +695,7 @@ Rectangle {
                         border.color: KP.hairline
 
                         BrushStrokePreview {
+                            visible: panel.isStrokeRow(row.modelData)
                             anchors.fill: parent
                             anchors.margins: 2
                             brushSize: row.modelData.size
@@ -634,6 +711,13 @@ Rectangle {
                             blendStrength: row.modelData.blendStrength || 0
                             scaleHint: 0.60
                             ink: KP.text
+                        }
+                        KpIcon {
+                            visible: !panel.isStrokeRow(row.modelData)
+                            anchors.centerIn: parent
+                            name: "tools/" + ((row.modelData.executableTool === "smart_fill") ? "fill" : (row.modelData.executableTool || Workspace.activeTool))
+                            size: 16
+                            color: row.current ? KP.textAccent : KP.iconNormal
                         }
                     }
 
@@ -665,6 +749,7 @@ Rectangle {
                             Layout.fillWidth: true
                             spacing: KP.gapS
                             Text {
+                                visible: panel.isStrokeRow(row.modelData)
                                 text: row.modelData.hardness + "%"
                                 color: KP.textSubtle
                                 font.pixelSize: KP.fontMicro
@@ -672,7 +757,7 @@ Rectangle {
                             }
                             Text {
                                 text: panel.tipLabel(row.modelData)
-                                color: panel.realisticEngine ? KP.textAccent : KP.textSubtle
+                                color: (panel.isBrushTool && panel.realisticEngine) ? KP.textAccent : KP.textSubtle
                                 font.pixelSize: KP.fontMicro
                             }
                         }
@@ -681,7 +766,7 @@ Rectangle {
                     Text {
                         id: rowSize
                         Layout.alignment: Qt.AlignVCenter
-                        text: panel.presetSize(row.modelData) + " px"
+                        text: panel.presetBadgeText(row.modelData)
                         color: row.current ? KP.textMuted : KP.textSubtle
                         font.pixelSize: KP.fontXS
                         font.family: KP.fontMono
@@ -689,13 +774,14 @@ Rectangle {
 
                     IconButton {
                         objectName: "brushMenuButton_" + row.presetIndex
-                        visible: panel.isBrushTool && (row.hovered || row.current)
+                        visible: panel.hasCollections && (row.hovered || row.current)
                         glyph: "dots-h"
                         iconSize: 12
                         cell: 20
-                        tooltip: qsTr("Brush actions")
+                        tooltip: qsTr("Sub-tool actions")
                         onActivated: {
                             panel.targetBrushId = row.modelData.id
+                            panel.targetBrushExecTool = row.modelData.executableTool || Workspace.activeTool
                             panel.targetBrushIndex = row.presetIndex
                             brushContextMenu.popup()
                         }
@@ -709,13 +795,13 @@ Rectangle {
             objectName: "subToolNoResults"
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: panel.painting && list.count === 0
+            visible: panel.hasCollections && list.count === 0
             spacing: KP.gapS
             Item { Layout.fillHeight: true }
             Text {
                 Layout.fillWidth: true
                 text: panel.library.searchText.length > 0
-                      ? qsTr("No brushes match this search.")
+                      ? qsTr("No sub-tools match this search.")
                       : qsTr("This collection tab is empty.")
                 color: KP.textSubtle
                 font.pixelSize: KP.fontS
@@ -725,19 +811,19 @@ Rectangle {
             KpButton {
                 objectName: "emptyTabCreateBrushButton"
                 Layout.alignment: Qt.AlignHCenter
-                visible: panel.isBrushTool && panel.library.searchText.length === 0
+                visible: panel.hasCollections && panel.library.searchText.length === 0
                 small: true
-                label: qsTr("Create Brush from Current")
+                label: qsTr("Create Sub-Tool from Current")
                 onClicked: panel.openCreateBrushDialog()
             }
             Item { Layout.fillHeight: true }
         }
 
-        // ---- Not a painting tool
+        // ---- Not a sub-tool collection tool (e.g. Zoom, Hand, Eyedropper)
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: !panel.painting
+            visible: !panel.hasCollections
             ColumnLayout {
                 anchors.centerIn: parent
                 width: parent.width - 2 * KP.panelInset
@@ -870,6 +956,26 @@ Rectangle {
                 onObjectRemoved: function(index, object) { copyToTabSubmenu.removeItem(object) }
             }
         }
+        KpMenu {
+            id: moveToToolSubmenu
+            title: qsTr("Move to Compatible Tool")
+            enabled: panel.library.compatibleToolsFor(panel.targetBrushExecTool || Workspace.activeTool).length > 1
+            Instantiator {
+                model: panel.library.compatibleToolsFor(panel.targetBrushExecTool || Workspace.activeTool)
+                delegate: KpMenuItem {
+                    required property var modelData
+                    text: modelData
+                    enabled: modelData !== Workspace.activeTool
+                    onTriggered: {
+                        const tabs = panel.library.tabsForTool(modelData)
+                        if (tabs && tabs.length > 0)
+                            panel.library.moveSubToolTo(panel.targetBrushId, modelData, tabs[0].id)
+                    }
+                }
+                onObjectAdded: function(index, object) { moveToToolSubmenu.insertItem(index, object) }
+                onObjectRemoved: function(index, object) { moveToToolSubmenu.removeItem(object) }
+            }
+        }
         KpMenuItem {
             objectName: "brushMenuMoveUp"
             text: qsTr("Move Up")
@@ -901,8 +1007,10 @@ Rectangle {
         objectName: "tabNameDialog"
         bodyWidth: 320
         heading: panel.tabDialogMode === "rename" ? qsTr("Rename Collection Tab") : qsTr("New Collection Tab")
-        note: panel.realisticEngine ? qsTr("Saved inside your Realistic brushes collection.")
-                                    : qsTr("Saved inside your Digital brushes collection.")
+        note: panel.isBrushTool
+              ? (panel.realisticEngine ? qsTr("Saved inside your Realistic brushes collection.")
+                                       : qsTr("Saved inside your Digital brushes collection."))
+              : qsTr("Saved inside your %1 sub-tool collection.").arg(panel.toolLabel)
         body: [
             KpTextField {
                 id: tabNameInput

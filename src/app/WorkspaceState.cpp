@@ -154,10 +154,12 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     });
     m_brush = new BrushSettings(this);
     m_brush->setBrushEngine(m_brushEngine);
+    m_toolSettings = new ToolSettings(this);
     m_inputSettings = new input::TabletInputSettings(this);
     // The sub tool library follows the active tool wherever it changes (tool
     // palette, tab switch, session restore) and loads that tool's settings.
     m_subTools = new SubToolLibrary(m_brush, this);
+    m_subTools->setToolSettings(m_toolSettings);
     m_subTools->setTool(m_activeTool);
     connect(this, &WorkspaceState::activeToolChanged, m_subTools, &SubToolLibrary::setTool);
     m_emptyLayers = new LayerModel(this, false);

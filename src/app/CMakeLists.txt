@@ -3,6 +3,7 @@ add_library(komapaint_app STATIC
     BrushLibraryStore.cpp
     BrushLibraryStore.h
     BrushSettings.h
+    ToolSettings.h
     CanvasViewport.cpp
     CanvasViewport.h
     CommandLine.cpp

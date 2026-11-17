@@ -115,7 +115,7 @@ QJsonObject collectionToJson(const EngineCollectionData& col)
     return out;
 }
 
-bool collectionFromJson(const QJsonObject& obj, bool forceTraditionalMedia,
+bool collectionFromJson(const QJsonObject& obj, int forcedTraditionalMedia,
                         EngineCollectionData* out)
 {
     if (!out) return false;
@@ -137,8 +137,10 @@ bool collectionFromJson(const QJsonObject& obj, bool forceTraditionalMedia,
             if (!itemVal.isObject()) return false;
             BrushEntryData entry;
             if (!entryFromJson(itemVal.toObject(), &entry)) return false;
-            entry.defaults.traditionalMedia = forceTraditionalMedia;
-            entry.current.traditionalMedia = forceTraditionalMedia;
+            if (forcedTraditionalMedia >= 0) {
+                entry.defaults.traditionalMedia = (forcedTraditionalMedia != 0);
+                entry.current.traditionalMedia = (forcedTraditionalMedia != 0);
+            }
             tab.brushes.append(std::move(entry));
         }
         if (tab.currentBrushId.isEmpty() && !tab.brushes.isEmpty())
@@ -156,8 +158,9 @@ bool collectionFromJson(const QJsonObject& obj, bool forceTraditionalMedia,
     return true;
 }
 
-bool bundledCollectionFromJson(const QJsonObject& obj, bool forceTraditionalMedia,
-                               EngineCollectionData* out, QStringList* builtInIds)
+bool bundledCollectionFromJson(const QJsonObject& obj, int forcedTraditionalMedia,
+                               EngineCollectionData* out, QStringList* builtInIds,
+                               const QString& defaultExecutableTool = QString())
 {
     if (!out) return false;
     const auto tabsVal = obj.value(QStringLiteral("tabs"));
@@ -182,7 +185,10 @@ bool bundledCollectionFromJson(const QJsonObject& obj, bool forceTraditionalMedi
             if (name.isEmpty()) return false;
             BrushPresetValues values;
             if (!BrushLibraryStore::parseValues(pObj, &values)) return false;
-            values.traditionalMedia = forceTraditionalMedia;
+            if (forcedTraditionalMedia >= 0) values.traditionalMedia = (forcedTraditionalMedia != 0);
+            if (values.executableTool.isEmpty() && !defaultExecutableTool.isEmpty()) {
+                values.executableTool = defaultExecutableTool;
+            }
             BrushEntryData entry;
             entry.id = id.isEmpty()
                 ? QStringLiteral("builtin-%1-%2").arg(tab.id, QString::number(tab.brushes.size()))
@@ -251,16 +257,43 @@ bool BrushLibraryStore::parseValues(const QJsonObject& object, BrushPresetValues
 {
     if (!out) return false;
     BrushPresetValues v;
-    if (!readInteger(object, "size", BrushSettings::MinSize, BrushSettings::MaxSize, &v.size)
-        || !readInteger(object, "opacity", 0, 100, &v.opacity)
-        || !readInteger(object, "flow", 0, 100, &v.flow)
-        || !readInteger(object, "spacing", BrushSettings::MinSpacing, BrushSettings::MaxSpacing, &v.spacing)
-        || !readInteger(object, "hardness", 0, 100, &v.hardness)
-        || !readInteger(object, "stabilization", 0, 100, &v.stabilization)
-        || !object.value(QStringLiteral("textured")).isBool()) {
-        return false;
+    const QJsonValue execVal = object.value(QStringLiteral("executableTool"));
+    if (!execVal.isUndefined()) {
+        if (!execVal.isString()) return false;
+        v.executableTool = execVal.toString().trimmed();
     }
-    v.textured = object.value(QStringLiteral("textured")).toBool();
+    const bool brushRequired = v.executableTool.isEmpty() ||
+        v.executableTool == QStringLiteral("pen") ||
+        v.executableTool == QStringLiteral("pencil") ||
+        v.executableTool == QStringLiteral("brush") ||
+        v.executableTool == QStringLiteral("airbrush") ||
+        v.executableTool == QStringLiteral("eraser") ||
+        v.executableTool == QStringLiteral("boundary_eraser") ||
+        v.executableTool == QStringLiteral("smudge");
+
+    if (brushRequired) {
+        if (!readInteger(object, "size", BrushSettings::MinSize, BrushSettings::MaxSize, &v.size)
+            || !readInteger(object, "opacity", 0, 100, &v.opacity)
+            || !readInteger(object, "flow", 0, 100, &v.flow)
+            || !readInteger(object, "spacing", BrushSettings::MinSpacing, BrushSettings::MaxSpacing, &v.spacing)
+            || !readInteger(object, "hardness", 0, 100, &v.hardness)
+            || !readInteger(object, "stabilization", 0, 100, &v.stabilization)
+            || !object.value(QStringLiteral("textured")).isBool()) {
+            return false;
+        }
+        v.textured = object.value(QStringLiteral("textured")).toBool();
+    } else {
+        if (!readOptionalInteger(object, "size", BrushSettings::MinSize, BrushSettings::MaxSize, &v.size)
+            || !readOptionalInteger(object, "opacity", 0, 100, &v.opacity)
+            || !readOptionalInteger(object, "flow", 0, 100, &v.flow)
+            || !readOptionalInteger(object, "spacing", BrushSettings::MinSpacing, BrushSettings::MaxSpacing, &v.spacing)
+            || !readOptionalInteger(object, "hardness", 0, 100, &v.hardness)
+            || !readOptionalInteger(object, "stabilization", 0, 100, &v.stabilization)
+            || !readOptionalBool(object, "textured", &v.textured)) {
+            return false;
+        }
+    }
+
     const QJsonValue tipVal = object.value(QStringLiteral("tipStyle"));
     if (tipVal.isString()) {
         v.tipStyle = BrushSettings::normalizeTipStyle(tipVal.toString());
@@ -271,10 +304,15 @@ bool BrushLibraryStore::parseValues(const QJsonObject& object, BrushPresetValues
 
     if (!readOptionalInteger(object, "pressureSize", 0, 100, &v.pressureSize)
         || !readOptionalInteger(object, "pressureOpacity", 0, 100, &v.pressureOpacity)
+        || !readOptionalInteger(object, "pressureFlow", 0, 100, &v.pressureFlow)
         || !readOptionalInteger(object, "pressureGamma", 40, 200, &v.pressureGamma)
         || !readOptionalInteger(object, "minSizeRatio", 5, 100, &v.minSizeRatio)
+        || !readOptionalInteger(object, "tiltSize", 0, 100, &v.tiltSize)
+        || !readOptionalBool(object, "tiltAngle", &v.tiltAngle)
+        || !readOptionalBool(object, "stylusRotation", &v.stylusRotation)
         || !readOptionalInteger(object, "blendStrength", 0, 100, &v.blendStrength)
         || !readOptionalInteger(object, "colorMix", 0, 100, &v.colorMix)
+        || !readOptionalBool(object, "erase", &v.erase)
         || !readOptionalBool(object, "traditionalMedia", &v.traditionalMedia)
         || !readOptionalBool(object, "persistentReservoir", &v.persistentReservoir)
         || !readOptionalInteger(object, "paintLoad", 10, 100, &v.paintLoad)
@@ -310,6 +348,10 @@ bool BrushLibraryStore::parseValues(const QJsonObject& object, BrushPresetValues
     if (mixVal.isObject()) {
         v.materialMixture = mixVal.toObject().toVariantMap();
     }
+    const QJsonValue paramsVal = object.value(QStringLiteral("toolParams"));
+    if (paramsVal.isObject()) {
+        v.toolParams = paramsVal.toObject().toVariantMap();
+    }
     *out = std::move(v);
     return true;
 }
@@ -327,10 +369,15 @@ QJsonObject BrushLibraryStore::valuesToJson(const BrushPresetValues& v)
     obj.insert(QStringLiteral("tipStyle"), v.tipStyle);
     obj.insert(QStringLiteral("pressureSize"), v.pressureSize);
     obj.insert(QStringLiteral("pressureOpacity"), v.pressureOpacity);
+    obj.insert(QStringLiteral("pressureFlow"), v.pressureFlow);
     obj.insert(QStringLiteral("pressureGamma"), v.pressureGamma);
     obj.insert(QStringLiteral("minSizeRatio"), v.minSizeRatio);
+    obj.insert(QStringLiteral("tiltSize"), v.tiltSize);
+    obj.insert(QStringLiteral("tiltAngle"), v.tiltAngle);
+    obj.insert(QStringLiteral("stylusRotation"), v.stylusRotation);
     obj.insert(QStringLiteral("blendStrength"), v.blendStrength);
     obj.insert(QStringLiteral("colorMix"), v.colorMix);
+    obj.insert(QStringLiteral("erase"), v.erase);
     obj.insert(QStringLiteral("traditionalMedia"), v.traditionalMedia);
     obj.insert(QStringLiteral("persistentReservoir"), v.persistentReservoir);
     obj.insert(QStringLiteral("mediumId"), v.mediumId);
@@ -352,6 +399,10 @@ QJsonObject BrushLibraryStore::valuesToJson(const BrushPresetValues& v)
     obj.insert(QStringLiteral("pressureToContact"), v.pressureToContact);
     if (!v.materialMixture.isEmpty())
         obj.insert(QStringLiteral("materialMixture"), QJsonObject::fromVariantMap(v.materialMixture));
+    if (!v.executableTool.isEmpty())
+        obj.insert(QStringLiteral("executableTool"), v.executableTool);
+    if (!v.toolParams.isEmpty())
+        obj.insert(QStringLiteral("toolParams"), QJsonObject::fromVariantMap(v.toolParams));
     return obj;
 }
 
@@ -366,13 +417,63 @@ bool BrushLibraryStore::loadBundledCollections(const QJsonObject& root,
 
     BrushLibraryDocument doc;
     if (!bundledCollectionFromJson(collections.value(QStringLiteral("digital")).toObject(),
-                                   false, &doc.digital, &doc.knownBuiltInIds)) {
+                                   0, &doc.digital, &doc.knownBuiltInIds, QStringLiteral("brush"))) {
         return fail(error, QStringLiteral("Invalid digital brush collection in catalog."));
     }
     if (!bundledCollectionFromJson(collections.value(QStringLiteral("realistic")).toObject(),
-                                   true, &doc.realistic, &doc.knownBuiltInIds)) {
+                                   1, &doc.realistic, &doc.knownBuiltInIds, QStringLiteral("brush"))) {
         return fail(error, QStringLiteral("Invalid realistic brush collection in catalog."));
     }
+
+    // Seed universal toolCollections from "groups" (for pen/pencil/airbrush/eraser)
+    // and then override/extend with explicit "toolCollections" definitions.
+    const QJsonArray groups = root.value(QStringLiteral("groups")).toArray();
+    for (const QJsonValue& groupVal : groups) {
+        const QJsonObject gObj = groupVal.toObject();
+        const QString tool = gObj.value(QStringLiteral("tool")).toString().trimmed();
+        if (tool.isEmpty() || tool == QStringLiteral("brush")) continue;
+        const bool erase = gObj.value(QStringLiteral("erase")).toBool(false);
+        const QJsonArray presets = gObj.value(QStringLiteral("presets")).toArray();
+        EngineCollectionData col;
+        BrushTabData tab;
+        tab.id = QStringLiteral("%1-default").arg(tool);
+        tab.name = QStringLiteral("Default");
+        for (const QJsonValue& pVal : presets) {
+            if (!pVal.isObject()) continue;
+            const auto pObj = pVal.toObject();
+            BrushPresetValues values;
+            if (!parseValues(pObj, &values)) continue;
+            values.erase = erase;
+            if (values.executableTool.isEmpty()) values.executableTool = tool;
+            BrushEntryData entry;
+            const QString id = pObj.value(QStringLiteral("id")).toString().trimmed();
+            entry.id = id.isEmpty() ? QStringLiteral("builtin-%1-%2").arg(tool, QString::number(tab.brushes.size())) : id;
+            entry.name = pObj.value(QStringLiteral("name")).toString().trimmed();
+            entry.category = pObj.value(QStringLiteral("category")).toString().trimmed();
+            if (entry.category.isEmpty()) entry.category = tab.name;
+            entry.builtIn = true;
+            entry.defaults = values;
+            entry.current = values;
+            if (!doc.knownBuiltInIds.contains(entry.id)) doc.knownBuiltInIds.append(entry.id);
+            tab.brushes.append(std::move(entry));
+        }
+        if (!tab.brushes.isEmpty()) tab.currentBrushId = tab.brushes.first().id;
+        col.defaultTabId = tab.id;
+        col.currentTabId = tab.id;
+        col.tabs.append(std::move(tab));
+        doc.toolCollections.insert(tool, std::move(col));
+    }
+
+    const QJsonObject toolCols = root.value(QStringLiteral("toolCollections")).toObject();
+    for (auto it = toolCols.constBegin(); it != toolCols.constEnd(); ++it) {
+        if (!it.value().isObject()) continue;
+        EngineCollectionData col;
+        if (!bundledCollectionFromJson(it.value().toObject(), -1, &col, &doc.knownBuiltInIds, it.key())) {
+            return fail(error, QStringLiteral("Invalid tool collection '%1' in catalog.").arg(it.key()));
+        }
+        doc.toolCollections.insert(it.key(), std::move(col));
+    }
+
     *out = std::move(doc);
     return true;
 }
@@ -397,8 +498,9 @@ bool BrushLibraryStore::load(const QString& filePath,
         return fail(error, QStringLiteral("Brush library JSON is corrupt."));
 
     const QJsonObject root = doc.object();
-    if (root.value(QStringLiteral("format")).toString() != kFormatName
-        || root.value(QStringLiteral("version")).toInt(-1) != 1) {
+    const int version = root.value(QStringLiteral("format")).toString() == kFormatName
+        ? root.value(QStringLiteral("version")).toInt(-1) : -1;
+    if (version != 1 && version != 2) {
         return fail(error, QStringLiteral("Unsupported brush library format or version."));
     }
     const QByteArray expectedSha = root.value(QStringLiteral("sha256")).toString().toLatin1();
@@ -412,13 +514,37 @@ bool BrushLibraryStore::load(const QString& filePath,
         const QString id = idVal.toString().trimmed();
         if (!id.isEmpty()) loaded.knownBuiltInIds.append(id);
     }
-    if (!collectionFromJson(root.value(QStringLiteral("digital")).toObject(), false, &loaded.digital)
-        || !collectionFromJson(root.value(QStringLiteral("realistic")).toObject(), true, &loaded.realistic)) {
+    if (!collectionFromJson(root.value(QStringLiteral("digital")).toObject(), 0, &loaded.digital)
+        || !collectionFromJson(root.value(QStringLiteral("realistic")).toObject(), 1, &loaded.realistic)) {
         return fail(error, QStringLiteral("Brush library contains invalid engine collections."));
+    }
+
+    const QJsonObject savedToolCols = root.value(QStringLiteral("toolCollections")).toObject();
+    for (auto it = savedToolCols.constBegin(); it != savedToolCols.constEnd(); ++it) {
+        if (!it.value().isObject()) continue;
+        EngineCollectionData col;
+        if (!collectionFromJson(it.value().toObject(), -1, &col)) {
+            return fail(error, QStringLiteral("Brush library contains invalid tool collection '%1'.").arg(it.key()));
+        }
+        loaded.toolCollections.insert(it.key(), std::move(col));
     }
 
     mergeNewBuiltIns(bundled.digital, loaded.knownBuiltInIds, &loaded.digital, &loaded.knownBuiltInIds);
     mergeNewBuiltIns(bundled.realistic, loaded.knownBuiltInIds, &loaded.realistic, &loaded.knownBuiltInIds);
+    for (auto it = bundled.toolCollections.constBegin(); it != bundled.toolCollections.constEnd(); ++it) {
+        if (!loaded.toolCollections.contains(it.key())) {
+            loaded.toolCollections.insert(it.key(), it.value());
+            for (const auto& bTab : it.value().tabs) {
+                for (const auto& bEntry : bTab.brushes) {
+                    if (bEntry.builtIn && !loaded.knownBuiltInIds.contains(bEntry.id))
+                        loaded.knownBuiltInIds.append(bEntry.id);
+                }
+            }
+        } else {
+            mergeNewBuiltIns(it.value(), loaded.knownBuiltInIds,
+                             &loaded.toolCollections[it.key()], &loaded.knownBuiltInIds);
+        }
+    }
     *out = std::move(loaded);
     return true;
 }
@@ -435,12 +561,18 @@ bool BrushLibraryStore::save(const QString& filePath,
     QJsonArray knownIds;
     for (const auto& id : doc.knownBuiltInIds) knownIds.append(id);
 
+    QJsonObject toolColsJson;
+    for (auto it = doc.toolCollections.constBegin(); it != doc.toolCollections.constEnd(); ++it) {
+        toolColsJson.insert(it.key(), collectionToJson(it.value()));
+    }
+
     QJsonObject root;
     root.insert(QStringLiteral("format"), kFormatName);
-    root.insert(QStringLiteral("version"), 1);
+    root.insert(QStringLiteral("version"), 2);
     root.insert(QStringLiteral("knownBuiltInIds"), knownIds);
     root.insert(QStringLiteral("digital"), collectionToJson(doc.digital));
     root.insert(QStringLiteral("realistic"), collectionToJson(doc.realistic));
+    root.insert(QStringLiteral("toolCollections"), toolColsJson);
     root.insert(QStringLiteral("sha256"), QString::fromLatin1(digestOf(root)));
 
     QSaveFile saveFile(filePath);
