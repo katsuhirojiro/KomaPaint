@@ -27,7 +27,7 @@ constexpr wchar_t kDotKomaSubKey[] = L"Software\\Classes\\.koma";
 constexpr wchar_t kProgIdSubKey[] = L"Software\\Classes\\KomaPaint.Illustration";
 constexpr wchar_t kProgIdDefaultIconSubKey[] = L"Software\\Classes\\KomaPaint.Illustration\\DefaultIcon";
 constexpr wchar_t kProgIdCommandSubKey[] = L"Software\\Classes\\KomaPaint.Illustration\\shell\\open\\command";
-constexpr wchar_t kSupportedTypesSubKey[] = L"Software\\Classes\\Applications\\komapaint.exe\\SupportedTypes";
+constexpr wchar_t kSupportedTypesSubKey[] = L"Software\\Classes\\Applications\\KomaPaint.exe\\SupportedTypes";
 
 #if defined(Q_OS_WIN)
 

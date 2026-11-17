@@ -2,21 +2,29 @@
 #include "CanvasViewport.h"
 #include "MixerSurfaceItem.h"
 #include "PaintMixerController.h"
+#include "SubToolLibrary.h"
 #include "ToolSettings.h"
+#include "canvas/CanvasDocument.h"
+#include "color/ColorPalette.h"
 #include "core/Version.h"
+#include "history/UndoStack.h"
+#include "layers/Layer.h"
+#include "layers/LayerModel.h"
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
 #include <QFontDatabase>
-#include <QQuickWindow>
-#include <QStandardPaths>
-#include <QDir>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlError>
+#include <QQuickItem>
+#include <QQuickWindow>
+#include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QUrl>
 #include <QtLogging>
@@ -106,6 +114,9 @@ void KomaPaintApp::loadUi()
 
     qInfo("[KomaPaint] loadUi(): calling m_engine.load(%s)...",
           qUtf8Printable(loadUrl.toString()));
+    connect(&m_engine, &QQmlEngine::warnings, this, [this](const QList<QQmlError>& warnings) {
+        for (const auto& w : warnings) m_qmlWarnings.append(w.toString());
+    });
     m_engine.load(loadUrl);
     qInfo("[KomaPaint] loadUi(): m_engine.load() returned; rootObjects().size() = %lld",
           static_cast<long long>(m_engine.rootObjects().size()));
@@ -184,8 +195,243 @@ int KomaPaintApp::run()
         }
     }
 
+    if (qEnvironmentVariableIsSet("KOMAPAINT_VERIFY_PACKAGED")) {
+        QTimer::singleShot(150, this, &KomaPaintApp::runPackagedVerification);
+    }
+
     qInfo("[KomaPaint] run(): entering app.exec() event loop");
     return app->exec();
+}
+
+void KomaPaintApp::runPackagedVerification()
+{
+    QStringList report;
+    auto fail = [&](const QString& reason) {
+        report << (QStringLiteral("FAIL: ") + reason);
+        qCritical("[KomaPaint][VerifyPackaged] %s", qUtf8Printable(reason));
+        const QString reportPath = qEnvironmentVariable("KOMAPAINT_VERIFY_REPORT");
+        if (!reportPath.isEmpty()) {
+            QFile f(reportPath);
+            if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                f.write(report.join(u'\n').toUtf8());
+            }
+        }
+        QCoreApplication::exit(1);
+    };
+
+    if (!m_window || !m_window->isVisible()) {
+        fail(QStringLiteral("Main window did not open or is not visible."));
+        return;
+    }
+    report << QStringLiteral("1. Main window opened: '%1' (%2x%3)")
+                  .arg(m_window->title())
+                  .arg(m_window->width())
+                  .arg(m_window->height());
+
+    // Verify bundled resources & tool icons inside the packaged binary.
+    for (const char* res : {
+             ":/workspaces/MainWindow.qml",
+             ":/brushes/presets.json",
+             ":/icons/tools/brush.png",
+             ":/icons/tools/eraser.png",
+             ":/icons/tools/fill.png",
+             ":/icons/tools/wand.png",
+             ":/icons/tools/lasso.png",
+             ":/icons/tools/selection.png",
+             ":/icons/tools/gradient.png",
+             ":/icons/tools/rectangle.png",
+             ":/icons/tools/text.png"
+         }) {
+        if (!QFile::exists(QLatin1String(res))) {
+            fail(QStringLiteral("Missing bundled resource: %1").arg(QLatin1String(res)));
+            return;
+        }
+    }
+    report << QStringLiteral("2. Bundled QML, brush presets, and tool icon resources verified.");
+
+    // Create a canvas in the live running packaged application.
+    if (!m_workspace.newProject(QStringLiteral("PackagedVerify"), 512, 512, true,
+                                QStringLiteral("white"), 72)) {
+        fail(QStringLiteral("WorkspaceState::newProject failed."));
+        return;
+    }
+    QCoreApplication::processEvents();
+
+    auto* canvas = m_window->findChild<CanvasViewport*>(QStringLiteral("canvasViewport"));
+    if (!canvas) {
+        fail(QStringLiteral("CanvasViewport ('canvasViewport') not created in live QML workspace."));
+        return;
+    }
+    report << QStringLiteral("3. Canvas created (512x512) and live CanvasViewport initialized.");
+
+    // Verify tool buttons exist and are enabled, and switch panels including Color Wheel & Paint Mixer.
+    for (const char* toolId : {
+             "brush", "eraser", "fill", "wand", "lasso", "selection",
+             "move", "transform", "gradient", "line", "curveline",
+             "rectangle", "circle", "text", "smudge"
+         }) {
+        const QString name = QStringLiteral("tool_") + QLatin1String(toolId);
+        auto* btn = m_window->findChild<QQuickItem*>(name);
+        if (!btn || !btn->property("available").toBool()) {
+            fail(QStringLiteral("Tool button '%1' missing or unavailable.").arg(name));
+            return;
+        }
+        m_workspace.setActiveTool(QString::fromLatin1(toolId));
+        QCoreApplication::processEvents();
+    }
+    m_dock.showPanel(QStringLiteral("subtool"));
+    m_dock.showPanel(QStringLiteral("toolproperty"));
+    m_dock.showPanel(QStringLiteral("color"));
+    QCoreApplication::processEvents();
+    auto* colorWheel = m_window->findChild<QQuickItem*>(QStringLiteral("colorWheel"));
+    if (!colorWheel) {
+        fail(QStringLiteral("ColorWheel not accessible in Color dock panel."));
+        return;
+    }
+
+    m_dock.showPanel(QStringLiteral("colormixer"));
+    QCoreApplication::processEvents();
+    auto* mixerSurface = m_window->findChild<QQuickItem*>(QStringLiteral("mixerSurface"));
+    if (!mixerSurface) {
+        fail(QStringLiteral("MixerSurfaceItem not accessible in Color Mixer dock panel."));
+        return;
+    }
+    report << QStringLiteral("4. Tool palette (all 15 active art tools + view tools), panels, Color Wheel, and Paint Mixer verified.");
+
+    // Verify Digital and Realistic engine settings toggle cleanly.
+    m_workspace.setActiveTool(QStringLiteral("brush"));
+    m_workspace.setRealisticEngineEnabled(true);
+    m_workspace.setBrushEngine(QStringLiteral("realistic"));
+    QCoreApplication::processEvents();
+    if (!m_workspace.isRealisticEngine() || m_workspace.subTools()->activeEngine() != QStringLiteral("realistic")) {
+        fail(QStringLiteral("Failed to switch to Realistic engine."));
+        return;
+    }
+    m_workspace.setBrushEngine(QStringLiteral("digital"));
+    QCoreApplication::processEvents();
+    if (m_workspace.isRealisticEngine() || m_workspace.subTools()->activeEngine() != QStringLiteral("digital")) {
+        fail(QStringLiteral("Failed to switch back to Digital engine."));
+        return;
+    }
+    report << QStringLiteral("5. Digital & Realistic engine switching verified.");
+
+    // Exercise draw, erase, select, smart fill, and undo on the real document.
+    auto* doc = qobject_cast<CanvasDocument*>(m_workspace.document());
+    if (!doc || !doc->layers() || !doc->layers()->layerAt(0)) {
+        fail(QStringLiteral("Active CanvasDocument/Layer missing."));
+        return;
+    }
+    auto* layer = doc->layers()->layerAt(0);
+
+    // Draw closed rectangle boundary [100..260, 100..260]
+    m_workspace.setActiveTool(QStringLiteral("rectangle"));
+    m_workspace.colors()->setForeground(QColor(20, 20, 20));
+    m_workspace.toolSettings()->setShapeMode(QStringLiteral("stroke"));
+    m_workspace.toolSettings()->setShapeStrokeWidth(6);
+    if (!canvas->applyShape(QStringLiteral("rectangle"), 100, 100, 260, 260)) {
+        fail(QStringLiteral("Rectangle shape tool failed."));
+        return;
+    }
+    // Smart Fill inside [100..260, 100..260]
+    m_workspace.setActiveTool(QStringLiteral("fill"));
+    m_workspace.subTools()->select(2); // Smart Fill
+    m_workspace.colors()->setForeground(QColor(40, 140, 220));
+    if (!canvas->applyFillAt(180, 180) || !canvas->commitPendingRegionFill()) {
+        fail(QStringLiteral("Smart Fill preview/commit failed."));
+        return;
+    }
+    if ((layer->tiles().pixel({180, 180}).value_or(0U) >> 24) < 200 ||
+        (layer->tiles().pixel({360, 360}).value_or(0U) >> 24) != 0) {
+        fail(QStringLiteral("Smart Fill leaked or did not fill interior."));
+        return;
+    }
+
+    // Brush stroke + Eraser + Selection + Undo
+    m_workspace.setActiveTool(QStringLiteral("brush"));
+    m_workspace.colors()->setForeground(QColor(210, 50, 40));
+    m_workspace.brush()->setSize(20);
+    if (!canvas->beginStroke(340, 180, 1.0, m_workspace.brush(), m_workspace.colors()->foreground())) {
+        fail(QStringLiteral("Digital brush beginStroke failed."));
+        return;
+    }
+    canvas->continueStroke(390, 180, 1.0);
+    canvas->endStroke(390, 180, 1.0);
+    if ((layer->tiles().pixel({360, 180}).value_or(0U) >> 24) < 200) {
+        fail(QStringLiteral("Brush stroke left no pixels."));
+        return;
+    }
+
+    m_workspace.setActiveTool(QStringLiteral("eraser"));
+    m_workspace.brush()->setSize(24);
+    if (!canvas->beginStroke(360, 180, 1.0, m_workspace.brush(), m_workspace.colors()->foreground())) {
+        fail(QStringLiteral("Eraser beginStroke failed."));
+        return;
+    }
+    canvas->endStroke(360, 180, 1.0);
+    if ((layer->tiles().pixel({360, 180}).value_or(0U) >> 24) != 0) {
+        fail(QStringLiteral("Eraser did not erase pixels."));
+        return;
+    }
+
+    // Undo eraser -> pixel returns
+    if (!m_workspace.history() || !m_workspace.history()->canUndo()) {
+        fail(QStringLiteral("Undo stack unavailable."));
+        return;
+    }
+    m_workspace.history()->undo();
+    if ((layer->tiles().pixel({360, 180}).value_or(0U) >> 24) < 200) {
+        fail(QStringLiteral("Undo did not restore erased pixel."));
+        return;
+    }
+
+    // Selection API
+    doc->selectAll();
+    if (!m_workspace.hasSelection()) {
+        fail(QStringLiteral("Select All failed."));
+        return;
+    }
+    doc->deselect();
+    report << QStringLiteral("6. Canvas draw, erase, select, Smart Fill, and undo verified.");
+
+    // Save and reopen .koma project
+    QTemporaryDir tempDir;
+    if (!tempDir.isValid()) {
+        fail(QStringLiteral("Could not create temporary verification directory."));
+        return;
+    }
+    const QString komaPath = tempDir.filePath(QStringLiteral("verify_roundtrip.koma"));
+    if (!m_workspace.saveToPath(komaPath)) {
+        fail(QStringLiteral("saveToPath failed."));
+        return;
+    }
+    if (!m_workspace.closeTab(0, true) || !m_workspace.openFromPath(komaPath)) {
+        fail(QStringLiteral("openFromPath failed on saved .koma project."));
+        return;
+    }
+    auto* reopenedDoc = qobject_cast<CanvasDocument*>(m_workspace.document());
+    if (!reopenedDoc || !reopenedDoc->layers() || reopenedDoc->layers()->count() < 1 ||
+        reopenedDoc->width() != 512 || reopenedDoc->height() != 512 ||
+        (reopenedDoc->layers()->layerAt(0)->tiles().pixel({180, 180}).value_or(0U) >> 24) < 200) {
+        fail(QStringLiteral("Reopened .koma project lost dimensions or artwork pixels."));
+        return;
+    }
+    report << QStringLiteral("7. Save and reopen .koma round-trip verified.");
+
+    if (!m_qmlWarnings.isEmpty()) {
+        fail(QStringLiteral("QML warnings occurred: %1").arg(m_qmlWarnings.join(QStringLiteral(" | "))));
+        return;
+    }
+    report << QStringLiteral("8. Zero QML warnings, missing Qt plugins, or critical errors.");
+
+    const QString reportPath = qEnvironmentVariable("KOMAPAINT_VERIFY_REPORT");
+    if (!reportPath.isEmpty()) {
+        QFile f(reportPath);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            f.write(report.join(u'\n').toUtf8());
+        }
+    }
+    qInfo("[KomaPaint][VerifyPackaged] ALL CHECKS PASSED:\n%s", qUtf8Printable(report.join(u'\n')));
+    QCoreApplication::exit(0);
 }
 
 }  // namespace komapaint

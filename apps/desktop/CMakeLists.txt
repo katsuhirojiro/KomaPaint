@@ -11,6 +11,10 @@ qt_add_executable(komapaint WIN32
     ${CMAKE_SOURCE_DIR}/resources/qml.qrc
 )
 
+set_target_properties(komapaint PROPERTIES
+    OUTPUT_NAME "KomaPaint"
+)
+
 target_link_libraries(komapaint PRIVATE
     komapaint::app
     Qt6::Widgets   # QApplication for native menus / file dialogs

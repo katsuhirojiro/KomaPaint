@@ -112,7 +112,7 @@ jobs:
       - name: Verify executable exists
         shell: pwsh
         run: |
-          $exe = "${{ env.OUTPUT_DIR }}\komapaint.exe"
+          $exe = "${{ env.OUTPUT_DIR }}\KomaPaint.exe"
           if (!(Test-Path $exe)) {
             Write-Error "Expected build output not found: $exe"
             Write-Host "Files in build\bin:"
@@ -201,16 +201,16 @@ jobs:
       - name: Stage application directory
         shell: pwsh
         run: |
-          # Start from a clean staging directory containing only komapaint.exe.
+          # Start from a clean staging directory containing only KomaPaint.exe.
           # Do NOT pre-create qt.conf: windeployqt writes its own qt.conf into
           # --dir pointing Plugins/Qml2Imports at the relative subdirectories it
           # creates; overwriting it with "Plugins=." can break plugin lookup.
           if (Test-Path "${{ env.STAGE_DIR }}") { Remove-Item "${{ env.STAGE_DIR }}" -Recurse -Force }
           New-Item -ItemType Directory -Force -Path "${{ env.STAGE_DIR }}" | Out-Null
-          Copy-Item "${{ env.OUTPUT_DIR }}\komapaint.exe" "${{ env.STAGE_DIR }}\komapaint.exe" -Force
-          Write-Host "Staged komapaint.exe into ${{ env.STAGE_DIR }}"
+          Copy-Item "${{ env.OUTPUT_DIR }}\KomaPaint.exe" "${{ env.STAGE_DIR }}\KomaPaint.exe" -Force
+          Write-Host "Staged KomaPaint.exe into ${{ env.STAGE_DIR }}"
 
-      - name: Deploy Qt runtime dependencies (windeployqt)
+      - name: Deploy Qt and MSVC runtime dependencies (windeployqt)
         shell: pwsh
         run: |
           $windeploy = Join-Path "${{ steps.qt.outputs.qtBin }}" "windeployqt.exe"
@@ -218,28 +218,19 @@ jobs:
             Write-Error "windeployqt.exe not found at $windeploy"
             exit 1
           }
-          $exe    = "${{ env.STAGE_DIR }}\komapaint.exe"
+          $exe    = "${{ env.STAGE_DIR }}\KomaPaint.exe"
           $qmlDir = "${{ github.workspace }}\ui"
-          # Run windeployqt against the STAGED (single-exe) folder so only the
-          # runtime dependencies actually needed by komapaint.exe are pulled in.
-          # QML is bundled inside the executable via the qml.qrc resource, but
-          # we still pass --qmldir so windeployqt picks up any QML plugin modules
-          # (QtQuick, QtQuickControls2, QtQuickLayouts) that the QML engine loads
-          # at runtime.
           Push-Location "${{ env.STAGE_DIR }}"
-          # IMPORTANT: do NOT pass --no-platform-plugins / do NOT restrict to a
-          # single platform plugin. The offscreen plugin (qoffscreen.dll) is
-          # required for headless smoke testing in CI, and shipping qwindows.dll
-          # alone is not enough for all runtime scenarios.
-          # --no-system-d3d-compiler / --no-opengl-sw keep the payload small.
-          & $windeploy --release --no-compiler-runtime --no-system-d3d-compiler `
+          & $windeploy --release --no-system-d3d-compiler `
             --no-opengl-sw --qmldir $qmlDir --dir . $exe
-          # Ensure offscreen platform plugin is present for headless smoke test.
-          # (A stock release does not need it but CI does.)
+          $deployExit = $LASTEXITCODE
+          Pop-Location
+          if ($deployExit -ne 0) { exit $deployExit }
+
+          # Ensure offscreen platform plugin is present for headless smoke/CI checks.
           $pluginsRoot = (Resolve-Path "${{ steps.qt.outputs.qtBin }}\..\plugins").Path
           $offSrc = Join-Path $pluginsRoot "platforms\qoffscreen.dll"
           $offDst = "${{ env.STAGE_DIR }}\platforms\qoffscreen.dll"
-          Write-Host "offscreen plugin source: $offSrc"
           if (Test-Path $offSrc) {
             Copy-Item $offSrc $offDst -Force
             Write-Host "Copied qoffscreen.dll -> $offDst"
@@ -247,9 +238,24 @@ jobs:
             Write-Error "qoffscreen.dll not found at $offSrc"
             exit 1
           }
-          $deployExit = $LASTEXITCODE
-          Pop-Location
-          if ($deployExit -ne 0) { exit $deployExit }
+
+          # Bundle MSVC CRT DLLs (vcruntime140*, msvcp140*) so the ZIP runs
+          # on clean Windows machines without Visual Studio or VC++ Redist.
+          $crtCopied = @()
+          if ($env:VCToolsRedistDir -and (Test-Path $env:VCToolsRedistDir)) {
+            $crtDir = Get-ChildItem (Join-Path $env:VCToolsRedistDir "x64") -Directory -Filter "Microsoft.VC*.CRT" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($crtDir) {
+              foreach ($dllName in @("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "msvcp140_1.dll", "msvcp140_2.dll", "msvcp140_atomic_wait.dll", "concrt140.dll")) {
+                $srcDll = Join-Path $crtDir.FullName $dllName
+                $dstDll = Join-Path "${{ env.STAGE_DIR }}" $dllName
+                if ((Test-Path $srcDll) -and !(Test-Path $dstDll)) {
+                  Copy-Item $srcDll $dstDll -Force
+                  $crtCopied += $dllName
+                }
+              }
+            }
+          }
+          Write-Host "Bundled MSVC CRT DLLs: $($crtCopied -join ', ')"
 
       - name: Verify no test-only DLLs leaked into the package
         shell: pwsh
@@ -279,21 +285,23 @@ jobs:
         run: |
           $bin = "${{ env.STAGE_DIR }}"
           $required = @(
-            "$bin\komapaint.exe",
+            "$bin\KomaPaint.exe",
             "$bin\Qt6Core.dll",
             "$bin\Qt6Gui.dll",
             "$bin\Qt6Qml.dll",
             "$bin\Qt6Quick.dll",
             "$bin\Qt6QuickControls2.dll",
             "$bin\Qt6Widgets.dll",
+            "$bin\vcruntime140.dll",
+            "$bin\msvcp140.dll",
             "$bin\platforms\qwindows.dll",
             "$bin\platforms\qoffscreen.dll"
           )
           foreach ($f in $required) {
             if (!(Test-Path $f)) {
               Write-Error "Missing required deployed file: $f"
-              Write-Host "Deployed Qt6 DLLs:"
-              Get-ChildItem $bin -File -Filter "Qt6*.dll" | Select Name | Format-Table -AutoSize | Out-String | Write-Host
+              Write-Host "Deployed DLLs:"
+              Get-ChildItem $bin -File -Filter "*.dll" | Select Name | Format-Table -AutoSize | Out-String | Write-Host
               exit 1
             }
           }
@@ -303,54 +311,50 @@ jobs:
       - name: Package into ZIP
         shell: pwsh
         run: |
-          # Ship the per-user .koma file-association helper next to the exe.
-          # It simply calls "komapaint.exe --associate" / "--unassociate";
-          # registration is per-user (HKCU) and needs no admin rights.
           Copy-Item "${{ github.workspace }}\packaging\Register_koma_file_association.cmd" "${{ env.STAGE_DIR }}\Register_koma_file_association.cmd" -Force
-          $zip = "${{ github.workspace }}\KomaPaint-Windows-x64.zip"
+          $zip = "${{ github.workspace }}\KomaPaint-Windows-x64-Human-Test.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
-          # Zip the staged folder so the archive contains a single top-level
-          # "KomaPaint" directory with the exe and its dependencies.
           Compress-Archive -Path "${{ env.STAGE_DIR }}" -DestinationPath $zip -CompressionLevel Optimal
           if (!(Test-Path $zip)) {
             Write-Error "Packaging failed; zip not produced."
             exit 1
           }
           Get-Item $zip | Format-List Name,Length
-          # Inventory annotation so the package contents can be checked without
-          # downloading the artifact (list truncated to keep the annotation small).
           $files = @(Get-ChildItem "${{ env.STAGE_DIR }}" -Recurse -File)
           $dlls = @($files | Where-Object { $_.Extension -eq '.dll' })
           $qmlFiles = @($files | Where-Object { $_.FullName -match '\\qml\\' })
           $topLevel = @($files | Where-Object { $_.DirectoryName -eq "${{ env.STAGE_DIR }}" })
           $inventory = "$($files.Count) files total; top level: " + (($topLevel | Sort-Object Name | ForEach-Object { $_.Name }) -join ', ')
           if ($inventory.Length -gt 1400) { $inventory = $inventory.Substring(0, 1400) + ' ...' }
-          $hasExe = Test-Path (Join-Path "${{ env.STAGE_DIR }}" 'komapaint.exe')
+          $hasExe = Test-Path (Join-Path "${{ env.STAGE_DIR }}" 'KomaPaint.exe')
           $hasQWindows = Test-Path (Join-Path "${{ env.STAGE_DIR }}" 'platforms\qwindows.dll')
           $zipBytes = (Get-Item $zip).Length
-          Write-Host "::notice title=Release package inventory::zip $([math]::Round($zipBytes / 1MB, 1)) MB; komapaint.exe=$hasExe; DLLs=$($dlls.Count); QML files=$($qmlFiles.Count); qwindows.dll=$hasQWindows; $inventory"
+          Write-Host "::notice title=Release package inventory::zip $zipBytes bytes ($([math]::Round($zipBytes / 1MB, 1)) MB); KomaPaint.exe=$hasExe; DLLs=$($dlls.Count); QML files=$($qmlFiles.Count); qwindows.dll=$hasQWindows; $inventory"
 
-      - name: Smoke-test packaged executable launches
+      - name: Verify extracted packaged application (launch + end-to-end GUI checks)
         shell: pwsh
         run: |
-          # Smoke the actual extracted ZIP, isolated from the build and Qt SDK.
+          # Extract into a clean directory isolated from Qt SDK and build output.
           $extract = Join-Path $env:RUNNER_TEMP 'komapaint-zip-smoke'
           if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
-          Expand-Archive -Path "${{ github.workspace }}\KomaPaint-Windows-x64.zip" -DestinationPath $extract
+          Expand-Archive -Path "${{ github.workspace }}\KomaPaint-Windows-x64-Human-Test.zip" -DestinationPath $extract
           $bin = Join-Path $extract 'KomaPaint'
           $env:PATH = "$bin;$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem"
           Remove-Item Env:QT_PLUGIN_PATH, Env:QT_QPA_PLATFORM_PLUGIN_PATH, Env:QML_IMPORT_PATH, Env:QML2_IMPORT_PATH -ErrorAction SilentlyContinue
-          # Use Qt's native Windows platform for the packaged-app smoke test.
-          # The offscreen QPA has no native HWND for .NET's Process object to
-          # find, so CloseMainWindow() can never deliver WM_CLOSE under it.
-          # The windows QPA exercises the same window path as a real launch.
           $env:QT_QPA_PLATFORM = "windows"
-          $exe = "$bin\komapaint.exe"
+          $exe = "$bin\KomaPaint.exe"
           $env:KOMAPAINT_SMOKE_LOG = Join-Path $env:RUNNER_TEMP "komapaint-smoke.log"
           Remove-Item $env:KOMAPAINT_SMOKE_LOG -ErrorAction SilentlyContinue
 
+          # Isolate user AppData so verification writes clean session/recovery/project data
+          $isolatedAppData = Join-Path $env:RUNNER_TEMP 'komapaint-verify-appdata'
+          if (Test-Path $isolatedAppData) { Remove-Item $isolatedAppData -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $isolatedAppData | Out-Null
+          $env:APPDATA = $isolatedAppData
+          $env:LOCALAPPDATA = $isolatedAppData
+
           Write-Host "============================================"
-          Write-Host "SMOKE TEST: launching komapaint.exe directly"
+          Write-Host "PACKAGED VERIFICATION: launching KomaPaint.exe directly"
           Write-Host "  exe:       $exe"
           Write-Host "  cwd:       $bin"
           Write-Host "  QT_QPA_PLATFORM=$env:QT_QPA_PLATFORM"
@@ -506,13 +510,33 @@ jobs:
             Write-Host "=== Smoke test PASSED ==="
             Write-Host "::notice title=Packaged smoke test::extracted ZIP launched from a clean PATH with no Qt on it; native window '$mainWindowTitle' appeared after $windowSeconds s; PE subsystem $peSubsystem (Windows GUI); closed with WM_CLOSE; exit code 0"
           } else {
-            Fail-Smoke "komapaint.exe exited prematurely with code $($p.ExitCode) (expected the event loop to run; check for a startup crash or a QML load failure)."
+            Fail-Smoke "KomaPaint.exe exited prematurely with code $($p.ExitCode) (expected the event loop to run; check for a startup crash or a QML load failure)."
           }
+
+          # Now run the 8-point packaged functional verification inside the extracted KomaPaint.exe itself
+          $verifyReport = Join-Path $env:RUNNER_TEMP "komapaint-verify-report.txt"
+          Remove-Item $verifyReport -ErrorAction SilentlyContinue
+          $env:KOMAPAINT_VERIFY_PACKAGED = "1"
+          $env:KOMAPAINT_VERIFY_REPORT = $verifyReport
+          $vp = Start-Process -FilePath $exe -WorkingDirectory $bin -PassThru
+          if (-not $vp.WaitForExit(60000)) {
+            $vp.Kill()
+            $vp.WaitForExit()
+            Fail-Smoke "Packaged functional verification timed out after 60s."
+          }
+          $reportText = if (Test-Path $verifyReport) { (Get-Content $verifyReport -Raw).Trim() } else { "no report written" }
+          Write-Host "--- Packaged functional verification report ---"
+          Write-Host $reportText
+          if ($vp.ExitCode -ne 0) {
+            Fail-Smoke "Packaged functional verification failed (exit $($vp.ExitCode)): $reportText"
+          }
+          $reportOneLine = $reportText.Replace('%','%25').Replace("`r",' ').Replace("`n",' || ')
+          Write-Host "::notice title=Packaged functional verification::$reportOneLine"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KomaPaint-Windows-x64-Qt${{ env.QT_VERSION }}
-          path: KomaPaint-Windows-x64.zip
+          name: KomaPaint-Windows-x64-Human-Test
+          path: KomaPaint-Windows-x64-Human-Test.zip
           if-no-files-found: error
           retention-days: 30

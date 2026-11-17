@@ -10,9 +10,9 @@ rem   Register_koma_file_association.cmd             register
 rem   Register_koma_file_association.cmd --remove    unregister
 
 setlocal
-set "EXE=%~dp0komapaint.exe"
+set "EXE=%~dp0KomaPaint.exe"
 if not exist "%EXE%" (
-    echo ERROR: komapaint.exe not found next to this script. 1>&2
+    echo ERROR: KomaPaint.exe not found next to this script. 1>&2
     exit /b 1
 )
 

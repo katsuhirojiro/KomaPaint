@@ -38,6 +38,7 @@ private:
     void registerTypes();
     void loadStyles();
     void loadUi();
+    void runPackagedVerification();
 
     QQmlApplicationEngine m_engine;
     ApplicationConfig     m_config;
@@ -48,6 +49,7 @@ private:
     WorkspaceState        m_workspace;
     QQuickWindow*         m_window = nullptr;
     QString               m_fileToOpen;
+    QStringList           m_qmlWarnings;
 };
 
 }  // namespace komapaint
