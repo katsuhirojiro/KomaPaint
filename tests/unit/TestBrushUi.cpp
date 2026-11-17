@@ -1748,7 +1748,11 @@ void TestBrushUi::shortcutsAndPerformanceSettingsPersistAndResolveConflicts()
 {
     {
         Settings fresh(QStringLiteral("KomaPaintTests"), QStringLiteral("BrushUiShortcutsPerf"));
-        fresh.clear();
+        fresh.setValue(QStringLiteral("shortcuts/tool.pen"), QStringLiteral("P"));
+        fresh.setValue(QStringLiteral("performance/tileCacheLimitMB"), 256);
+        fresh.setValue(QStringLiteral("performance/undoHistoryLimit"), 60);
+        fresh.setValue(QStringLiteral("performance/wetSimEnabled"), true);
+        fresh.setValue(QStringLiteral("performance/wetSimIntervalMs"), 200);
         fresh.sync();
     }
     {
