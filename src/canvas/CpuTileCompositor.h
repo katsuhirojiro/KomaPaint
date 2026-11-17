@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <set>
+#include <span>
 #include <vector>
 
 namespace komapaint {
@@ -32,6 +33,12 @@ public:
     // Empty optional means invalid inputs or allocation failure. Never alters sources.
     static std::optional<CompositeTile> compose(const TileGeometry& geometry,
         TilePoint tile, const std::vector<CompositeLayer>& topFirst, std::uint32_t background);
+    // Zero-allocation tile compositing into a caller-owned output buffer,
+    // supporting optional per-layer pre-rendered pixel spans (same index order as topFirst).
+    static bool composeInto(const TileGeometry& geometry, TilePoint tile,
+        const std::vector<CompositeLayer>& topFirst, std::uint32_t background,
+        std::span<const std::span<const std::uint32_t>> layerTileOverrides,
+        std::vector<std::uint32_t>& outPixels, std::int64_t& outWidth, std::int64_t& outHeight);
 };
 
 // Single consumer / single thread. Owns no artwork or cache. Configuration

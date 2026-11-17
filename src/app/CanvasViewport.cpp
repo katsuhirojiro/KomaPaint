@@ -76,28 +76,24 @@ const material::MaterialRenderer& canvasMaterialRenderer()
     return renderer;
 }
 
-bool prepareMaterialRenderLayers(std::vector<CompositeLayer>& layers, TilePoint tile,
+bool prepareMaterialRenderLayers(const std::vector<CompositeLayer>& layers, TilePoint tile,
                                  const material::SurfaceProfile& surface,
-                                 std::vector<std::unique_ptr<SparseTileStore>>& temporaryStores)
+                                 std::vector<std::vector<std::uint32_t>>& scratchBuffers,
+                                 std::vector<std::span<const std::uint32_t>>& overrides)
 {
     try {
-        temporaryStores.reserve(layers.size());
-        for (auto& compositeLayer : layers) {
+        const std::size_t count = layers.size();
+        if (scratchBuffers.size() < count) scratchBuffers.resize(count);
+        overrides.assign(count, {});
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& compositeLayer = layers[i];
+            if (!compositeLayer.visible || compositeLayer.opacity == 0.0) continue;
             Layer* source = compositeLayer.materialSource;
             if (!source || source->materialTiles().tileEntries(tile).empty()) continue;
-            const auto& geometry = source->tiles().geometry();
-            std::vector<std::uint32_t> rendered;
             if (!canvasMaterialRenderer().renderTile(source->materialTiles(), tile,
                     source->tiles().tilePixels(tile), material::gouacheProfile(),
-                    surface, &rendered)) return false;
-            auto output = std::make_unique<SparseTileStore>(geometry.width(), geometry.height(), geometry.tileSize());
-            if (std::any_of(rendered.begin(), rendered.end(), [](std::uint32_t pixel) { return pixel != 0; })) {
-                std::vector<SparseTileStore::TileSnapshot> snapshot;
-                snapshot.push_back({tile, std::move(rendered)});
-                if (output->restoreTiles(snapshot, false) != SparseTileStore::WriteResult::Changed) return false;
-            }
-            compositeLayer.store = output.get();
-            temporaryStores.push_back(std::move(output));
+                    surface, &scratchBuffers[i])) return false;
+            overrides[i] = scratchBuffers[i];
         }
         return true;
     } catch (const std::bad_alloc&) { return false; }
@@ -153,14 +149,8 @@ void CanvasViewport::setHistory(QObject* object)
 QObject* CanvasViewport::document() const { return m_document.data(); }
 void CanvasViewport::setDocument(QObject* object)
 {
-    qDebug() << "[CanvasViewport] setDocument() called:"
-             << "object=" << object << "old m_document=" << m_document.data();
-
     auto* doc = qobject_cast<CanvasDocument*>(object);
-    if (m_document == doc) {
-        qDebug() << "[CanvasViewport] setDocument: same document, returning early";
-        return;
-    }
+    if (m_document == doc) return;
     if (m_document) {
         disconnect(m_document, nullptr, this, nullptr);
         disconnect(m_document->layers(), nullptr, this, nullptr);
@@ -176,18 +166,13 @@ void CanvasViewport::setDocument(QObject* object)
     m_cacheBudget = doc ? doc->layers()->documentBudget() : nullptr;
     m_originInitialized = false;
     m_pendingView = false;
-    qDebug() << "[CanvasViewport] setDocument: m_document updated to" << m_document.data()
-             << "m_originInitialized reset to false";
 
     if (doc) {
-        qDebug() << "[CanvasViewport] setDocument: connecting signals for new document"
-                 << "size=" << doc->width() << "x" << doc->height();
         connect(doc, &CanvasDocument::backgroundChanged, this, &CanvasViewport::invalidateAll);
         connect(doc, &CanvasDocument::surfaceChanged, this, [this] {
             m_invalidation.reset(); clearCache(); invalidateAll();
         });
         connect(doc, &CanvasDocument::sizeChanged, this, [this] {
-            qDebug() << "[CanvasViewport] sizeChanged signal received";
             m_invalidation.reset(); clearCache(); invalidateAll();
         });
         connect(doc, &QObject::destroyed, this, [this] { m_document = nullptr; m_invalidation.reset(); clearCache(); m_cacheBudget.reset(); invalidateAll(); });
@@ -199,11 +184,9 @@ void CanvasViewport::setDocument(QObject* object)
         connect(model, &QAbstractItemModel::modelReset, this, [this] { reconnectLayers(); invalidateAll(); });
         reconnectLayers();
     }
-    qDebug() << "[CanvasViewport] setDocument: emitting documentChanged(), calling invalidateAll()";
     emit documentChanged();
     invalidateAll();
     refreshMaterialSimulation();
-    qDebug() << "[CanvasViewport] setDocument: done";
 }
 void CanvasViewport::reconnectLayers()
 {
@@ -294,13 +277,11 @@ void CanvasViewport::schedule(const QRectF& region)
 }
 void CanvasViewport::changedTile(qint64 x, qint64 y)
 {
-    qDebug() << "[CanvasViewport] changedTile() tile=(" << x << "," << y << ")";
     if (!m_document) return;
     eraseCacheTile({x, y});
     const qreal side = m_document->layers()->layerAt(0)->tiles().geometry().tileSize();
     const qreal scale = m_zoom / 100;
     QRectF rect(m_origin.x() + x * side * scale, m_origin.y() + y * side * scale, side * scale, side * scale);
-    qDebug() << "[CanvasViewport] changedTile: scheduling viewport rect" << rect;
     schedule(rect.adjusted(-2, -2, 2, 2));
 }
 void CanvasViewport::setZoom(qreal zoom)
@@ -335,26 +316,13 @@ QPointF CanvasViewport::viewportToDocument(qreal x, qreal y) const { return (QPo
 QPointF CanvasViewport::documentToViewport(qreal x, qreal y) const { return m_origin + QPointF(x, y) * (m_zoom / 100); }
 void CanvasViewport::fit()
 {
-    qDebug() << "[CanvasViewport] fit() called:"
-             << "m_document=" << m_document.data() << "width=" << width() << "height=" << height();
-
-    if (!m_document) {
-        qDebug() << "[CanvasViewport] fit: no document, returning";
-        return;
-    }
-    if (width() <= 0 || height() <= 0) {
-        qDebug() << "[CanvasViewport] fit: viewport has zero size, returning";
-        return;
-    }
+    if (!m_document || width() <= 0 || height() <= 0) return;
 
     m_zoom = qBound(6.25, 100 * std::min(width() / m_document->width(), height() / m_document->height()), 6400.0);
     m_origin = QPointF((width() - m_document->width() * m_zoom / 100) / 2, (height() - m_document->height() * m_zoom / 100) / 2);
     m_originInitialized = true;
     m_pendingView = false;
-    qDebug() << "[CanvasViewport] fit: zoom=" << m_zoom << "origin=" << m_origin
-             << "docSize=" << m_document->width() << "x" << m_document->height();
     emit zoomChanged(); emit zoomRequested(m_zoom); emit viewChanged(); invalidateAll();
-    qDebug() << "[CanvasViewport] fit: done";
 }
 QPointF CanvasViewport::viewCenter() const
 {
@@ -419,16 +387,21 @@ QImage CanvasViewport::composedTile(TilePoint tile, const std::vector<CompositeL
     auto found = m_cache.find(tile);
     if (found != m_cache.end()) { found->second.used = ++m_clock; return found->second.image; }
     if (list.empty()) return {};
-    auto renderedLayers = list;
-    std::vector<std::unique_ptr<SparseTileStore>> materialStores;
     const auto surface = m_document ? m_document->surfaceProfile() : material::coldPressedPaper();
-    if (!prepareMaterialRenderLayers(renderedLayers, tile, surface, materialStores)) return {};
-    auto composite = CpuTileCompositor::compose(list[0].store->geometry(), tile, renderedLayers, background);
-    if (!composite) return {};
-    QImage image(static_cast<int>(composite->width), static_cast<int>(composite->height), QImage::Format_ARGB32_Premultiplied);
+    if (!prepareMaterialRenderLayers(list, tile, surface, m_materialScratchBuffers, m_materialOverrides))
+        return {};
+    std::int64_t tileWidth = 0;
+    std::int64_t tileHeight = 0;
+    if (!CpuTileCompositor::composeInto(list[0].store->geometry(), tile, list, background,
+                                        m_materialOverrides, m_composeTilePixels, tileWidth, tileHeight))
+        return {};
+    QImage image(static_cast<int>(tileWidth), static_cast<int>(tileHeight), QImage::Format_ARGB32_Premultiplied);
     if (image.isNull()) return {};
+    const std::size_t rowBytes = static_cast<std::size_t>(image.width()) * sizeof(std::uint32_t);
     for (int row = 0; row < image.height(); ++row)
-        std::memcpy(image.scanLine(row), composite->pixels.data() + static_cast<std::size_t>(row) * static_cast<std::size_t>(image.width()), static_cast<std::size_t>(image.width()) * sizeof(std::uint32_t));
+        std::memcpy(image.scanLine(row),
+                    m_composeTilePixels.data() + static_cast<std::size_t>(row) * static_cast<std::size_t>(image.width()),
+                    rowBytes);
     ++m_compositeCount;
     const auto bytes = static_cast<std::size_t>(image.sizeInBytes());
     while (!m_cache.empty() && (bytes > CacheLimit || m_cacheBytes > CacheLimit - bytes)) {
@@ -474,34 +447,13 @@ void CanvasViewport::reportStrokeFailure(SparseTileStore::WriteResult reason, bo
 
 bool CanvasViewport::beginStroke(qreal x, qreal y, qreal pressure, QObject* settings, const QColor& color)
 {
-    qDebug() << "[CanvasViewport] beginStroke() called:"
-             << "viewport=(" << x << "," << y << ")" << "pressure=" << pressure
-             << "m_document=" << m_document.data();
-
     cancelStroke();
     auto* brush = qobject_cast<BrushSettings*>(settings);
-    if (!m_document) {
-        qDebug() << "[CanvasViewport] beginStroke: no document";
+    if (!m_document || !m_history || !brush || !color.isValid())
         return false;
-    }
-    if (!m_history) {
-        qDebug() << "[CanvasViewport] beginStroke: no history";
-        return false;
-    }
-    if (!brush) {
-        qDebug() << "[CanvasViewport] beginStroke: no brush settings";
-        return false;
-    }
-    if (!color.isValid()) {
-        qDebug() << "[CanvasViewport] beginStroke: invalid color";
-        return false;
-    }
 
     auto* model = m_document->layers();
     auto* layer = model->layerAt(model->activeLayerIndex());
-    qDebug() << "[CanvasViewport] beginStroke: activeLayerIndex=" << model->activeLayerIndex()
-             << "layer=" << layer << "locked=" << (layer ? layer->isLocked() : true)
-             << "visible=" << (layer ? layer->isVisible() : true);
 
     if (!layer || layer->isLocked() || !layer->isVisible()) {
         emit strokeError(QStringLiteral("Select a visible, unlocked layer to paint."));
@@ -740,14 +692,12 @@ void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
              << "viewport=(" << x << "," << y << ")" << "pressure=" << pressure
              << "m_stroke=" << (bool)m_stroke;
 
-    if ((!m_stroke && !m_materialStroke) || !m_strokeLayer || !m_document) { qDebug() << "[CanvasViewport] continueStroke: no stroke/layer/document"; cancelStroke(); return; }
+    if ((!m_stroke && !m_materialStroke) || !m_strokeLayer || !m_document) { cancelStroke(); return; }
     if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
         m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) {
-        qDebug() << "[CanvasViewport] continueStroke: layer changed or invalid";
-        cancelStroke(); return; }
+        cancelStroke(); return;
+    }
     auto point = viewportToDocument(x, y);
-    qDebug() << "[CanvasViewport] continueStroke: viewport(" << x << "," << y << ") -> document("
-             << point.x() << "," << point.y() << ")";
     // Stabilisation smooths the samples between pen-down and pen-up; endStroke()
     // then draws on to the real pen-up position.
     const InputSample sample = m_stabilizer.filter({point.x(), point.y(), pressure});
@@ -765,14 +715,11 @@ void CanvasViewport::continueStroke(qreal x, qreal y, qreal pressure)
 }
 void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
 {
-    qDebug() << "[CanvasViewport] endStroke() called:"
-             << "viewport=(" << x << "," << y << ")" << "pressure=" << pressure;
-
-    if ((!m_stroke && !m_materialStroke) || !m_strokeLayer || !m_document) { qDebug() << "[CanvasViewport] endStroke: no stroke/layer/document"; cancelStroke(); return; }
+    if ((!m_stroke && !m_materialStroke) || !m_strokeLayer || !m_document) { cancelStroke(); return; }
     if (m_strokeLayer->isLocked() || !m_strokeLayer->isVisible() ||
         m_document->layers()->layerAt(m_document->layers()->activeLayerIndex()) != m_strokeLayer) {
-        qDebug() << "[CanvasViewport] endStroke: layer changed or invalid";
-        cancelStroke(); return; }
+        cancelStroke(); return;
+    }
     auto point = viewportToDocument(x, y);
     const bool materialStroke = bool(m_materialStroke);
     const bool ok = materialStroke
@@ -805,10 +752,8 @@ void CanvasViewport::endStroke(qreal x, qreal y, qreal pressure)
         m_strokeLayer = nullptr;
     }
     refreshMaterialSimulation();
-    qDebug() << "[CanvasViewport] endStroke: stroke ended, ok=" << ok;
 }
 void CanvasViewport::cancelStroke() {
-    qDebug() << "[CanvasViewport] cancelStroke() called";
     if (m_history && m_history->strokeActive()) m_history->cancelStroke();
     m_stroke.reset();
     m_materialStroke.reset();
@@ -830,15 +775,20 @@ QVariant CanvasViewport::colorAt(qreal x, qreal y) const
     // Composed directly, without the viewport cache: sampling must not disturb
     // the cache or the invalidation bookkeeping of the display.
     const auto background = m_document->hasTransparentBackground() ? 0U : m_document->backgroundColor().rgba();
-    auto renderedLayers = list;
-    std::vector<std::unique_ptr<SparseTileStore>> materialStores;
-    if (!prepareMaterialRenderLayers(renderedLayers, address->tile, m_document->surfaceProfile(), materialStores)) return {};
-    const auto tile = CpuTileCompositor::compose(geometry, address->tile, renderedLayers, background);
-    if (!tile) return {};
-    const auto index = static_cast<std::size_t>(address->local.y) * static_cast<std::size_t>(tile->width)
+    std::vector<std::vector<std::uint32_t>> scratchBuffers;
+    std::vector<std::span<const std::uint32_t>> overrides;
+    if (!prepareMaterialRenderLayers(list, address->tile, m_document->surfaceProfile(), scratchBuffers, overrides))
+        return {};
+    std::vector<std::uint32_t> pixels;
+    std::int64_t tileWidth = 0;
+    std::int64_t tileHeight = 0;
+    if (!CpuTileCompositor::composeInto(geometry, address->tile, list, background, overrides,
+                                        pixels, tileWidth, tileHeight))
+        return {};
+    const auto index = static_cast<std::size_t>(address->local.y) * static_cast<std::size_t>(tileWidth)
                      + static_cast<std::size_t>(address->local.x);
-    if (index >= tile->pixels.size()) return {};
-    const std::uint32_t pixel = tile->pixels[index];   // premultiplied ARGB
+    if (index >= pixels.size()) return {};
+    const std::uint32_t pixel = pixels[index];   // premultiplied ARGB
     const unsigned alpha = (pixel >> 24) & 255U;
     if (alpha == 0) return {};
     auto channel = [&](unsigned shift) { return static_cast<int>(std::min(255U, (((pixel >> shift) & 255U) * 255U + alpha / 2) / alpha)); };
@@ -853,20 +803,11 @@ void CanvasViewport::paint(QPainter* painter)
 QImage CanvasViewport::frameSnapshot() const { QMutexLocker lock(&m_frameMutex); return m_frame; }
 void CanvasViewport::refreshNow()
 {
-    qDebug() << "[CanvasViewport] refreshNow() called:"
-             << "m_document=" << m_document.data()
-             << "m_originInitialized=" << m_originInitialized
-             << "zoom=" << m_zoom << "origin=" << m_origin
-             << "frameSize=" << m_frame.size();
-
     m_scheduled = false;
     QRectF dirty = m_pending;
     m_pending = {};
     const QSize frameSize(qCeil(width()), qCeil(height()));
-    if (frameSize.width() <= 0 || frameSize.height() <= 0) {
-        qDebug() << "[CanvasViewport] refreshNow: zero frame size, returning";
-        return;
-    }
+    if (frameSize.width() <= 0 || frameSize.height() <= 0) return;
     // Bound viewport memory independently of document size.
     if (static_cast<qint64>(frameSize.width()) * frameSize.height() > 32LL * 1024 * 1024) {
         qWarning("Canvas viewport too large to allocate safely"); return;
@@ -878,12 +819,8 @@ void CanvasViewport::refreshNow()
             if (next.isNull()) { qWarning("Canvas viewport allocation failed"); return; }
             m_frame = std::move(next);
             dirty = QRectF(QPointF(0, 0), QSizeF(frameSize));
-            qDebug() << "[CanvasViewport] refreshNow: reallocated frame to" << frameSize;
         }
-        if (dirty.isEmpty()) {
-            qDebug() << "[CanvasViewport] refreshNow: empty dirty region, returning";
-            return;
-        }
+        if (dirty.isEmpty()) return;
         if (m_document && !m_originInitialized) {
             m_origin = QPointF((width() - m_document->width() * m_zoom / 100) / 2,
                                (height() - m_document->height() * m_zoom / 100) / 2);
@@ -891,7 +828,6 @@ void CanvasViewport::refreshNow()
             dirty = QRectF(QPointF(0, 0), QSizeF(frameSize));
             // Reported after this function returns: the frame lock is held here.
             QMetaObject::invokeMethod(this, &CanvasViewport::viewChanged, Qt::QueuedConnection);
-            qDebug() << "[CanvasViewport] refreshNow: auto-centered origin=" << m_origin;
         }
         QPainter painter(&m_frame);
         painter.setClipRect(dirty);
@@ -901,10 +837,7 @@ void CanvasViewport::refreshNow()
             const auto background = m_document->hasTransparentBackground() ? 0U : m_document->backgroundColor().rgba();
             auto plan = m_invalidation.prepare(list, background);
             if (plan.invalidateAll) clearCache();
-            if (!m_invalidation.accept(plan, list, background)) {
-                qDebug() << "[CanvasViewport] refreshNow: invalidation accept failed";
-                return;
-            }
+            if (!m_invalidation.accept(plan, list, background)) return;
             for (const auto& tile : plan.tiles) {
                 eraseCacheTile(tile);
             }
@@ -914,10 +847,17 @@ void CanvasViewport::refreshNow()
             painter.scale(scale, scale);
             const QRectF documentRect(0, 0, m_document->width(), m_document->height());
             painter.setClipRect(documentRect, Qt::IntersectClip);
-            QImage checks(16, 16, QImage::Format_RGB32);
-            checks.fill(m_checkerLight);
-            { QPainter cp(&checks); cp.fillRect(0, 0, 8, 8, m_checkerDark); cp.fillRect(8, 8, 8, 8, m_checkerDark); }
-            painter.fillRect(documentRect, QBrush(checks));
+            if (m_checkerBrush.style() == Qt::NoBrush
+                || m_cachedCheckerLight != m_checkerLight
+                || m_cachedCheckerDark != m_checkerDark) {
+                QImage checks(16, 16, QImage::Format_RGB32);
+                checks.fill(m_checkerLight);
+                { QPainter cp(&checks); cp.fillRect(0, 0, 8, 8, m_checkerDark); cp.fillRect(8, 8, 8, 8, m_checkerDark); }
+                m_checkerBrush = QBrush(checks);
+                m_cachedCheckerLight = m_checkerLight;
+                m_cachedCheckerDark = m_checkerDark;
+            }
+            painter.fillRect(documentRect, m_checkerBrush);
             if (!list.empty()) {
                 const auto& geometry = list.front().store->geometry();
                 auto a = viewportToDocument(dirty.left(), dirty.top());
@@ -928,8 +868,6 @@ void CanvasViewport::refreshNow()
                                    static_cast<std::int64_t>(std::ceil(qBound<qreal>(0, b.y(), m_document->height())))};
                 auto range = geometry.tilesForRect(requested);
                 if (range) {
-                    qDebug() << "[CanvasViewport] refreshNow: composing" << (range->last.y - range->first.y + 1)
-                             << "x" << (range->last.x - range->first.x + 1) << "tiles";
                     for (auto y = range->first.y; y <= range->last.y; ++y) {
                         for (auto x = range->first.x; x <= range->last.x; ++x) {
                             TilePoint tile{x, y};
@@ -950,6 +888,5 @@ void CanvasViewport::refreshNow()
         painter.end();
     } catch (const std::bad_alloc&) { qWarning("Canvas viewport allocation failed"); return; }
     update(dirty.toAlignedRect());
-    qDebug() << "[CanvasViewport] refreshNow: done, update scheduled for" << dirty.toAlignedRect();
 }
 } // namespace komapaint

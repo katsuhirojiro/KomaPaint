@@ -129,6 +129,11 @@ private:
     QString m_statusNotice;
     QString m_lastError;
     quint64 m_surfaceRevision = 1;
+    mutable QVariantList m_cachedPigmentLibrary;
+    mutable std::string m_cachedPigmentMedium;
+    mutable QImage m_cachedSurfaceImage;
+    mutable quint64 m_cachedSurfaceRevision = 0;
+    mutable std::vector<std::uint32_t> m_surfacePixelBuffer;
 };
 
 } // namespace komapaint

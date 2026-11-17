@@ -147,6 +147,7 @@ private:
     std::uint64_t m_nextId = 1;
     std::vector<HistorySnapshot> m_history;
     std::size_t m_undoIndex = 0;
+    std::vector<MaterialCell> m_rebuildGrid;
 };
 
 } // namespace komapaint::material

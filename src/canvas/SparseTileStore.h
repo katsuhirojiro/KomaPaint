@@ -63,6 +63,12 @@ public:
     void beginBatch() noexcept;
     void endBatch() noexcept;
     WriteResult setPixel(TilePoint point, std::uint32_t argbPremultiplied);
+    // Tile-level batch mutation helpers: perform reservation, before-change
+    // capture, and dirty marking once per touched tile instead of per pixel.
+    WriteResult beginTileEdit(TilePoint tile, TileRect dirtyDocRect,
+                              std::uint32_t*& outPixels, std::size_t*& outNonzero,
+                              bool& outCreated) noexcept;
+    void endTileEdit(TilePoint tile, bool anyChanged) noexcept;
     // Resizing is deliberately restricted until a real crop/resize operation exists.
     bool resizeEmpty(std::int64_t width, std::int64_t height);
 private:

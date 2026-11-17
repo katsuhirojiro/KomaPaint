@@ -5,6 +5,7 @@
 #include "../material/MaterialEngine.h"
 #include <memory>
 #include <QQuickPaintedItem>
+#include <QBrush>
 #include <QColor>
 #include <QImage>
 #include <QElapsedTimer>
@@ -13,6 +14,8 @@
 #include <QRectF>
 #include <QVariant>
 #include <map>
+#include <span>
+#include <vector>
 
 class QTimer;
 
@@ -129,5 +132,11 @@ private:
     QRectF m_pending;
     mutable QMutex m_frameMutex;
     QImage m_frame;
+    QBrush m_checkerBrush;
+    QColor m_cachedCheckerLight;
+    QColor m_cachedCheckerDark;
+    std::vector<std::vector<std::uint32_t>> m_materialScratchBuffers;
+    std::vector<std::span<const std::uint32_t>> m_materialOverrides;
+    std::vector<std::uint32_t> m_composeTilePixels;
 };
 } // namespace komapaint

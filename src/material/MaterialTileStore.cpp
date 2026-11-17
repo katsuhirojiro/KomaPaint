@@ -1,6 +1,7 @@
 #include "MaterialTileStore.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -136,18 +137,28 @@ std::span<const MaterialEntry> MaterialTileStore::tileEntries(TilePoint tile) co
 
 std::optional<MaterialCell> MaterialTileStore::cellAt(TilePoint point) const noexcept
 {
-    if (!isValid()) return std::nullopt;
+    const MaterialCell* cell = findCell(point);
+    if (!cell) {
+        return (isValid() && m_geometry.address(point))
+            ? std::optional<MaterialCell>(MaterialCell{}) : std::nullopt;
+    }
+    return *cell;
+}
+
+const MaterialCell* MaterialTileStore::findCell(TilePoint point) const noexcept
+{
+    if (!isValid()) return nullptr;
     const auto address = m_geometry.address(point);
-    if (!address) return std::nullopt;
+    if (!address) return nullptr;
     const auto tile = m_tiles.find(address->tile);
-    if (tile == m_tiles.end()) return MaterialCell{};
+    if (tile == m_tiles.end()) return nullptr;
     const auto index = static_cast<std::size_t>(address->local.y)
         * static_cast<std::size_t>(m_geometry.tileSize())
         + static_cast<std::size_t>(address->local.x);
     const auto entry = std::lower_bound(tile->second.entries.begin(), tile->second.entries.end(), index,
         [](const MaterialEntry& item, std::size_t value) { return item.localIndex < value; });
     return entry != tile->second.entries.end() && entry->localIndex == index
-        ? std::optional<MaterialCell>(entry->cell) : std::optional<MaterialCell>(MaterialCell{});
+        ? &entry->cell : nullptr;
 }
 
 const MaterialComposition* MaterialTileStore::composition(std::size_t id) const noexcept
@@ -598,6 +609,231 @@ MaterialTileStore::Result MaterialTileStore::writeCell(TilePoint point, const Ma
     return Result::Changed;
 }
 
+std::optional<std::size_t> MaterialTileStore::internComposition(const PaintBatch& paint, bool* inserted)
+{
+    return intern(paint, inserted);
+}
+
+MaterialTileStore::Result MaterialTileStore::setCell(TilePoint point, const MaterialCell& cell)
+{
+    return writeCell(point, cell);
+}
+
+MaterialTileStore::Result MaterialTileStore::replaceTileEntries(TilePoint tilePoint,
+                                                                 std::span<const MaterialEntry> entries)
+{
+    if (!isValid()) return Result::OutOfBounds;
+    const auto bounds = m_geometry.tileBounds(tilePoint);
+    if (!bounds) return Result::OutOfBounds;
+    const std::size_t tileSize = static_cast<std::size_t>(m_geometry.tileSize());
+    const std::size_t tilePixels = tileSize * tileSize;
+    const std::size_t edgeW = static_cast<std::size_t>(bounds->right - bounds->left);
+    const std::size_t edgeH = static_cast<std::size_t>(bounds->bottom - bounds->top);
+
+    std::size_t newActiveCells = 0;
+    std::size_t previous = 0;
+    bool first = true;
+    for (const auto& entry : entries) {
+        if (entry.localIndex >= tilePixels || (!first && entry.localIndex <= previous)
+            || entry.cell.empty() || !validateCell(entry.cell))
+            return Result::InvalidData;
+        const std::size_t lx = entry.localIndex % tileSize;
+        const std::size_t ly = entry.localIndex / tileSize;
+        if (lx >= edgeW || ly >= edgeH) return Result::InvalidData;
+        previous = entry.localIndex;
+        first = false;
+        if (mobileCell(entry.cell)) ++newActiveCells;
+    }
+
+    auto tileIt = m_tiles.find(tilePoint);
+    const bool hadTile = tileIt != m_tiles.end();
+    if (!hadTile && entries.empty()) return Result::Unchanged;
+    if (hadTile && tileIt->second.entries.size() == entries.size()
+        && std::equal(entries.begin(), entries.end(), tileIt->second.entries.begin()))
+        return Result::Unchanged;
+
+    const auto beforeEntries = hadTile
+        ? std::span<const MaterialEntry>(tileIt->second.entries)
+        : std::span<const MaterialEntry>{};
+    if (m_beforeChange && !m_beforeChange(m_beforeContext, tilePoint, beforeEntries))
+        return Result::AllocationFailed;
+
+    const bool activateTile = newActiveCells > 0 && (!hadTile || tileIt->second.activeCells == 0);
+    std::vector<TilePoint> stagedActive;
+    std::size_t activeStagingBytes = 0;
+    bool activeStageCommitted = false;
+    struct ActiveStageRelease {
+        std::shared_ptr<DocumentMemoryBudget> budget;
+        std::size_t bytes = 0;
+        bool* committed = nullptr;
+        ~ActiveStageRelease() {
+            if (budget && bytes && committed && !*committed)
+                budget->release(DocumentMemoryBudget::Category::RestoreStaging, bytes);
+        }
+    } activeStage{m_budget, 0, &activeStageCommitted};
+
+    if (activateTile && m_activeTiles.size() == m_activeTiles.capacity()) {
+        const std::size_t currentCapacity = m_activeTiles.capacity();
+        const std::size_t nextCapacity = currentCapacity == 0 ? std::size_t{8}
+            : currentCapacity > std::numeric_limits<std::size_t>::max() / 2
+                ? m_activeTiles.max_size() : currentCapacity * 2;
+        if (nextCapacity <= currentCapacity || nextCapacity > m_activeTiles.max_size()
+            || nextCapacity > std::numeric_limits<std::size_t>::max() / sizeof(TilePoint))
+            return Result::AllocationFailed;
+        activeStagingBytes = nextCapacity * sizeof(TilePoint);
+        if (m_budget && !m_budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, activeStagingBytes))
+            return Result::DocumentMemoryLimit;
+        activeStage.bytes = activeStagingBytes;
+        try {
+            stagedActive.reserve(nextCapacity);
+            stagedActive.insert(stagedActive.end(), m_activeTiles.begin(), m_activeTiles.end());
+            stagedActive.insert(std::lower_bound(stagedActive.begin(), stagedActive.end(), tilePoint, TilePointLess{}), tilePoint);
+            const std::size_t actualBytes = stagedActive.capacity() * sizeof(TilePoint);
+            if (actualBytes > activeStagingBytes) {
+                const std::size_t extra = actualBytes - activeStagingBytes;
+                if (m_budget && !m_budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, extra))
+                    return Result::DocumentMemoryLimit;
+                activeStagingBytes += extra;
+                activeStage.bytes = activeStagingBytes;
+            }
+        } catch (const std::bad_alloc&) { return Result::AllocationFailed; }
+          catch (const std::length_error&) { return Result::AllocationFailed; }
+    }
+
+    const auto marked = m_dirty.mark(*bounds);
+    if (marked != DirtyTileTracker::Result::Marked)
+        return marked == DirtyTileTracker::Result::AllocationFailed ? Result::AllocationFailed : Result::TrackingLimit;
+
+    if (entries.empty()) {
+        for (const auto& oldEntry : tileIt->second.entries) {
+            const std::size_t oldId = oldEntry.cell.compositionId;
+            if (oldId > 0 && oldId < m_compositionLiveRefs.size() && m_compositionLiveRefs[oldId] > 0)
+                --m_compositionLiveRefs[oldId];
+        }
+        const std::size_t oldBytes = tileIt->second.chargedBytes;
+        m_tiles.erase(tileIt);
+        m_allocatedBytes -= oldBytes;
+        if (m_budget && oldBytes) m_budget->release(DocumentMemoryBudget::Category::Artwork, oldBytes);
+        auto activePosition = std::lower_bound(m_activeTiles.begin(), m_activeTiles.end(),
+                                               tilePoint, TilePointLess{});
+        if (activePosition != m_activeTiles.end() && *activePosition == tilePoint)
+            m_activeTiles.erase(activePosition);
+        notify(tilePoint);
+        return Result::Changed;
+    }
+
+    bool createdTile = false;
+    try {
+        if (!hadTile) {
+            auto inserted = m_tiles.try_emplace(tilePoint);
+            if (!inserted.second) return Result::AllocationFailed;
+            tileIt = inserted.first;
+            createdTile = true;
+        }
+        auto& tile = tileIt->second;
+        if (entries.size() > tile.entries.capacity()) {
+            const std::size_t oldBytes = tile.chargedBytes;
+            const std::size_t currentCapacity = tile.entries.capacity();
+            const std::size_t maximum = tile.entries.max_size();
+            if (entries.size() > maximum || maximum > std::numeric_limits<std::size_t>::max() / sizeof(MaterialEntry)) {
+                if (createdTile) m_tiles.erase(tileIt);
+                return Result::AllocationFailed;
+            }
+            std::size_t nextCapacity = currentCapacity == 0 ? std::size_t{8}
+                : currentCapacity > maximum / 2 ? maximum : currentCapacity * 2;
+            while (nextCapacity < entries.size()) {
+                nextCapacity = nextCapacity > maximum / 2 ? maximum : nextCapacity * 2;
+            }
+            const std::size_t requestedBytes = nextCapacity * sizeof(MaterialEntry);
+            if (m_budget && !m_budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, requestedBytes)) {
+                if (createdTile) m_tiles.erase(tileIt);
+                return Result::DocumentMemoryLimit;
+            }
+            struct Staging {
+                std::shared_ptr<DocumentMemoryBudget> budget;
+                std::size_t bytes;
+                bool committed = false;
+                ~Staging() {
+                    if (budget && !committed)
+                        budget->release(DocumentMemoryBudget::Category::RestoreStaging, bytes);
+                }
+            } staging{m_budget, requestedBytes};
+            std::vector<MaterialEntry> replacement;
+            replacement.reserve(nextCapacity);
+            replacement.assign(entries.begin(), entries.end());
+            const std::size_t actualBytes = replacement.capacity() * sizeof(MaterialEntry);
+            if (actualBytes > requestedBytes) {
+                const std::size_t extra = actualBytes - requestedBytes;
+                if (m_budget && !m_budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, extra)) {
+                    if (createdTile) m_tiles.erase(tileIt);
+                    return Result::DocumentMemoryLimit;
+                }
+                staging.bytes += extra;
+            }
+            for (const auto& oldEntry : tile.entries) {
+                const std::size_t oldId = oldEntry.cell.compositionId;
+                if (oldId > 0 && oldId < m_compositionLiveRefs.size() && m_compositionLiveRefs[oldId] > 0)
+                    --m_compositionLiveRefs[oldId];
+            }
+            tile.entries.swap(replacement);
+            tile.chargedBytes = actualBytes;
+            m_allocatedBytes += actualBytes;
+            if (m_budget) {
+                if (oldBytes) m_budget->release(DocumentMemoryBudget::Category::Artwork, oldBytes);
+                m_budget->transferToArtwork(staging.bytes);
+            }
+            m_allocatedBytes -= oldBytes;
+            staging.committed = true;
+        } else {
+            for (const auto& oldEntry : tile.entries) {
+                const std::size_t oldId = oldEntry.cell.compositionId;
+                if (oldId > 0 && oldId < m_compositionLiveRefs.size() && m_compositionLiveRefs[oldId] > 0)
+                    --m_compositionLiveRefs[oldId];
+            }
+            tile.entries.assign(entries.begin(), entries.end());
+        }
+        for (const auto& newEntry : tile.entries) {
+            const std::size_t newId = newEntry.cell.compositionId;
+            if (newId > 0 && newId < m_compositionLiveRefs.size())
+                ++m_compositionLiveRefs[newId];
+        }
+        tile.activeCells = newActiveCells;
+    } catch (const std::bad_alloc&) {
+        if (createdTile) {
+            const auto it = m_tiles.find(tilePoint);
+            if (it != m_tiles.end() && it->second.entries.empty()) m_tiles.erase(it);
+        }
+        return Result::AllocationFailed;
+    } catch (const std::length_error&) {
+        if (createdTile) {
+            const auto it = m_tiles.find(tilePoint);
+            if (it != m_tiles.end() && it->second.entries.empty()) m_tiles.erase(it);
+        }
+        return Result::AllocationFailed;
+    }
+
+    if (activateTile && !stagedActive.empty()) {
+        const std::size_t oldActiveBytes = m_activeTileBytes;
+        m_activeTiles.swap(stagedActive);
+        m_activeTileBytes = m_activeTiles.capacity() * sizeof(TilePoint);
+        if (m_budget) {
+            if (oldActiveBytes) m_budget->release(DocumentMemoryBudget::Category::Artwork, oldActiveBytes);
+            m_budget->transferToArtwork(activeStage.bytes);
+        }
+        activeStageCommitted = true;
+    }
+    auto activePosition = std::lower_bound(m_activeTiles.begin(), m_activeTiles.end(),
+                                           tilePoint, TilePointLess{});
+    const bool activeListed = activePosition != m_activeTiles.end() && *activePosition == tilePoint;
+    const bool activeAfter = newActiveCells != 0;
+    if (activeAfter && !activeListed)
+        m_activeTiles.insert(activePosition, tilePoint);
+    else if (!activeAfter && activeListed)
+        m_activeTiles.erase(activePosition);
+    notify(tilePoint);
+    return Result::Changed;
+}
+
 MaterialTileStore::Result MaterialTileStore::write(TilePoint point, const PaintBatch& paint, bool combine) try
 {
     if (!paint.valid()) return Result::InvalidData;
@@ -946,31 +1182,70 @@ bool MaterialRenderer::renderTile(const MaterialTileStore& material, TilePoint t
         if (!digitalBase.empty()) std::copy(digitalBase.begin(), digitalBase.end(), output->begin());
         const auto entries = material.tileEntries(tile);
         const auto tileSize = static_cast<std::size_t>(material.geometry().tileSize());
+        const std::int64_t tileSizeI = material.geometry().tileSize();
+        const std::int64_t originX = tile.x * tileSizeI;
+        const std::int64_t originY = tile.y * tileSizeI;
+        const auto& compositions = material.compositions();
+
+        struct CachedComp {
+            std::size_t id = 0;
+            MaterialEngine::CompositionOptics optics{};
+            const MediumProfile* medium = nullptr;
+            bool valid = false;
+        };
+        constexpr std::size_t CacheSlots = 64;
+        std::array<CachedComp, CacheSlots> cache{};
+
+        const MediumProfile& wcProf = watercolourProfile();
+        const MediumProfile& goProf = gouacheProfile();
+        const MediumProfile& inkProf = inkProfile();
+
+        MaterialCell lastCell{};
+        OpticalResult lastOptical{};
+        bool hasLastCell = false;
+
         for (const auto& entry : entries) {
             const MaterialCell& cell = entry.cell;
-            const std::int64_t docX = tile.x * material.geometry().tileSize()
-                + static_cast<std::int64_t>(entry.localIndex % tileSize);
-            const std::int64_t docY = tile.y * material.geometry().tileSize()
-                + static_cast<std::int64_t>(entry.localIndex / tileSize);
-            const auto batch = material.batchAt({docX, docY});
-            if (!batch || !batch->valid()) return false;
-            const MediumProfile* profile = &defaultMedium;
-            if (batch->mediumId == gouacheProfile().id) profile = &gouacheProfile();
-            else if (batch->mediumId == watercolourProfile().id) profile = &watercolourProfile();
-            else if (batch->mediumId == inkProfile().id) profile = &inkProfile();
-            else if (batch->mediumId != defaultMedium.id) return false;
-            // MaterialDab deposits a local fraction of a batch per pixel; scale
-            // by the shared reference unit so optical depth matches direct
-            // batch evaluation without letting water inflate opacity.
+            if (cell.compositionId == 0 || cell.compositionId >= compositions.size()) return false;
+            const auto& slot = cache[cell.compositionId & (CacheSlots - 1)];
+            CachedComp* cached = &cache[cell.compositionId & (CacheSlots - 1)];
+            if (!slot.valid || slot.id != cell.compositionId) {
+                const MaterialComposition& comp = compositions[cell.compositionId];
+                if (comp.mediumId.empty()) return false;
+                const MediumProfile* prof = &defaultMedium;
+                if (comp.mediumId == goProf.id) prof = &goProf;
+                else if (comp.mediumId == wcProf.id) prof = &wcProf;
+                else if (comp.mediumId == inkProf.id) prof = &inkProf;
+                else if (comp.mediumId != defaultMedium.id) return false;
+                cached->id = cell.compositionId;
+                cached->optics = m_engine.prepareCompositionOptics(comp.pigments);
+                cached->medium = prof;
+                cached->valid = true;
+            }
             constexpr double ReferenceBatchPixels = 16384.0;
+            OpticalResult optical;
+            if (hasLastCell && cell == lastCell) {
+                optical = lastOptical;
+            } else {
+                optical = m_engine.opticalResultPrepared(
+                    cached->optics, *cached->medium, surface,
+                    double(cell.pigmentMass), double(cell.water),
+                    double(cell.binder), double(cell.filler),
+                    double(cell.drying), double(cell.settling),
+                    ReferenceBatchPixels);
+                lastCell = cell;
+                lastOptical = optical;
+                hasLastCell = true;
+            }
+            const std::int64_t docX = originX + static_cast<std::int64_t>(entry.localIndex % tileSize);
+            const std::int64_t docY = originY + static_cast<std::int64_t>(entry.localIndex / tileSize);
             const double toothHeight = surfaceToothHeightAt(docX, docY, surface);
             const double valley = 1.0 - toothHeight;
-            const double opticalGran = m_engine.opticalResult(*batch, *profile, surface, ReferenceBatchPixels).granulation;
-            const double granulationBias = 1.0 + opticalGran * (0.25 + 0.75 * double(cell.settling)) * (valley - 0.5) * 0.45;
+            const double granulationBias = 1.0 + optical.granulation * (0.25 + 0.75 * double(cell.settling)) * (valley - 0.5) * 0.45;
             const double toothContact = (0.86 + 0.14 * std::clamp(0.45 * toothHeight + 0.55 * double(cell.consistency), 0.0, 1.0))
                 * std::clamp(granulationBias, 0.72, 1.28);
-            (*output)[entry.localIndex] = m_engine.composite((*output)[entry.localIndex], *batch,
-                *profile, surface, 1.0, ReferenceBatchPixels, toothContact);
+            (*output)[entry.localIndex] = m_engine.compositeOptical((*output)[entry.localIndex],
+                optical, surface, 1.0, toothContact);
         }
         return true;
     } catch (const std::bad_alloc&) { return false; }

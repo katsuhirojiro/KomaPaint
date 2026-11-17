@@ -84,6 +84,7 @@ public:
     bool resizeEmpty(std::int64_t width, std::int64_t height) noexcept;
 
     std::optional<MaterialCell> cellAt(TilePoint point) const noexcept;
+    const MaterialCell* findCell(TilePoint point) const noexcept;
     std::span<const MaterialEntry> tileEntries(TilePoint tile) const noexcept;
     std::optional<PaintBatch> batchAt(TilePoint point) const;
     const MaterialComposition* composition(std::size_t id) const noexcept;
@@ -93,6 +94,9 @@ public:
     void pinSnapshots(std::span<const MaterialTileSnapshot> snapshots) noexcept;
     void unpinSnapshots(std::span<const MaterialTileSnapshot> snapshots) noexcept;
 
+    std::optional<std::size_t> internComposition(const PaintBatch& paint, bool* inserted = nullptr);
+    Result setCell(TilePoint point, const MaterialCell& cell);
+    Result replaceTileEntries(TilePoint tile, std::span<const MaterialEntry> entries);
     Result deposit(TilePoint point, const PaintBatch& paint);
     Result setBatch(TilePoint point, const PaintBatch& paint);
     Result updateCellState(TilePoint point, double water, double binder, double filler,

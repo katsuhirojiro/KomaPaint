@@ -544,45 +544,147 @@ DepositOpticalSummary PaintMixerModel::activeOpticalSummary(const SurfaceProfile
 
 void PaintMixerModel::rebuildSurfaceTiles()
 {
-    // Clear existing tiles cleanly and restamp every deposit via MaterialTileStore,
-    // then reclaim unreferenced composition records so storage stays deduplicated.
-    const auto allocated = m_surfaceStore.allocatedTilePoints();
-    if (!allocated.empty()) {
-        std::vector<MaterialTileSnapshot> emptySnapshots;
-        emptySnapshots.reserve(allocated.size());
-        for (const TilePoint tile : allocated)
-            emptySnapshots.push_back(MaterialTileSnapshot{tile, {}});
-        m_surfaceStore.restoreTiles(emptySnapshots, false);
-    }
+    constexpr std::size_t kGridSize = static_cast<std::size_t>(SurfaceWidth) * static_cast<std::size_t>(SurfaceHeight);
+    if (m_rebuildGrid.size() != kGridSize) m_rebuildGrid.assign(kGridSize, MaterialCell{});
+    else std::fill(m_rebuildGrid.begin(), m_rebuildGrid.end(), MaterialCell{});
+
+    constexpr double kReferenceBatchPixels = 16384.0;
+    constexpr double kPalettePuddleThickness = 2.8;
+    constexpr double kBaseScale = kPalettePuddleThickness / kReferenceBatchPixels;
 
     m_surfaceStore.beginBatch();
     for (const auto& deposit : m_deposits) {
-        if (deposit.batch.totalMass() <= 1e-9) continue;
+        if (deposit.batch.totalMass() <= 1e-9 || !deposit.batch.valid()) continue;
+        const auto depCompOpt = m_surfaceStore.internComposition(deposit.batch, nullptr);
+        if (!depCompOpt) continue;
+        const std::size_t depCompId = *depCompOpt;
+        const double depPigment = deposit.batch.pigmentMass();
+        const double depWater = deposit.batch.water;
+        const double depBinder = deposit.batch.binder;
+        const double depFiller = deposit.batch.filler;
+        const double depTotal = depPigment + depWater + depBinder + depFiller;
+        if (depTotal <= 0.0) continue;
+        const double depWetness = std::clamp(depWater / depTotal, 0.0, 1.0);
+        const double depConsistency = std::clamp((depPigment + depBinder + depFiller) / depTotal, 0.0, 1.0);
+        const double depDrying = deposit.batch.drying;
+        const double depSettling = deposit.batch.settling;
+
+        const double denomRadius = std::max(4.0, deposit.radius);
+        const double invDenomRadiusSq = 1.0 / (denomRadius * denomRadius);
         const int r = static_cast<int>(std::ceil(deposit.radius));
         const int x0 = std::max(0, static_cast<int>(std::floor(deposit.x)) - r);
         const int y0 = std::max(0, static_cast<int>(std::floor(deposit.y)) - r);
         const int x1 = std::min(SurfaceWidth - 1, static_cast<int>(std::ceil(deposit.x)) + r);
         const int y1 = std::min(SurfaceHeight - 1, static_cast<int>(std::ceil(deposit.y)) + r);
+
         for (int y = y0; y <= y1; ++y) {
+            const double dy = (double(y) + 0.5) - deposit.y;
+            const double dySq = dy * dy;
+            MaterialCell* row = m_rebuildGrid.data() + static_cast<std::size_t>(y) * SurfaceWidth;
             for (int x = x0; x <= x1; ++x) {
                 const double dx = (double(x) + 0.5) - deposit.x;
-                const double dy = (double(y) + 0.5) - deposit.y;
-                const double distNorm = std::sqrt(dx * dx + dy * dy) / std::max(4.0, deposit.radius);
-                if (distNorm > 1.0) continue;
-                // Smooth domed puddle profile: fuller center, soft feathered rim.
-                // MaterialRenderer::renderTile scales per-pixel cell quantities
-                // by ReferenceBatchPixels (16384.0) and applies non-absorbent
-                // palette retention (~0.42x), so scale the physical puddle dome
-                // thickness accordingly for crisp, readable palette visualization.
-                constexpr double kReferenceBatchPixels = 16384.0;
-                constexpr double kPalettePuddleThickness = 2.8;
-                const double profile = 0.32 + 0.68 * std::pow(1.0 - distNorm * distNorm, 0.55);
-                PaintBatch cellBatch = deposit.batch;
-                cellBatch.scale((profile * kPalettePuddleThickness) / kReferenceBatchPixels);
-                m_surfaceStore.deposit({x, y}, cellBatch);
+                const double distNormSq = (dx * dx + dySq) * invDenomRadiusSq;
+                if (distNormSq > 1.0) continue;
+                const double profile = 0.32 + 0.68 * std::pow(1.0 - distNormSq, 0.55);
+                const double factor = profile * kBaseScale;
+                const double partPigment = depPigment * factor;
+                const double partWater = depWater * factor;
+                const double partBinder = depBinder * factor;
+                const double partFiller = depFiller * factor;
+                const double partTotal = partPigment + partWater + partBinder + partFiller;
+                if (partTotal <= 0.0) continue;
+
+                MaterialCell& dst = row[x];
+                if (dst.empty()) {
+                    dst.compositionId = depCompId;
+                    dst.pigmentMass = static_cast<float>(partPigment);
+                    dst.water = static_cast<float>(partWater);
+                    dst.binder = static_cast<float>(partBinder);
+                    dst.filler = static_cast<float>(partFiller);
+                    dst.wetness = static_cast<float>(depWetness);
+                    dst.consistency = static_cast<float>(depConsistency);
+                    dst.drying = static_cast<float>(depDrying);
+                    dst.settling = static_cast<float>(depSettling);
+                } else if (dst.compositionId == depCompId) {
+                    const double priorTotal = double(dst.pigmentMass) + double(dst.water)
+                        + double(dst.binder) + double(dst.filler);
+                    const double sumPigment = double(dst.pigmentMass) + partPigment;
+                    const double sumWater = double(dst.water) + partWater;
+                    const double sumBinder = double(dst.binder) + partBinder;
+                    const double sumFiller = double(dst.filler) + partFiller;
+                    const double sumTotal = sumPigment + sumWater + sumBinder + sumFiller;
+                    const double safeDenom = std::max(1e-12, priorTotal + partTotal);
+                    dst.pigmentMass = static_cast<float>(sumPigment);
+                    dst.water = static_cast<float>(sumWater);
+                    dst.binder = static_cast<float>(sumBinder);
+                    dst.filler = static_cast<float>(sumFiller);
+                    dst.wetness = static_cast<float>(std::clamp(sumWater / std::max(1e-12, sumTotal), 0.0, 1.0));
+                    dst.consistency = static_cast<float>(std::clamp((sumPigment + sumBinder + sumFiller) / std::max(1e-12, sumTotal), 0.0, 1.0));
+                    dst.drying = static_cast<float>(std::clamp((double(dst.drying) * priorTotal + depDrying * partTotal) / safeDenom, 0.0, 1.0));
+                    dst.settling = static_cast<float>(std::clamp((double(dst.settling) * priorTotal + depSettling * partTotal) / safeDenom, 0.0, 1.0));
+                } else {
+                    const auto* priorComp = m_surfaceStore.composition(dst.compositionId);
+                    if (!priorComp) continue;
+                    PaintBatch priorBatch;
+                    priorBatch.mediumId = priorComp->mediumId;
+                    priorBatch.water = dst.water;
+                    priorBatch.binder = dst.binder;
+                    priorBatch.filler = dst.filler;
+                    priorBatch.wetness = dst.wetness;
+                    priorBatch.consistency = dst.consistency;
+                    priorBatch.drying = dst.drying;
+                    priorBatch.settling = dst.settling;
+                    for (const auto& pc : priorComp->pigments) {
+                        const double m = pc.mass * double(dst.pigmentMass);
+                        if (pc.pigmentId.empty()) priorBatch.addResidual(pc.residualArgb, m);
+                        else priorBatch.addPigment(pc.pigmentId, m);
+                    }
+                    PaintBatch cellBatch = deposit.batch;
+                    cellBatch.scale(factor);
+                    PaintBatch combined = mix(priorBatch, cellBatch);
+                    const auto cidOpt = m_surfaceStore.internComposition(combined, nullptr);
+                    if (!cidOpt) continue;
+                    dst.compositionId = *cidOpt;
+                    dst.pigmentMass = static_cast<float>(combined.pigmentMass());
+                    dst.water = static_cast<float>(combined.water);
+                    dst.binder = static_cast<float>(combined.binder);
+                    dst.filler = static_cast<float>(combined.filler);
+                    dst.wetness = static_cast<float>(combined.wetness);
+                    dst.consistency = static_cast<float>(combined.consistency);
+                    dst.drying = static_cast<float>(combined.drying);
+                    dst.settling = static_cast<float>(combined.settling);
+                }
             }
         }
     }
+
+    constexpr int tilesX = (SurfaceWidth + SurfaceTileSize - 1) / SurfaceTileSize;
+    constexpr int tilesY = (SurfaceHeight + SurfaceTileSize - 1) / SurfaceTileSize;
+    std::vector<MaterialEntry> tileEntries;
+    tileEntries.reserve(SurfaceTileSize * SurfaceTileSize / 2);
+
+    for (int ty = 0; ty < tilesY; ++ty) {
+        const int py0 = ty * SurfaceTileSize;
+        const int py1 = std::min(SurfaceHeight, py0 + SurfaceTileSize);
+        for (int tx = 0; tx < tilesX; ++tx) {
+            const int px0 = tx * SurfaceTileSize;
+            const int px1 = std::min(SurfaceWidth, px0 + SurfaceTileSize);
+            tileEntries.clear();
+            for (int y = py0; y < py1; ++y) {
+                const std::size_t ly = static_cast<std::size_t>(y - py0);
+                const MaterialCell* row = m_rebuildGrid.data() + static_cast<std::size_t>(y) * SurfaceWidth;
+                for (int x = px0; x < px1; ++x) {
+                    const MaterialCell& c = row[x];
+                    if (c.empty()) continue;
+                    const std::size_t localIndex = ly * static_cast<std::size_t>(SurfaceTileSize)
+                        + static_cast<std::size_t>(x - px0);
+                    tileEntries.push_back(MaterialEntry{localIndex, c});
+                }
+            }
+            m_surfaceStore.replaceTileEntries({tx, ty}, tileEntries);
+        }
+    }
+
     m_surfaceStore.endBatch();
     m_surfaceStore.reclaimUnreferenced();
 }
@@ -596,8 +698,8 @@ bool PaintMixerModel::renderSurface(std::vector<std::uint32_t>& outPremultiplied
     const MediumProfile* activeMedium = findMediumProfile(m_mediumId);
     if (!activeMedium) activeMedium = &gouacheProfile();
 
+    std::vector<std::uint32_t> tilePixels;
     for (const TilePoint tile : allocated) {
-        std::vector<std::uint32_t> tilePixels;
         if (!renderer.renderTile(m_surfaceStore, tile, {}, *activeMedium,
                                  nonAbsorbentPalette(), &tilePixels)) {
             return false;
@@ -607,22 +709,26 @@ bool PaintMixerModel::renderSurface(std::vector<std::uint32_t>& outPremultiplied
         for (int ly = 0; ly < SurfaceTileSize; ++ly) {
             const int py = tileY0 + ly;
             if (py < 0 || py >= SurfaceHeight) continue;
+            std::uint32_t* dstRow = outPremultipliedArgb.data() + static_cast<std::size_t>(py) * SurfaceWidth;
+            const std::uint32_t* srcRow = tilePixels.data() + static_cast<std::size_t>(ly) * SurfaceTileSize;
             for (int lx = 0; lx < SurfaceTileSize; ++lx) {
                 const int px = tileX0 + lx;
                 if (px < 0 || px >= SurfaceWidth) continue;
-                const std::uint32_t src = tilePixels[static_cast<std::size_t>(ly) * SurfaceTileSize + static_cast<std::size_t>(lx)];
-                if ((src >> 24U) == 0) continue;
-                // src is premultiplied ARGB over transparent; composite over porcelain palette
+                const std::uint32_t src = srcRow[lx];
                 const std::uint32_t a = (src >> 24U) & 0xffU;
-                const double inv = 1.0 - double(a) / 255.0;
-                std::uint32_t out = 0xff000000U;
-                for (int shift : {16, 8, 0}) {
-                    const double srcPremul = double((src >> shift) & 0xffU);
-                    const double dstC = double((PorcelainArgb >> shift) & 0xffU);
-                    const auto ch = static_cast<std::uint32_t>(std::clamp(std::lround(srcPremul + dstC * inv), 0L, 255L));
-                    out |= (ch << shift);
+                if (a == 0) continue;
+                if (a == 255U) {
+                    dstRow[px] = src;
+                    continue;
                 }
-                outPremultipliedArgb[static_cast<std::size_t>(py) * SurfaceWidth + static_cast<std::size_t>(px)] = out;
+                const double inv = 1.0 - double(a) / 255.0;
+                const double r = double((src >> 16U) & 0xffU) + double((PorcelainArgb >> 16U) & 0xffU) * inv;
+                const double g = double((src >> 8U) & 0xffU) + double((PorcelainArgb >> 8U) & 0xffU) * inv;
+                const double b = double(src & 0xffU) + double(PorcelainArgb & 0xffU) * inv;
+                const auto rc = static_cast<std::uint32_t>(std::clamp(std::lround(r), 0L, 255L));
+                const auto gc = static_cast<std::uint32_t>(std::clamp(std::lround(g), 0L, 255L));
+                const auto bc = static_cast<std::uint32_t>(std::clamp(std::lround(b), 0L, 255L));
+                dstRow[px] = 0xff000000U | (rc << 16U) | (gc << 8U) | bc;
             }
         }
     }

@@ -150,6 +150,82 @@ SparseTileStore::WriteResult SparseTileStore::setPixelImpl(TilePoint point, std:
     }
     return WriteResult::Changed;
 }
+
+SparseTileStore::WriteResult SparseTileStore::beginTileEdit(
+    TilePoint tile, TileRect dirtyDocRect,
+    std::uint32_t*& outPixels, std::size_t*& outNonzero, bool& outCreated) noexcept
+{
+    outPixels = nullptr;
+    outNonzero = nullptr;
+    outCreated = false;
+    if (m_recordedStroke && m_recordedFailure) return WriteResult::HistoryLimit;
+    auto fail = [&](WriteResult result) noexcept {
+        if (m_recordedStroke && result != WriteResult::Changed && result != WriteResult::Unchanged)
+            m_recordedFailure = true;
+        return result;
+    };
+    if (!isValid() || !m_geometry.tileBounds(tile)) return fail(WriteResult::OutOfBounds);
+    auto it = m_tiles.find(tile);
+    bool created = false;
+    const bool needsTile = (it == m_tiles.end());
+    PixelReservation reservation(m_documentBudget.get(), DocumentMemoryBudget::Category::Artwork,
+                                 needsTile ? m_tileBytes : 0);
+    if (!reservation.ok()) return fail(WriteResult::DocumentMemoryLimit);
+    if (needsTile) {
+        if (m_tileBytes > m_pixelBudget || allocatedPixelBytes() > m_pixelBudget - m_tileBytes)
+            return fail(WriteResult::MemoryLimit);
+        try {
+            Tile fresh;
+            fresh.pixels.resize(m_tileBytes / sizeof(std::uint32_t), 0);
+            it = m_tiles.emplace(tile, std::move(fresh)).first;
+            created = true;
+        } catch (const std::bad_alloc&) { return fail(WriteResult::AllocationFailed); }
+          catch (const std::length_error&) { return fail(WriteResult::AllocationFailed); }
+    }
+    if (m_beforeChange) {
+        const auto capture = m_beforeChange(m_beforeContext, tile, !created,
+            created ? std::span<const std::uint32_t>{} : std::span<const std::uint32_t>{it->second.pixels});
+        if (capture != CaptureResult::Ready) {
+            if (created) m_tiles.erase(it);
+            if (capture == CaptureResult::Limit) return fail(WriteResult::HistoryLimit);
+            if (capture == CaptureResult::DocumentLimit) return fail(WriteResult::DocumentMemoryLimit);
+            return fail(WriteResult::HistoryAllocationFailed);
+        }
+    }
+    const auto dirty = m_dirty.mark(dirtyDocRect);
+    if (dirty != DirtyTileTracker::Result::Marked) {
+        if (created) m_tiles.erase(it);
+        return fail((dirty == DirtyTileTracker::Result::LimitExceeded || dirty == DirtyTileTracker::Result::VersionExhausted)
+            ? WriteResult::TrackingLimit : WriteResult::AllocationFailed);
+    }
+    reservation.commitArtwork();
+    outPixels = it->second.pixels.data();
+    outNonzero = &it->second.nonzero;
+    outCreated = created;
+    return WriteResult::Changed;
+}
+
+void SparseTileStore::endTileEdit(TilePoint tile, bool anyChanged) noexcept
+{
+    auto it = m_tiles.find(tile);
+    if (it != m_tiles.end() && it->second.nonzero == 0 && !m_recordedStroke) {
+        m_tiles.erase(it);
+        if (m_documentBudget) m_documentBudget->release(DocumentMemoryBudget::Category::Artwork, m_tileBytes);
+    }
+    if (!anyChanged) return;
+    if (m_batchDepth) {
+        if (!m_batchChanged) { m_batchFirst = m_batchLast = tile; m_batchChanged = true; }
+        else {
+            m_batchFirst.x = std::min(m_batchFirst.x, tile.x); m_batchFirst.y = std::min(m_batchFirst.y, tile.y);
+            m_batchLast.x = std::max(m_batchLast.x, tile.x); m_batchLast.y = std::max(m_batchLast.y, tile.y);
+        }
+    } else if (m_callback) {
+        const bool wasNotifying = m_notifying;
+        m_notifying = true;
+        m_callback(m_callbackContext, tile);
+        m_notifying = wasNotifying;
+    }
+}
 SparseTileStore::WriteResult SparseTileStore::restoreTiles(const std::vector<TileSnapshot>& snapshots, bool notify)
 {
     if (!isValid() || m_beforeChange || m_batchDepth || m_recordedStroke) return WriteResult::InvalidPixel;

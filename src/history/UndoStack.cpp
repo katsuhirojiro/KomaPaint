@@ -115,6 +115,7 @@ bool UndoStack::beginMaterialStroke(Layer* layer)
         m_current->materialBefore.reserve(4);
         m_current->materialAfter.reserve(4);
         m_current->materialBeforeCharges.reserve(4);
+        m_hasLastCapturedMaterialTile = false;
         layer->materialTiles().setBeforeChange(&UndoStack::captureMaterial, this);
         emit stackChanged();
         return true;
@@ -176,7 +177,14 @@ bool UndoStack::captureMaterial(void* context, TilePoint tile,
 bool UndoStack::captureMaterialTile(TilePoint tile, std::span<const material::MaterialEntry> entries)
 {
     if (!m_current || !m_current->layer || !m_current->materialStroke) return false;
-    for (const auto& item : m_current->materialBefore) if (item.tile == tile) return true;
+    if (m_hasLastCapturedMaterialTile && m_lastCapturedMaterialTile == tile) return true;
+    for (const auto& item : m_current->materialBefore) {
+        if (item.tile == tile) {
+            m_lastCapturedMaterialTile = tile;
+            m_hasLastCapturedMaterialTile = true;
+            return true;
+        }
+    }
     if (entries.size() > (std::numeric_limits<std::size_t>::max() - 512) / sizeof(material::MaterialEntry))
         return false;
     const std::size_t dataBytes = entries.size() * sizeof(material::MaterialEntry);
@@ -202,10 +210,13 @@ bool UndoStack::captureMaterialTile(TilePoint tile, std::span<const material::Ma
     m_current->historyBytes += dataBytes;
     m_currentBytes += charge;
     reservation.retained = true;
+    m_lastCapturedMaterialTile = tile;
+    m_hasLastCapturedMaterialTile = true;
     return true;
 }
 void UndoStack::detachCapture() noexcept
 {
+    m_hasLastCapturedMaterialTile = false;
     if (!m_current || !m_current->layer) return;
     if (m_current->materialStroke) m_current->layer->materialTiles().setBeforeChange(nullptr, nullptr);
     else m_current->layer->tiles().setBeforeChange(nullptr, nullptr);

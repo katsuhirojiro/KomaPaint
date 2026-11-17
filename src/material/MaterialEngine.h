@@ -249,12 +249,34 @@ struct MaterialSimulationStats {
 
 class MaterialEngine {
 public:
+    struct CompositionOptics {
+        Spectrum kBase{};
+        Spectrum sBase{};
+        double pigmentOpacityFactor = 0.0;
+        double weightedGranulationBase = 0.0;
+        double settlingTendency = 0.0;
+        double granulationTendency = 0.0;
+        bool hasPigments = false;
+    };
+
     explicit MaterialEngine(const PigmentLibrary& pigments) : m_pigments(pigments) {}
     const PigmentLibrary& pigments() const noexcept { return m_pigments; }
     Spectrum reflectance(const PaintBatch& paint, double depositShare = 1.0) const noexcept;
     OpticalResult opticalResult(const PaintBatch& paint, const MediumProfile& medium,
                                 const SurfaceProfile& surface,
                                 double depositShare = 1.0) const noexcept;
+    CompositionOptics prepareCompositionOptics(const std::vector<PigmentComponent>& normalizedPigments) const noexcept;
+    OpticalResult opticalResultPrepared(const CompositionOptics& comp,
+                                        const MediumProfile& medium,
+                                        const SurfaceProfile& surface,
+                                        double pigmentMass, double water,
+                                        double binder, double filler,
+                                        double drying, double settling,
+                                        double depositShare = 1.0) const noexcept;
+    std::uint32_t compositeOptical(std::uint32_t destinationPremultiplied,
+                                   const OpticalResult& optical,
+                                   const SurfaceProfile& surface,
+                                   double coverage, double toothContact) const noexcept;
     std::uint32_t composite(std::uint32_t destinationPremultiplied,
                             const PaintBatch& paint, const MediumProfile& medium,
                             const SurfaceProfile& surface, double coverage,
@@ -304,9 +326,16 @@ public:
                                        double centerX, double centerY,
                                        const BrushInput& input);
 private:
+    struct ScratchPixel {
+        double contact = 0.0;
+        double radial = 1.0;
+        double toothHeight = 0.5;
+        double weight = 0.0;
+    };
     const MaterialEngine& m_engine;
     const MediumProfile& m_medium;
     const SurfaceProfile& m_surface;
+    std::vector<ScratchPixel> m_dabScratch;
 };
 
 struct MaterialSample {

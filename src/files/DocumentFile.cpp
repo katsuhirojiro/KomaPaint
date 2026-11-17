@@ -19,7 +19,6 @@
 #include <map>
 #include <memory>
 #include <new>
-#include <queue>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -37,19 +36,45 @@ constexpr qsizetype MinFileBytes = 48;
 
 // ---- little-endian writers ---------------------------------------------------
 
+void writeU32Le(char*& dst, quint32 v) noexcept
+{
+    dst[0] = static_cast<char>(v & 0xffU);
+    dst[1] = static_cast<char>((v >> 8) & 0xffU);
+    dst[2] = static_cast<char>((v >> 16) & 0xffU);
+    dst[3] = static_cast<char>((v >> 24) & 0xffU);
+    dst += 4;
+}
+void writeU64Le(char*& dst, quint64 v) noexcept
+{
+    for (int i = 0; i < 8; ++i) dst[i] = static_cast<char>((v >> (8 * i)) & 0xffU);
+    dst += 8;
+}
+void writeFloatLe(char*& dst, float v) noexcept
+{
+    quint32 bits = 0;
+    static_assert(sizeof(bits) == sizeof(v));
+    std::memcpy(&bits, &v, sizeof(bits));
+    writeU32Le(dst, bits);
+}
 void putU8(QByteArray& out, quint8 v) { out.append(static_cast<char>(v)); }
 void putU16(QByteArray& out, quint16 v)
 {
-    out.append(static_cast<char>(v & 0xff));
-    out.append(static_cast<char>((v >> 8) & 0xff));
+    char buf[2]{static_cast<char>(v & 0xff), static_cast<char>((v >> 8) & 0xff)};
+    out.append(buf, 2);
 }
 void putU32(QByteArray& out, quint32 v)
 {
-    for (int i = 0; i < 4; ++i) out.append(static_cast<char>((v >> (8 * i)) & 0xff));
+    char buf[4];
+    char* p = buf;
+    writeU32Le(p, v);
+    out.append(buf, 4);
 }
 void putU64(QByteArray& out, quint64 v)
 {
-    for (int i = 0; i < 8; ++i) out.append(static_cast<char>((v >> (8 * i)) & 0xff));
+    char buf[8];
+    char* p = buf;
+    writeU64Le(p, v);
+    out.append(buf, 8);
 }
 void putDouble(QByteArray& out, double v)
 {
@@ -561,19 +586,23 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
             if (static_cast<quint64>(buffer.size()) > DocumentFile::MaxFileBytes - envelopeBytes ||
                 rectangleBytes > DocumentFile::MaxFileBytes - envelopeBytes - static_cast<quint64>(buffer.size()))
                 return fail(QStringLiteral("The document is too large for the native file format. The file was not changed."));
-            putU64(buffer, static_cast<quint64>(bounds->left));
-            putU64(buffer, static_cast<quint64>(bounds->top));
-            putU32(buffer, static_cast<quint32>(width));
-            putU32(buffer, static_cast<quint32>(height));
+            const qsizetype rectStart = buffer.size();
+            buffer.resize(rectStart + static_cast<qsizetype>(rectangleBytes));
+            char* dst = buffer.data() + rectStart;
+            writeU64Le(dst, static_cast<quint64>(bounds->left));
+            writeU64Le(dst, static_cast<quint64>(bounds->top));
+            writeU32Le(dst, static_cast<quint32>(width));
+            writeU32Le(dst, static_cast<quint32>(height));
             const std::size_t stride = static_cast<std::size_t>(geometry.tileSize());
             bool anyNonZero = false;
             for (std::uint64_t y = 0; y < height; ++y) {
+                const std::uint32_t* srcRow = pixels.data() + static_cast<std::size_t>(y) * stride;
                 for (std::uint64_t x = 0; x < width; ++x) {
-                    const std::uint32_t p = pixels[static_cast<std::size_t>(y) * stride + static_cast<std::size_t>(x)];
+                    const std::uint32_t p = srcRow[x];
                     if (!premultiplied(p))
                         return fail(QStringLiteral("A layer contains invalid pixels. The file was not changed."));
                     if (p != 0) anyNonZero = true;
-                    putU32(buffer, p);
+                    writeU32Le(dst, p);
                 }
             }
             // Allocated tiles are never all-zero (an all-zero tile is erased by
@@ -594,8 +623,11 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
             std::vector<std::size_t> denseIds(compositions.size(), 0);
             std::vector<std::size_t> exportIds;
             exportIds.push_back(0);
+            std::vector<std::span<const material::MaterialEntry>> materialSpans;
+            materialSpans.reserve(materialPoints.size());
             for (TilePoint tile : materialPoints) {
                 const auto entries = materialStore.tileEntries(tile);
+                materialSpans.push_back(entries);
                 if (entries.size() > std::numeric_limits<quint64>::max() - materialPixelCount)
                     return fail(QStringLiteral("The material content is too large to save."));
                 materialPixelCount += static_cast<quint64>(entries.size());
@@ -639,80 +671,89 @@ bool buildIllustrationPayload(const CanvasDocument& document, quint16 version, Q
             const auto& materialGeometry = materialStore.geometry();
             if (materialGeometry.width() != geometry.width() || materialGeometry.height() != geometry.height())
                 return fail(QStringLiteral("A material layer has invalid geometry. The file was not changed."));
-            struct MaterialCursor {
-                quint64 x = 0, y = 0;
-                std::size_t tileIndex = 0, entryIndex = 0;
-            };
-            struct LaterMaterialPixel {
-                bool operator()(const MaterialCursor& a, const MaterialCursor& b) const noexcept
-                {
-                    return a.y != b.y ? a.y > b.y : a.x > b.x;
-                }
-            };
-            std::priority_queue<MaterialCursor, std::vector<MaterialCursor>, LaterMaterialPixel> ordered;
-            const auto cursorFor = [&](std::size_t tileIndex, std::size_t entryIndex) {
-                const TilePoint tile = materialPoints[tileIndex];
-                const auto entries = materialStore.tileEntries(tile);
-                const auto local = entries[entryIndex].localIndex;
-                const auto tileSize = static_cast<std::size_t>(materialGeometry.tileSize());
-                const auto x = tile.x * materialGeometry.tileSize() + static_cast<std::int64_t>(local % tileSize);
-                const auto y = tile.y * materialGeometry.tileSize() + static_cast<std::int64_t>(local / tileSize);
-                return MaterialCursor{static_cast<quint64>(x), static_cast<quint64>(y), tileIndex, entryIndex};
-            };
-            // Merge each tile's locally sorted cells into document y/x order.
-            // This avoids a second allocation proportional to every material
-            // pixel when saving large sparse artwork.
-            for (std::size_t tileIndex = 0; tileIndex < materialPoints.size(); ++tileIndex) {
-                if (!materialStore.tileEntries(materialPoints[tileIndex]).empty())
-                    ordered.push(cursorFor(tileIndex, 0));
-            }
+
+            constexpr quint64 pixelRecordBytes = 56;
+            constexpr quint64 envelopeBytes = 32;
             putU64(buffer, materialPixelCount);
-            quint64 written = 0;
-            quint64 previousX = 0, previousY = 0;
-            bool first = true;
-            while (!ordered.empty()) {
-                const MaterialCursor item = ordered.top();
-                ordered.pop();
-                const TilePoint tile = materialPoints[item.tileIndex];
-                const auto entries = materialStore.tileEntries(tile);
-                const auto& cell = entries[item.entryIndex].cell;
-                if (item.x >= static_cast<quint64>(materialGeometry.width())
-                    || item.y >= static_cast<quint64>(materialGeometry.height())
-                    || cell.compositionId == 0 || cell.compositionId >= compositions.size()
-                    || denseIds[cell.compositionId] == 0
-                    || !std::isfinite(cell.pigmentMass) || cell.pigmentMass < 0.0F
-                    || !std::isfinite(cell.water) || cell.water < 0.0F
-                    || !std::isfinite(cell.binder) || cell.binder < 0.0F
-                    || !std::isfinite(cell.filler) || cell.filler < 0.0F
-                    || !std::isfinite(cell.wetness) || cell.wetness < 0.0F || cell.wetness > 1.0F
-                    || !std::isfinite(cell.consistency) || cell.consistency < 0.0F || cell.consistency > 1.0F
-                    || !std::isfinite(cell.drying) || cell.drying < 0.0F || cell.drying > 1.0F
-                    || !std::isfinite(cell.settling) || cell.settling < 0.0F || cell.settling > 1.0F
-                    || (!first && (item.y < previousY || (item.y == previousY && item.x <= previousX))))
-                    return fail(QStringLiteral("A layer contains invalid or unordered material pixels. The file was not changed."));
-                constexpr quint64 pixelRecordBytes = 56;
-                if (static_cast<quint64>(buffer.size()) > DocumentFile::MaxFileBytes - 32 - pixelRecordBytes)
+            if (materialPixelCount > 0) {
+                if (static_cast<quint64>(buffer.size()) > DocumentFile::MaxFileBytes - envelopeBytes
+                    || materialPixelCount > (DocumentFile::MaxFileBytes - envelopeBytes - static_cast<quint64>(buffer.size())) / pixelRecordBytes)
                     return fail(QStringLiteral("The material content is too large for the native file format. The file was not changed."));
-                putU64(buffer, item.x);
-                putU64(buffer, item.y);
-                putU64(buffer, static_cast<quint64>(denseIds[cell.compositionId]));
-                putFloat(buffer, cell.pigmentMass);
-                putFloat(buffer, cell.water);
-                putFloat(buffer, cell.binder);
-                putFloat(buffer, cell.filler);
-                putFloat(buffer, cell.wetness);
-                putFloat(buffer, cell.consistency);
-                putFloat(buffer, cell.drying);
-                putFloat(buffer, cell.settling);
-                ++written;
-                previousX = item.x;
-                previousY = item.y;
-                first = false;
-                const std::size_t next = item.entryIndex + 1;
-                if (next < entries.size()) ordered.push(cursorFor(item.tileIndex, next));
+                const qsizetype matStart = buffer.size();
+                buffer.resize(matStart + static_cast<qsizetype>(materialPixelCount * pixelRecordBytes));
+                char* dst = buffer.data() + matStart;
+
+                const auto tileSizeI = materialGeometry.tileSize();
+                const auto tileSide = static_cast<std::size_t>(tileSizeI);
+                const auto geomWidthU = static_cast<quint64>(materialGeometry.width());
+                const auto geomHeightU = static_cast<quint64>(materialGeometry.height());
+                quint64 written = 0;
+                quint64 previousX = 0, previousY = 0;
+                bool first = true;
+
+                // materialPoints is sorted by (tile.y, tile.x), so tiles with the
+                // same tile.y span disjoint horizontal bands and merging each tile-row
+                // linearly emits every pixel in exact document (y, x) order.
+                std::size_t rowBegin = 0;
+                std::vector<std::size_t> rowCursors;
+                while (rowBegin < materialPoints.size()) {
+                    const std::int64_t ty = materialPoints[rowBegin].y;
+                    std::size_t rowEnd = rowBegin + 1;
+                    while (rowEnd < materialPoints.size() && materialPoints[rowEnd].y == ty) ++rowEnd;
+                    const std::size_t rowTileCount = rowEnd - rowBegin;
+                    rowCursors.assign(rowTileCount, 0);
+                    const std::int64_t tileOriginY = ty * tileSizeI;
+
+                    for (std::size_t ly = 0; ly < tileSide; ++ly) {
+                        const quint64 docY = static_cast<quint64>(tileOriginY + static_cast<std::int64_t>(ly));
+                        const std::size_t rowIndexMin = ly * tileSide;
+                        const std::size_t rowIndexMax = rowIndexMin + tileSide;
+                        for (std::size_t k = 0; k < rowTileCount; ++k) {
+                            const auto entries = materialSpans[rowBegin + k];
+                            std::size_t& cursor = rowCursors[k];
+                            const std::int64_t tileOriginX = materialPoints[rowBegin + k].x * tileSizeI;
+                            while (cursor < entries.size() && entries[cursor].localIndex < rowIndexMax) {
+                                const auto& entry = entries[cursor++];
+                                if (entry.localIndex < rowIndexMin)
+                                    return fail(QStringLiteral("A layer contains invalid or unordered material pixels. The file was not changed."));
+                                const quint64 docX = static_cast<quint64>(tileOriginX + static_cast<std::int64_t>(entry.localIndex - rowIndexMin));
+                                const auto& cell = entry.cell;
+                                if (docX >= geomWidthU || docY >= geomHeightU
+                                    || cell.compositionId == 0 || cell.compositionId >= compositions.size()
+                                    || denseIds[cell.compositionId] == 0
+                                    || !std::isfinite(cell.pigmentMass) || cell.pigmentMass < 0.0F
+                                    || !std::isfinite(cell.water) || cell.water < 0.0F
+                                    || !std::isfinite(cell.binder) || cell.binder < 0.0F
+                                    || !std::isfinite(cell.filler) || cell.filler < 0.0F
+                                    || !std::isfinite(cell.wetness) || cell.wetness < 0.0F || cell.wetness > 1.0F
+                                    || !std::isfinite(cell.consistency) || cell.consistency < 0.0F || cell.consistency > 1.0F
+                                    || !std::isfinite(cell.drying) || cell.drying < 0.0F || cell.drying > 1.0F
+                                    || !std::isfinite(cell.settling) || cell.settling < 0.0F || cell.settling > 1.0F
+                                    || (!first && (docY < previousY || (docY == previousY && docX <= previousX))))
+                                    return fail(QStringLiteral("A layer contains invalid or unordered material pixels. The file was not changed."));
+                                writeU64Le(dst, docX);
+                                writeU64Le(dst, docY);
+                                writeU64Le(dst, static_cast<quint64>(denseIds[cell.compositionId]));
+                                writeFloatLe(dst, cell.pigmentMass);
+                                writeFloatLe(dst, cell.water);
+                                writeFloatLe(dst, cell.binder);
+                                writeFloatLe(dst, cell.filler);
+                                writeFloatLe(dst, cell.wetness);
+                                writeFloatLe(dst, cell.consistency);
+                                writeFloatLe(dst, cell.drying);
+                                writeFloatLe(dst, cell.settling);
+                                ++written;
+                                previousX = docX;
+                                previousY = docY;
+                                first = false;
+                            }
+                        }
+                    }
+                    rowBegin = rowEnd;
+                }
+                if (written != materialPixelCount)
+                    return fail(QStringLiteral("The material content changed while saving. The file was not changed."));
             }
-            if (written != materialPixelCount)
-                return fail(QStringLiteral("The material content changed while saving. The file was not changed."));
         }
     }
     if (version >= DocumentFile::FormatVersion) {

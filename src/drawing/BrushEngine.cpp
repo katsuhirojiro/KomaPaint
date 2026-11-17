@@ -43,7 +43,8 @@ std::uint32_t lerpPremul(std::uint32_t a, std::uint32_t b, double t)
     auto ch = [&](unsigned shift) -> unsigned {
         const double va = static_cast<double>((a >> shift) & 255U);
         const double vb = static_cast<double>((b >> shift) & 255U);
-        return static_cast<unsigned>(std::clamp(std::lround(va * inv + vb * u), 0L, 255L));
+        const double blended = va * inv + vb * u + 0.5;
+        return std::min(255U, static_cast<unsigned>(blended > 0.0 ? blended : 0.0));
     };
     const unsigned outA = ch(24);
     const unsigned outR = std::min(outA, ch(16));
@@ -180,36 +181,157 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const double bottom = std::min(static_cast<double>(g.height()), std::ceil(p.y + radius + 1));
     if (left >= right || top >= bottom) return R::Unchanged;
 
+    const auto docLeft = static_cast<std::int64_t>(left);
+    const auto docTop = static_cast<std::int64_t>(top);
+    const auto docRight = static_cast<std::int64_t>(right);
+    const auto docBottom = static_cast<std::int64_t>(bottom);
+    const auto tileRange = g.tilesForRect({docLeft, docTop, docRight, docBottom});
+    if (!tileRange) return R::Unchanged;
+
     const double totalAngle = b.angleRadians + (b.followDirection ? strokeAngle : 0.0);
+    const bool hasRotation = totalAngle != 0.0;
+    const double cosA = hasRotation ? std::cos(-totalAngle) : 1.0;
+    const double sinA = hasRotation ? std::sin(-totalAngle) : 0.0;
+    const double aspect = std::clamp(b.aspectRatio, 1.0, 4.0);
+    const double softness = 1.0 - clamp01(b.hardness);
+    const double radiusPlusHalf = radius + 0.5;
+    const double maxDistSq = radiusPlusHalf * radiusPlusHalf;
+    const double invBand = 1.0 / std::max(1.0, softness * radiusPlusHalf);
+    const double opacityFlowPressure = b.opacity * b.flow * pressureAlpha;
+    if (opacityFlowPressure <= 0.0) return R::Unchanged;
+
     const double blendFactor = clamp01(b.blendStrength);
     const bool blending = !b.erase && blendFactor > 0.0;
     const std::uint32_t fgPremul = straightToPremul(b.color);
     const std::uint32_t effectiveCarry = hasCarry
         ? lerpPremul(carryPremul, fgPremul, clamp01(b.colorMix))
         : fgPremul;
+    const unsigned colorAlpha = (b.color >> 24) & 255U;
+    const unsigned colorR = (b.color >> 16) & 255U;
+    const unsigned colorG = (b.color >> 8) & 255U;
+    const unsigned colorB = b.color & 255U;
+    const std::size_t tileStride = static_cast<std::size_t>(g.tileSize());
+
+    auto computeCoverage = [&](double dx, double dy, std::int64_t x, std::int64_t y) noexcept -> double {
+        double lx = dx;
+        double ly = dy;
+        if (hasRotation) {
+            lx = dx * cosA - dy * sinA;
+            ly = dx * sinA + dy * cosA;
+        }
+        const double sy = ly * aspect;
+        const double distSq = lx * lx + sy * sy;
+        if (distSq >= maxDistSq) return 0.0;
+        const double dist = std::sqrt(distSq);
+        double coverage = clamp01((radiusPlusHalf - dist) * invBand);
+        if (softness > 0.0) coverage += softness * (coverage * coverage * (3.0 - 2.0 * coverage) - coverage);
+        if (coverage <= 0.0) return 0.0;
+
+        switch (b.tip) {
+        case BrushTip::Round:
+            return coverage;
+        case BrushTip::Textured: {
+            const std::uint32_t n = hash2d(x, y);
+            return coverage * (0.25 + 0.75 * (n & 255U) / 255.0);
+        }
+        case BrushTip::Bristle: {
+            const double normX = radius > 0.0 ? std::clamp(lx / radius, -1.0, 1.0) : 0.0;
+            const double tuftWave = 0.5 + 0.5 * std::cos(normX * 3.14159265358979323846 * 9.0);
+            const std::uint32_t n = hash2d(x, y, 17U);
+            const double micro = 0.55 + 0.45 * ((n & 255U) / 255.0);
+            const double bristleMask = std::clamp(0.32 + 0.68 * std::pow(tuftWave, 0.7) * micro, 0.0, 1.0);
+            return coverage * bristleMask;
+        }
+        case BrushTip::Graphite: {
+            const double toothA = (hash2d(x, y, 31U) & 255U) / 255.0;
+            const double toothB = (hash2d(x / 2, y / 2, 53U) & 255U) / 255.0;
+            const double grain = 0.65 * toothA + 0.35 * toothB;
+            const double coreBoost = clamp01(coverage * 1.25);
+            const double mask = std::clamp((0.28 + 0.72 * grain) * (0.6 + 0.4 * coreBoost), 0.0, 1.0);
+            return coverage * mask;
+        }
+        case BrushTip::Stipple: {
+            const double cell = (hash2d(x / 2, y / 2, 79U) & 255U) / 255.0;
+            const double fine = (hash2d(x, y, 101U) & 255U) / 255.0;
+            const double dot = std::clamp((cell * 0.7 + fine * 0.3 - 0.25) * 1.6, 0.0, 1.0);
+            return coverage * dot;
+        }
+        }
+        return coverage;
+    };
 
     Batch batch(store);
     bool changed = false;
-    for (auto y = static_cast<std::int64_t>(top); y < static_cast<std::int64_t>(bottom); ++y) {
-        for (auto x = static_cast<std::int64_t>(left); x < static_cast<std::int64_t>(right); ++x) {
-            const double coverage = tipCoverage(b.tip, x + 0.5 - p.x, y + 0.5 - p.y, radius,
-                                                x, y, b.hardness, b.aspectRatio, totalAngle);
-            if (coverage <= 0) continue;
-            const auto old = store.pixel({x, y}).value();
-            const double amount = coverage * b.opacity * b.flow * pressureAlpha;
-            std::uint32_t next = old;
-            if (b.erase) {
-                next = erase(old, amount);
-            } else if (blending) {
-                const double mixAmt = clamp01(amount * blendFactor);
-                next = blend(old, effectiveCarry, mixAmt);
-            } else {
-                next = deposit(old, b.color, amount);
+    for (auto ty = tileRange->first.y; ty <= tileRange->last.y; ++ty) {
+        for (auto tx = tileRange->first.x; tx <= tileRange->last.x; ++tx) {
+            const TilePoint tile{tx, ty};
+            const auto bounds = g.tileBounds(tile);
+            if (!bounds) continue;
+            const std::int64_t x0 = std::max(docLeft, bounds->left);
+            const std::int64_t y0 = std::max(docTop, bounds->top);
+            const std::int64_t x1 = std::min(docRight, bounds->right);
+            const std::int64_t y1 = std::min(docBottom, bounds->bottom);
+            if (x0 >= x1 || y0 >= y1) continue;
+
+            const auto readSpan = store.tilePixels(tile);
+            if (b.erase && readSpan.empty()) continue;
+            const std::uint32_t* readPtr = readSpan.empty() ? nullptr : readSpan.data();
+
+            std::uint32_t* writePtr = nullptr;
+            std::size_t* nonzeroPtr = nullptr;
+            bool tileCreated = false;
+            bool tileChanged = false;
+            const std::int64_t tileOriginX = bounds->left;
+            const std::int64_t tileOriginY = bounds->top;
+
+            for (std::int64_t y = y0; y < y1; ++y) {
+                const double dy = static_cast<double>(y) + 0.5 - p.y;
+                const std::size_t lyOffset = static_cast<std::size_t>(y - tileOriginY) * tileStride;
+                for (std::int64_t x = x0; x < x1; ++x) {
+                    const double coverage = computeCoverage(static_cast<double>(x) + 0.5 - p.x, dy, x, y);
+                    if (coverage <= 0.0) continue;
+                    const std::size_t idx = lyOffset + static_cast<std::size_t>(x - tileOriginX);
+                    const std::uint32_t old = writePtr ? writePtr[idx] : (readPtr ? readPtr[idx] : 0U);
+                    const double amount = coverage * opacityFlowPressure;
+                    std::uint32_t next = old;
+                    if (b.erase) {
+                        if (old == 0U) continue;
+                        next = erase(old, amount);
+                    } else if (blending) {
+                        const double mixAmt = clamp01(amount * blendFactor);
+                        next = blend(old, effectiveCarry, mixAmt);
+                    } else {
+                        const auto alpha = static_cast<unsigned>(clamp01(amount) * colorAlpha + 0.5);
+                        if (alpha == 0U) continue;
+                        if (alpha == 255U && old == 0U) {
+                            next = (255U << 24) | (colorR << 16) | (colorG << 8) | colorB;
+                        } else if (alpha == 255U) {
+                            next = (255U << 24) | (colorR << 16) | (colorG << 8) | colorB;
+                        } else {
+                            const unsigned inverse = 255U - alpha;
+                            const unsigned outA = std::min(255U, alpha + scale((old >> 24) & 255U, inverse));
+                            const unsigned outR = std::min(255U, scale(colorR, alpha) + scale((old >> 16) & 255U, inverse));
+                            const unsigned outG = std::min(255U, scale(colorG, alpha) + scale((old >> 8) & 255U, inverse));
+                            const unsigned outB = std::min(255U, scale(colorB, alpha) + scale(old & 255U, inverse));
+                            next = (outA << 24) | (outR << 16) | (outG << 8) | outB;
+                        }
+                    }
+                    if (next == old) continue;
+                    if (!writePtr) {
+                        const auto editRes = store.beginTileEdit(tile, {x0, y0, x1, y1},
+                                                                 writePtr, nonzeroPtr, tileCreated);
+                        if (editRes != R::Changed) return editRes;
+                    }
+                    if (old == 0U) ++(*nonzeroPtr);
+                    if (next == 0U) --(*nonzeroPtr);
+                    writePtr[idx] = next;
+                    tileChanged = true;
+                }
             }
-            if (next == old) continue;
-            auto result = store.setPixel({x, y}, next);
-            if (result == R::Changed) changed = true;
-            else if (result != R::Unchanged) return result;
+            if (writePtr) {
+                store.endTileEdit(tile, tileChanged);
+                if (tileChanged) changed = true;
+            }
         }
     }
     return changed ? R::Changed : R::Unchanged;

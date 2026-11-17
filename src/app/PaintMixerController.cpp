@@ -78,8 +78,11 @@ QString PaintMixerController::summarizeBatch(const material::PaintBatch& batch) 
 
 QVariantList PaintMixerController::pigmentLibrary() const
 {
-    QVariantList list;
     const std::string medium = m_model.activeMediumId();
+    if (!m_cachedPigmentLibrary.isEmpty() && m_cachedPigmentMedium == medium)
+        return m_cachedPigmentLibrary;
+
+    QVariantList list;
     for (const auto& p : m_model.pigments().pigments()) {
         QVariantMap item;
         item.insert(QStringLiteral("id"), QString::fromStdString(p.id));
@@ -113,7 +116,9 @@ QVariantList PaintMixerController::pigmentLibrary() const
         item.insert(QStringLiteral("provenance"), QString::fromStdString(p.provenance));
         list.append(item);
     }
-    return list;
+    m_cachedPigmentMedium = medium;
+    m_cachedPigmentLibrary = list;
+    return m_cachedPigmentLibrary;
 }
 
 QVariantList PaintMixerController::deposits() const
@@ -674,19 +679,27 @@ bool PaintMixerController::deleteSavedMixture(const QString& savedId)
 
 QImage PaintMixerController::renderSurfaceImage() const
 {
-    std::vector<std::uint32_t> pixels;
-    if (!m_model.renderSurface(pixels)) return {};
-    QImage img(material::PaintMixerModel::SurfaceWidth,
-               material::PaintMixerModel::SurfaceHeight,
-               QImage::Format_ARGB32_Premultiplied);
+    if (m_cachedSurfaceRevision == m_surfaceRevision && !m_cachedSurfaceImage.isNull())
+        return m_cachedSurfaceImage;
+
+    if (!m_model.renderSurface(m_surfacePixelBuffer)) return {};
+    if (m_cachedSurfaceImage.isNull()
+        || m_cachedSurfaceImage.width() != material::PaintMixerModel::SurfaceWidth
+        || m_cachedSurfaceImage.height() != material::PaintMixerModel::SurfaceHeight
+        || m_cachedSurfaceImage.format() != QImage::Format_ARGB32_Premultiplied) {
+        m_cachedSurfaceImage = QImage(material::PaintMixerModel::SurfaceWidth,
+                                      material::PaintMixerModel::SurfaceHeight,
+                                      QImage::Format_ARGB32_Premultiplied);
+    }
     for (int y = 0; y < material::PaintMixerModel::SurfaceHeight; ++y) {
-        auto* row = reinterpret_cast<std::uint32_t*>(img.scanLine(y));
+        auto* row = reinterpret_cast<std::uint32_t*>(m_cachedSurfaceImage.scanLine(y));
         const std::size_t offset = static_cast<std::size_t>(y) * material::PaintMixerModel::SurfaceWidth;
-        std::copy(pixels.begin() + offset,
-                  pixels.begin() + offset + material::PaintMixerModel::SurfaceWidth,
+        std::copy(m_surfacePixelBuffer.begin() + offset,
+                  m_surfacePixelBuffer.begin() + offset + material::PaintMixerModel::SurfaceWidth,
                   row);
     }
-    return img;
+    m_cachedSurfaceRevision = m_surfaceRevision;
+    return m_cachedSurfaceImage;
 }
 
 } // namespace komapaint

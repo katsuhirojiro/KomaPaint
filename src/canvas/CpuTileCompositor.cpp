@@ -57,38 +57,113 @@ bool validBlendMode(BlendMode mode) {
 bool same(const std::vector<CompositeLayer>& a, std::uint32_t ab,
           const std::vector<CompositeLayer>& b, std::uint32_t bb) { return ab == bb && a == b; }
 }
+bool CpuTileCompositor::composeInto(const TileGeometry& geometry, TilePoint tile,
+        const std::vector<CompositeLayer>& layers, std::uint32_t background,
+        std::span<const std::span<const std::uint32_t>> layerTileOverrides,
+        std::vector<std::uint32_t>& outPixels, std::int64_t& outWidth, std::int64_t& outHeight)
+{
+    auto bounds = geometry.tileBounds(tile);
+    if (!bounds || !validPixel(background) || geometry.tileSize() > 4096) return false;
+    if (!layerTileOverrides.empty() && layerTileOverrides.size() != layers.size()) return false;
+    const auto stride = static_cast<std::size_t>(geometry.tileSize());
+    const std::size_t tilePixels = stride * stride;
+    for (std::size_t i = 0; i < layers.size(); ++i) {
+        const auto& layer = layers[i];
+        if (!layer.store || !layer.store->isValid() || !std::isfinite(layer.opacity) || layer.opacity < 0 || layer.opacity > 1 || !validBlendMode(layer.blendMode))
+            return false;
+        const auto& other = layer.store->geometry();
+        if (other.width() != geometry.width() || other.height() != geometry.height() || other.tileSize() != geometry.tileSize())
+            return false;
+        if (!layerTileOverrides.empty() && !layerTileOverrides[i].empty()
+            && layerTileOverrides[i].size() != tilePixels)
+            return false;
+    }
+    try {
+        outWidth = bounds->right - bounds->left;
+        outHeight = bounds->bottom - bounds->top;
+        const auto width = static_cast<std::size_t>(outWidth);
+        const auto height = static_cast<std::size_t>(outHeight);
+        outPixels.assign(width * height, background);
+        std::uint32_t* dstBase = outPixels.data();
+
+        for (std::size_t rev = layers.size(); rev > 0; --rev) {
+            const std::size_t idx = rev - 1;
+            const auto& layer = layers[idx];
+            if (!layer.visible || layer.opacity == 0.0) continue;
+            std::span<const std::uint32_t> pixels;
+            if (!layerTileOverrides.empty() && !layerTileOverrides[idx].empty()) {
+                pixels = layerTileOverrides[idx];
+            } else {
+                pixels = layer.store->tilePixels(tile);
+            }
+            if (pixels.empty()) continue;
+            const auto opacity = static_cast<unsigned>(std::lround(layer.opacity * 255.0));
+            if (opacity == 0U) continue;
+            const std::uint32_t* srcBase = pixels.data();
+
+            if (layer.blendMode == BlendMode::Normal) {
+                if (opacity == 255U) {
+                    for (std::size_t y = 0; y < height; ++y) {
+                        const std::uint32_t* srcRow = srcBase + y * stride;
+                        std::uint32_t* dstRow = dstBase + y * width;
+                        for (std::size_t x = 0; x < width; ++x) {
+                            const std::uint32_t src = srcRow[x];
+                            if (src == 0U) continue;
+                            const unsigned sa = src >> 24;
+                            if (sa == 255U) {
+                                dstRow[x] = src;
+                            } else {
+                                const std::uint32_t dst = dstRow[x];
+                                const unsigned inv = 255U - sa;
+                                const unsigned a = std::min(255U, sa + scale(dst >> 24, inv));
+                                const unsigned r = std::min(255U, ((src >> 16) & 255U) + scale((dst >> 16) & 255U, inv));
+                                const unsigned g = std::min(255U, ((src >> 8) & 255U) + scale((dst >> 8) & 255U, inv));
+                                const unsigned b = std::min(255U, (src & 255U) + scale(dst & 255U, inv));
+                                dstRow[x] = (a << 24) | (r << 16) | (g << 8) | b;
+                            }
+                        }
+                    }
+                } else {
+                    for (std::size_t y = 0; y < height; ++y) {
+                        const std::uint32_t* srcRow = srcBase + y * stride;
+                        std::uint32_t* dstRow = dstBase + y * width;
+                        for (std::size_t x = 0; x < width; ++x) {
+                            const std::uint32_t src = srcRow[x];
+                            if (src == 0U) continue;
+                            dstRow[x] = over(src, dstRow[x], opacity);
+                        }
+                    }
+                }
+            } else {
+                const BlendMode mode = layer.blendMode;
+                for (std::size_t y = 0; y < height; ++y) {
+                    const std::uint32_t* srcRow = srcBase + y * stride;
+                    std::uint32_t* dstRow = dstBase + y * width;
+                    for (std::size_t x = 0; x < width; ++x) {
+                        const std::uint32_t src = srcRow[x];
+                        if (src == 0U) continue;
+                        const std::uint32_t dst = dstRow[x];
+                        if (dst == 0U) {
+                            dstRow[x] = (opacity == 255U) ? src : over(src, 0U, opacity);
+                        } else {
+                            dstRow[x] = blendOver(src, dst, opacity, mode);
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    } catch (const std::bad_alloc&) { return false; }
+      catch (const std::length_error&) { return false; }
+}
+
 std::optional<CompositeTile> CpuTileCompositor::compose(const TileGeometry& geometry, TilePoint tile,
         const std::vector<CompositeLayer>& layers, std::uint32_t background)
 {
-    auto bounds = geometry.tileBounds(tile);
-    if (!bounds || !validPixel(background) || geometry.tileSize() > 4096) return std::nullopt;
-    for (const auto& layer : layers) {
-        if (!layer.store || !layer.store->isValid() || !std::isfinite(layer.opacity) || layer.opacity < 0 || layer.opacity > 1 || !validBlendMode(layer.blendMode))
-            return std::nullopt;
-        const auto& other = layer.store->geometry();
-        if (other.width() != geometry.width() || other.height() != geometry.height() || other.tileSize() != geometry.tileSize())
-            return std::nullopt;
-    }
-    try {
-        CompositeTile result;
-        result.width = bounds->right - bounds->left;
-        result.height = bounds->bottom - bounds->top;
-        const auto width = static_cast<std::size_t>(result.width);
-        const auto height = static_cast<std::size_t>(result.height);
-        result.pixels.assign(width * height, background);
-        for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
-            if (!it->visible || it->opacity == 0.0) continue;
-            const auto pixels = it->store->tilePixels(tile);
-            if (pixels.empty()) continue;
-            const auto opacity = static_cast<unsigned>(std::lround(it->opacity * 255.0));
-            const auto stride = static_cast<std::size_t>(geometry.tileSize());
-            for (std::size_t y = 0; y < height; ++y)
-                for (std::size_t x = 0; x < width; ++x)
-                    result.pixels[y * width + x] = blendOver(pixels[y * stride + x], result.pixels[y * width + x], opacity, it->blendMode);
-        }
-        return result;
-    } catch (const std::bad_alloc&) { return std::nullopt; }
-      catch (const std::length_error&) { return std::nullopt; }
+    CompositeTile result;
+    if (!composeInto(geometry, tile, layers, background, {}, result.pixels, result.width, result.height))
+        return std::nullopt;
+    return result;
 }
 CompositeInvalidation::Plan CompositeInvalidation::prepare(const std::vector<CompositeLayer>& layers, std::uint32_t background) const
 {

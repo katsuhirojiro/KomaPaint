@@ -70,6 +70,8 @@ private:
     std::unique_ptr<StrokeCommand> m_current;
     bool m_replaying = false;
     QPointer<UndoStack> m_self;  // see constructor: keeps liveness guards allocation-free
+    TilePoint m_lastCapturedMaterialTile{};
+    bool m_hasLastCapturedMaterialTile = false;
     std::size_t m_cursor = 0, m_bytes = 0, m_currentBytes = 0;
 };
 } // namespace komapaint
