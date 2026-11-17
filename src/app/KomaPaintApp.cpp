@@ -359,15 +359,18 @@ void KomaPaintApp::runPackagedVerification()
     }
 
     // Brush stroke + Eraser + Selection + Undo
+    const QPointF vpStart = canvas->documentToViewport(340, 180);
+    const QPointF vpEnd = canvas->documentToViewport(390, 180);
+    const QPointF vpMid = canvas->documentToViewport(360, 180);
     m_workspace.setActiveTool(QStringLiteral("brush"));
     m_workspace.colors()->setForeground(QColor(210, 50, 40));
     m_workspace.brush()->setSize(20);
-    if (!canvas->beginStroke(340, 180, 1.0, m_workspace.brush(), m_workspace.colors()->foreground())) {
+    if (!canvas->beginStroke(vpStart.x(), vpStart.y(), 1.0, m_workspace.brush(), m_workspace.colors()->foreground())) {
         fail(QStringLiteral("Digital brush beginStroke failed."));
         return;
     }
-    canvas->continueStroke(390, 180, 1.0);
-    canvas->endStroke(390, 180, 1.0);
+    canvas->continueStroke(vpEnd.x(), vpEnd.y(), 1.0);
+    canvas->endStroke(vpEnd.x(), vpEnd.y(), 1.0);
     if ((layer->tiles().pixel({360, 180}).value_or(0U) >> 24) < 200) {
         fail(QStringLiteral("Brush stroke left no pixels."));
         return;
@@ -375,11 +378,11 @@ void KomaPaintApp::runPackagedVerification()
 
     m_workspace.setActiveTool(QStringLiteral("eraser"));
     m_workspace.brush()->setSize(24);
-    if (!canvas->beginStroke(360, 180, 1.0, m_workspace.brush(), m_workspace.colors()->foreground())) {
+    if (!canvas->beginStroke(vpMid.x(), vpMid.y(), 1.0, m_workspace.brush(), m_workspace.colors()->foreground())) {
         fail(QStringLiteral("Eraser beginStroke failed."));
         return;
     }
-    canvas->endStroke(360, 180, 1.0);
+    canvas->endStroke(vpMid.x(), vpMid.y(), 1.0);
     if ((layer->tiles().pixel({360, 180}).value_or(0U) >> 24) != 0) {
         fail(QStringLiteral("Eraser did not erase pixels."));
         return;
