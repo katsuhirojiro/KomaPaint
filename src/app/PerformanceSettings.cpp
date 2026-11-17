@@ -101,11 +101,11 @@ bool PerformanceSettings::applyVariantMap(const QVariantMap& map)
 int PerformanceSettings::migratedUndoHistoryLimit()
 {
     constexpr int legacyForcedDefault = 60;
-    constexpr auto migratedKey = "performance/undoUnlimitedMigrated";
+    const QString migratedKey = QStringLiteral("performance/undoUnlimitedMigrated");
     int stored = m_settings ? m_settings->value(QStringLiteral("performance/undoHistoryLimit"), 0).toInt() : 0;
-    if (m_settings && !m_settings->value(QStringLiteral(migratedKey), false).toBool()) {
+    if (m_settings && !m_settings->value(migratedKey, false).toBool()) {
         if (stored == legacyForcedDefault) stored = 0;
-        m_settings->setValue(QStringLiteral(migratedKey), true);
+        m_settings->setValue(migratedKey, true);
         m_settings->setValue(QStringLiteral("performance/undoHistoryLimit"), stored);
     }
     return std::max(stored, 0);
