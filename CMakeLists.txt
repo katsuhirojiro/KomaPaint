@@ -31,6 +31,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
 # ---- Options ----------------------------------------------------------------
 option(KOMAPAINT_BUILD_TESTS      "Build unit tests."             ON)
 option(KOMAPAINT_ENABLE_WARNINGS  "Enable strict compiler warnings." ON)
+option(KOMAPAINT_BUILD_BENCHMARKS "Build the Qt-free workload benchmarks." OFF)
 
 if(KOMAPAINT_ENABLE_WARNINGS)
     if(MSVC)
@@ -64,6 +65,10 @@ add_subdirectory(apps/desktop)
 
 if(KOMAPAINT_BUILD_TESTS)
     add_subdirectory(tests)
+endif()
+
+if(KOMAPAINT_BUILD_BENCHMARKS)
+    add_subdirectory(bench)
 endif()
 
 # ---- Install ----------------------------------------------------------------

@@ -28,6 +28,18 @@ Two independent paths exist:
    undo. `test_inputperformancebenchmark` covers pointer normalisation and
    allocation-free steady state.
 
+   Workload harnesses now live in `bench/` and are built with
+   `-DKOMAPAINT_BUILD_BENCHMARKS=ON`. They link the same core libraries the
+   editor links, so they measure the shipping code path rather than a copy:
+   `bench_compositing` (one 256 px tile through `composeInto` across layer,
+   opacity, coverage and blend-mode cases), `bench_brush` (a 700-sample stroke
+   at 12-400 px, including soft, textured and smudging tips, with a per-stroke
+   allocation count) and `bench_material` (a wash stroke through the reservoir
+   path, then the render pass over the wet tiles it dirtied). Windows CI builds
+   and runs all three as a smoke check and prints the numbers into the run log;
+   the numbers are not asserted because shared runners are too noisy for
+   timing thresholds. See `bench/README.md` for the reference table.
+
 ## Reference run: 2026-11-17, GCC 12.2, `-O2`, Linux x86-64
 
 Not the shipping target. MSVC and Windows will differ, especially in memory
@@ -106,7 +118,21 @@ watercolour wash) attributes the time as:
 | `blendPremultiplied` | 11% |
 | surface tooth / dab contact / batch validation | 8% |
 
-74 ns per material cell, 8.7 ms for the full 22-tile pass. The sRGB conversion
+74 ns per material cell, 8.7 ms for the full 22-tile pass (p50 8.87 ms,
+p95 9.16 ms, p99 9.30 ms over 40 passes in `bench_material`).
+
+The same stroke through the deposition path - the part the artist feels while
+dragging - measures p50 122.3 ms, p95 125.3 ms, p99 126.6 ms on a 1600x1200
+canvas with 22 active tiles. Its profile differs from the render pass:
+`MaterialDab::apply` itself is 37% (per-pixel optics and compositing are inlined
+there), `dabContactAt` 10% over 26 M calls, `MaterialTileStore::validateCell` 10%
+over 15.7 M calls, `linearToSrgbByte` 6%, and `PaintBatch` state refreshes
+(`totalMass` 55 M calls, `refreshBatchState` 16 M calls) another 8%. Those
+bookkeeping calls are the clearest next target: the batch is fixed for a whole
+dab, yet its derived wetness/consistency is recomputed many times per pixel.
+They were not touched in this pass because they sit inside the material write
+path that must stay bit-identical without its own validation round.
+ The sRGB conversion
 already uses a 4096-entry hint table plus a one-step threshold search, so it is
 close to its floor; the remaining cost is the 12-band Kubelka-Munk evaluation
 per distinct cell, and a wash produces nearly a distinct value per pixel. Making
@@ -121,4 +147,10 @@ rather than a silent tweak.
 * No long-session memory or allocation growth measurements.
 * QML-side costs (bindings, delegates, layout) are not measured at all; only the
   C++ side is covered by the suites above.
-* The material renderer's per-cell optics is unchanged.
+* The material renderer's per-cell optics is unchanged, and so is the
+  `PaintBatch` bookkeeping inside the stroke path.
+* The canvas viewport keeps one frame image and repaints only the dirty
+  rectangle into it, but `QQuickPaintedItem` still uploads the whole texture per
+  frame. At 4K that is ~33 MB of upload per update, which is a plausible
+  bottleneck that no C++ harness can see; replacing it with per-tile scene-graph
+  textures is a rendering change that needs its own verification pass.

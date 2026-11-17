@@ -90,6 +90,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="${{ steps.qt.outputs.qtDir }}" `
             -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="${{ env.OUTPUT_DIR }}" `
             -DKOMAPAINT_BUILD_TESTS=ON `
+            -DKOMAPAINT_BUILD_BENCHMARKS=ON `
             -DKOMAPAINT_ENABLE_WARNINGS=ON
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -197,6 +198,38 @@ jobs:
           $totalsLine = if ($totals.Count -gt 0) { $totals -join ' ; ' } else { 'no Totals lines' }
           if ($totalsLine.Length -gt 8000) { $totalsLine = $totalsLine.Substring(0, 8000) + ' ...' }
           Write-Host "::notice title=Unit test totals::$($exes.Count) test executables; $totalsLine"
+
+      - name: Run workload benchmarks (smoke)
+        shell: pwsh
+        run: |
+          # The benchmarks are not assertions: shared runners are too noisy for
+          # timing thresholds. Running them here proves the harnesses still
+          # link, run and exercise the real code paths, and prints a shape of
+          # the current numbers into the log for comparison with
+          # bench/README.md.
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $benchDir = Join-Path $PWD "build/bench/bin"
+          $exes = Get-ChildItem $benchDir -Filter "bench_*.exe" | Sort-Object Name
+          if ($exes.Count -eq 0) {
+            Write-Host "::error title=Benchmarks missing::No bench_*.exe in $benchDir"
+            exit 1
+          }
+          $failed = 0
+          foreach ($exe in $exes) {
+            Write-Host ">>> $($exe.Name) <<<"
+            $output = & $exe.FullName 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            Write-Host $output
+            if ($code -ne 0) {
+              $note = ($output -split "`n" | Select-Object -Last 6) -join ' || '
+              $note = $note.Replace('%', '%25').Replace("`r", ' ').Replace("`n", ' || ')
+              Write-Host "::error title=$($exe.Name) failed (exit $code)::$note"
+              $failed++
+            }
+          }
+          if ($failed -gt 0) { exit 1 }
+          Write-Host "=== All benchmarks ran ==="
 
       - name: Stage application directory
         shell: pwsh
