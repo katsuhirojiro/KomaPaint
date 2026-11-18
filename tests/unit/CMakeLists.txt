@@ -210,6 +210,10 @@ target_sources(test_workspace_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
 target_link_libraries(test_workspace_ui PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
 
 # Icons, tool palette and the brush panels through the real main window.
+# Brush Studio's Qt-facing model: the lists QML will read, the edits, the undo
+# history and the .kb round trip. No window is needed, so it runs headless.
+komapaint_add_test(test_brush_studio_model TestBrushStudioModel.cpp)
+target_link_libraries(test_brush_studio_model PRIVATE komapaint::app)
 komapaint_add_test(test_brush_ui TestBrushUi.cpp)
 target_sources(test_brush_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
 target_link_libraries(test_brush_ui PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
