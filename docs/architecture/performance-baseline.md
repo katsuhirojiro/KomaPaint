@@ -167,8 +167,8 @@ compared with Linux.
 Most rows sit within a few tens of percent of each other - expected for a slower
 shared runner. Two do not:
 
-* **Multiply content blending is 3.4-4.6x slower on MSVC than on GCC.** The
-  rest of the compositor is integer and roughly equal on both, so this is not
+* **Multiply content blending was 3.4-4.6x slower on MSVC than on GCC.** The
+  rest of the compositor is integer and roughly equal on both, so this was not
   the runner. The blend path evaluates the W3C formula in doubles per channel
   and rounds four times per pixel with `std::lround`, which MSVC does not
   inline: without SSE4.1 (not part of the baseline the shipping build targets)
@@ -177,10 +177,25 @@ shared runner. Two do not:
   equivalence against `std::lround` over five million values on every compiler
   we build with, and the compositor, material and brush outputs were verified
   pixel-identical before the change.
-* **The material stroke is 1.6x slower on MSVC.** Same class of problem, more
+* **The material stroke was 1.6x slower on MSVC.** Same class of problem, more
   sources: `linearToSrgbByte`, `blendPremultiplied` and `packStraight` all round
   per channel, so the wash stroke was paying the same CRT calls several times
-  per pixel. The same replacement applies there.
+  per pixel.
+
+### Effect of the rounding change, measured on the same CI runner
+
+| workload | before | after | change |
+| --- | --- | --- | --- |
+| compositing, 4 Multiply layers, disc 40% | 4.054 ms | 1.349 ms | **-67%** |
+| material render pass, 22 tiles | 11.92 ms | 8.58 ms | **-28%** |
+| compositing, other blend paths | 0.048-0.362 ms | unchanged | - |
+| brush strokes, 12-400 px | 6.64-92.20 ms | unchanged | - |
+| material wash stroke, 1600x1200 | 193.9 ms | 193.2 ms | within noise |
+
+The wash stroke did not improve, which says its cost is where the profile said
+it is - per-cell optics and reservoir bookkeeping - and not in rounding. Redoing
+the same measurement on a second push gave 1.349 ms and 8.58 ms again, so the
+gap is well outside the run-to-run spread of the neighbouring rows.
 
 ## What is still missing
 

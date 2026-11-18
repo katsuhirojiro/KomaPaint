@@ -62,6 +62,21 @@ be taken on the target hardware.
 Percentiles are interpolated over the sample set; a dash means the case has not
 been re-measured since the harness moved into the repository.
 
+Windows MSVC Release on the CI runner (p50), for comparison:
+
+| Harness | Workload | MSVC Release |
+| --- | --- | --- |
+| compositing | 1 opaque layer, disc 12% | 0.048 ms |
+| compositing | 4 opaque layers, disc 12% | 0.184 ms |
+| compositing | 4 half-alpha layers, disc 40% | 0.314 ms |
+| compositing | 4 Multiply layers, disc 40% | 1.349 ms (4.054 ms before the rounding fix) |
+| brush | 12 px / 60 px / 200 px / 400 px | 6.64 / 18.00 / 49.52 / 92.03 ms |
+| material | wash stroke, 1600x1200 | 193.2 ms |
+| material | render pass over 22 wet tiles | 8.58 ms |
+
+The runner is a shared two-core VM, so treat these as "what the shipping
+compiler does to this code", not as a statement about a workstation.
+
 ## Interpreting them
 
 - Compositing is bandwidth-bound at roughly 2 ns per pixel except for Multiply,
