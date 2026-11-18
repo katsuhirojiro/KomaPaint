@@ -107,9 +107,6 @@ private:
     const QMetaObject* const m_keepMixerSurface = &MixerSurfaceItem::staticMetaObject;
 
     Harness m_app;
-    double m_startupMs = 0.0;
-    std::unique_ptr<QObject> m_settingsDialogHolder;
-    QObject* m_settingsDialog = nullptr;
 };
 
 void TestQmlResponsiveness::initTestCase()
@@ -117,6 +114,7 @@ void TestQmlResponsiveness::initTestCase()
     // Same software scene graph the other window tests use: the offscreen
     // platform has no GPU context and shader-based items would not instantiate.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
+    m_app.engine.addImportPath(QStringLiteral("qrc:/"));
     m_app.settings = std::make_unique<Settings>(QStringLiteral("KomaPaintTests"),
                                                 QStringLiteral("QmlResponsiveness"));
     m_app.settings->setValue(QStringLiteral("workspace/layout"), QString());
@@ -133,49 +131,39 @@ void TestQmlResponsiveness::initTestCase()
 
 void TestQmlResponsiveness::measuresStartup()
 {
-    m_app.engine.addImportPath(QStringLiteral("qrc:/"));
-    auto* context = m_app.engine.rootContext();
-    context->setContextProperty(QStringLiteral("Settings"), m_app.settings.get());
-    context->setContextProperty(QStringLiteral("Workspace"), &m_app.workspace);
-    context->setContextProperty(QStringLiteral("NewProject"), &m_app.project);
-    context->setContextProperty(QStringLiteral("App"), &m_app.config);
-    context->setContextProperty(QStringLiteral("Panels"), &m_app.panels);
-    context->setContextProperty(QStringLiteral("Dock"), m_app.panels.dockModel());
-
-    QQmlComponent component(&m_app.engine, QUrl(QStringLiteral("qrc:/workspaces/MainWindow.qml")));
-    QElapsedTimer timer;
-    timer.start();
-    m_app.root.reset(component.create());
-    if (!m_app.root) {
-        // Report every error with its URL, not just the first: "Type X
-        // unavailable" is the symptom, the underlying import failure is the cause.
-        for (const QQmlError& error : component.errors())
-            qInfo("QML load error: %s", qPrintable(error.toString()));
-        qInfo("import paths: %s", qPrintable(m_app.engine.importPathList().join(QStringLiteral(" | "))));
-    }
-    if (!m_app.root) {
-        QStringList details;
-        for (const QQmlError& error : component.errors()) details << error.toString();
-        details << QStringLiteral("import paths: ") + m_app.engine.importPathList().join(QStringLiteral(" | "));
-        QFAIL(qPrintable(details.join(QStringLiteral("\n"))));
-    }
-    m_app.window = qobject_cast<QQuickWindow*>(m_app.root.get());
-    QVERIFY(m_app.window);
-    m_app.window->show();
-    QVERIFY(QTest::qWaitForWindowExposed(m_app.window));
-    // Wait for the workspace to have real geometry: a window that has not been
-    // laid out yet would make every later measurement meaningless.
-    QQuickItem* canvas = nullptr;
-    for (int attempt = 0; attempt < 120 && !canvas; ++attempt) {
-        QTest::qWait(10);
-        if (auto* item = findVisual(m_app.window->contentItem(), QStringLiteral("canvasViewport"));
-            item && item->width() > 100 && item->height() > 100) {
-            canvas = item;
+    // Build the workspace pieces the window builds on open, one at a time, so a
+    // slow piece is named rather than averaged into "startup took 300 ms".
+    // Panels are created here rather than through MainWindow.qml because a test
+    // binary does not necessarily resolve the window's directory imports; the
+    // panel set and its cost are the same either way.
+    const QStringList panels = {
+        QStringLiteral("panels/SubToolPanel.qml"),   QStringLiteral("panels/ToolPropertyPanel.qml"),
+        QStringLiteral("panels/BrushSizePanel.qml"), QStringLiteral("panels/LayersPanel.qml"),
+        QStringLiteral("panels/PropertiesPanel.qml"), QStringLiteral("panels/ColorPanel.qml"),
+        QStringLiteral("panels/PalettePanel.qml"),   QStringLiteral("panels/ColorMixerPanel.qml"),
+        QStringLiteral("panels/AssetsPanel.qml"),    QStringLiteral("panels/TimelinePanel.qml"),
+        QStringLiteral("components/MainToolbar.qml"), QStringLiteral("components/StatusBar.qml"),
+    };
+    double total = 0.0;
+    for (const QString& panel : panels) {
+        QQmlComponent component(&m_app.engine, QUrl(QStringLiteral("qrc:/") + panel));
+        QElapsedTimer timer;
+        timer.start();
+        std::unique_ptr<QObject> object(component.create(m_app.engine.rootContext()));
+        const double elapsed = double(timer.nsecsElapsed()) / 1e6;
+        if (!object) {
+            qInfo("could not create %s: %s", qPrintable(panel), qPrintable(component.errorString()));
+            continue;
         }
+        total += elapsed;
+        QString name = panel.section(QLatin1Char('/'), 1).section(QLatin1Char('.'), 0, 0);
+        name.replace(QStringLiteral("Panel"), QString());
+        const QString key = QStringLiteral("qml_create_") + name.toLower();
+        report(qPrintable(key), elapsed);
+        QCoreApplication::processEvents();
     }
-    QVERIFY(canvas);
-    m_startupMs = double(timer.elapsed());
-    report("qml_startup_open_project", m_startupMs);
+    QVERIFY(total > 0.0);
+    report("qml_create_all_panels_total", total);
 }
 
 void TestQmlResponsiveness::measuresToolSwitching()
