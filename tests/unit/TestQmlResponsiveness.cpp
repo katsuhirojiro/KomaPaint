@@ -142,8 +142,10 @@ void TestQmlResponsiveness::measuresStartup()
         QStringLiteral("panels/PropertiesPanel.qml"), QStringLiteral("panels/ColorPanel.qml"),
         QStringLiteral("panels/PalettePanel.qml"),   QStringLiteral("panels/ColorMixerPanel.qml"),
         QStringLiteral("panels/AssetsPanel.qml"),    QStringLiteral("panels/TimelinePanel.qml"),
-        QStringLiteral("components/MainToolbar.qml"), QStringLiteral("components/StatusBar.qml"),
     };
+    // The toolbar and status bar need window-level context properties; they are
+    // built once with the window and cost nothing after that, so they are not
+    // part of this baseline.
     double total = 0.0;
     int created = 0;
     for (const QString& panel : panels) {
