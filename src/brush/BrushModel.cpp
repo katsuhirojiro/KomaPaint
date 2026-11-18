@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdio>
 #include <set>
+#include <string>
+#include <utility>
 
 namespace komapaint::brush {
 namespace {
@@ -461,16 +463,42 @@ bool BrushDocument::unexpose(std::string_view parameter) {
     return exposed.size() != before;
 }
 
+std::string effectiveSection(const ExposedProperty& property) {
+    if (!property.section.empty()) return property.section;
+    const char* section = parameterSection(property.parameter);
+    return section ? std::string(section) : std::string();
+}
+
+namespace {
+
+// A group an artist invented sorts after the built-in thirteen, and then
+// alphabetically among other invented groups, so two custom groups still have a
+// stable order instead of depending on insertion.
+std::pair<int, std::string> sectionKey(const ExposedProperty& property) {
+    const std::string section = effectiveSection(property);
+    const int rank = sectionRank(section);
+    return {rank < 0 ? int(parameterSections().size()) : rank, section};
+}
+
+} // namespace
+
+bool exposedLess(const ExposedProperty& a, const ExposedProperty& b) {
+    const auto keyA = sectionKey(a);
+    const auto keyB = sectionKey(b);
+    if (keyA != keyB) return keyA < keyB;
+    if (a.order != b.order) return a.order < b.order;
+    return a.parameter < b.parameter;
+}
+
 std::vector<const ExposedProperty*> BrushDocument::visibleExposed() const {
     std::vector<const ExposedProperty*> result;
     for (const auto& p : exposed) {
         if (p.visible) result.push_back(&p);
     }
-    std::stable_sort(result.begin(), result.end(), [](const ExposedProperty* a, const ExposedProperty* b) {
-        if (a->section != b->section) return a->section < b->section;
-        if (a->order != b->order) return a->order < b->order;
-        return a->parameter < b->parameter;
-    });
+    std::stable_sort(result.begin(), result.end(),
+                     [](const ExposedProperty* a, const ExposedProperty* b) {
+                         return exposedLess(*a, *b);
+                     });
     return result;
 }
 

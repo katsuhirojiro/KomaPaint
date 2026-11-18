@@ -40,5 +40,8 @@ bool parameterInRange(const ParameterInfo& info, double value);
 // setting, and nothing else reads it.
 std::span<const char* const> parameterSections();
 const char* parameterSection(std::string_view name);
+// Position of a group in the panel order above, or -1 for a name an artist
+// typed themselves (which sorts after the built-in groups).
+int sectionRank(std::string_view sectionName);
 
 } // namespace komapaint::brush

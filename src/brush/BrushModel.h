@@ -146,6 +146,15 @@ private:
     std::vector<ValidationIssue> m_issues;
 };
 
+// The group a property is shown under: the artist's own override when they gave
+// one, otherwise the group the registry puts the setting in.
+std::string effectiveSection(const ExposedProperty& property);
+
+// The order of the Sub-Tool property list: group first, in the registry's own
+// order (a group the artist invented sorts last), then the artist's order
+// inside that group, then the storage key so the result is never ambiguous.
+bool exposedLess(const ExposedProperty& a, const ExposedProperty& b);
+
 // A flat brush record as the application has stored it until now. Used to
 // migrate existing presets into the model without touching their numbers.
 struct LegacyBrush {

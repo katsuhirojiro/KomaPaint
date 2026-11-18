@@ -45,6 +45,7 @@ private slots:
     void exposureCanBeRenamedReorderedAndReset();
     void undoAndRedoRestoreExactly();
     void saveAndLoadRoundTrip();
+    void anUnsaveableBrushIsRefused();
     void aCorruptFileChangesNothing();
 };
 
@@ -71,6 +72,10 @@ void TestBrushStudioModel::componentEditingChangesTheDocument() {
 
     const QString id = model.addComponent(int(brush::ComponentKind::Image));
     QVERIFY(!id.isEmpty());
+    // A component that needs pixels gets a usable mask, so the brush can be
+    // saved the moment the artist adds it.
+    QVERIFY(model.document().validate().ok());
+    QVERIFY(!model.document().component(id.toStdString())->resourceId.empty());
     QCOMPARE(int(model.document().components.size()), 2);
     QCOMPARE(model.selectedId(), id);
     QVERIFY(componentsChanged.count() >= 1);
@@ -211,8 +216,12 @@ void TestBrushStudioModel::exposureCanBeRenamedReorderedAndReset() {
     BrushStudioModel model;
     const QVariantList initial = model.exposedProperties();
     QCOMPARE(int(initial.size()), 5);
-    QCOMPARE(stringField(initial.at(0).toMap(), "key"), QStringLiteral("size"));
-    QCOMPARE(stringField(initial.at(0).toMap(), "section"), QStringLiteral("Size"));
+    // Group order decides the panel: the tip's settings come first, and size
+    // follows them, exactly as the thirteen groups are ordered.
+    QCOMPARE(stringField(initial.at(0).toMap(), "key"), QStringLiteral("hardness"));
+    QCOMPARE(stringField(initial.at(0).toMap(), "section"), QStringLiteral("Brush Tip"));
+    QCOMPARE(stringField(initial.at(1).toMap(), "key"), QStringLiteral("size"));
+    QCOMPARE(stringField(initial.at(1).toMap(), "section"), QStringLiteral("Size"));
 
     QVERIFY(model.expose(QStringLiteral("scatter-x")));
     QCOMPARE(int(model.exposedProperties().size()), 6);
@@ -221,28 +230,41 @@ void TestBrushStudioModel::exposureCanBeRenamedReorderedAndReset() {
 
     QVariantMap fields;
     fields.insert(QStringLiteral("label"), QStringLiteral("Spread"));
-    fields.insert(QStringLiteral("section"), QStringLiteral("My Section"));
     fields.insert(QStringLiteral("control"), QStringLiteral("number"));
     QVERIFY(model.setExposure(QStringLiteral("scatter-x"), fields));
     const QVariantList afterRename = model.exposedProperties();
     const QVariantMap renamed = afterRename.last().toMap();
     QCOMPARE(stringField(renamed, "label"), QStringLiteral("Spread"));
-    QCOMPARE(stringField(renamed, "section"), QStringLiteral("My Section"));
+    QCOMPARE(stringField(renamed, "section"), QStringLiteral("Scatter"));
     QCOMPARE(stringField(renamed, "control"), QStringLiteral("number"));
 
-    QCOMPARE(stringField(model.exposedProperties().at(0).toMap(), "key"), QStringLiteral("size"));
-    QVERIFY(model.moveExposure(QStringLiteral("scatter-x"), -5));
-    QCOMPARE(stringField(model.exposedProperties().at(0).toMap(), "key"),
+    // Groups come in the panel's own order: the tip before size, size before
+    // opacity, scatter after both -- not alphabetically.
+    const QVariantList grouped = model.exposedProperties();
+    QCOMPARE(stringField(grouped.at(0).toMap(), "section"), QStringLiteral("Brush Tip"));
+    QCOMPARE(stringField(grouped.at(1).toMap(), "section"), QStringLiteral("Size"));
+    QCOMPARE(stringField(grouped.at(2).toMap(), "section"), QStringLiteral("Opacity & Flow"));
+
+    // Ordering happens inside a group; a move that would leave the group is
+    // refused rather than quietly doing nothing.
+    QVERIFY(model.expose(QStringLiteral("scatter-y")));
+    const QVariantList scatterRows = model.exposedProperties();
+    QCOMPARE(stringField(scatterRows.at(scatterRows.size() - 2).toMap(), "key"),
              QStringLiteral("scatter-x"));
+    QVERIFY(model.moveExposure(QStringLiteral("scatter-y"), -1));
+    QCOMPARE(stringField(model.exposedProperties().at(scatterRows.size() - 2).toMap(), "key"),
+             QStringLiteral("scatter-y"));
+    QVERIFY(!model.moveExposure(QStringLiteral("scatter-y"), -1));
     QVERIFY(!model.moveExposure(QStringLiteral("nope"), 1));
 
     QVERIFY(model.unexpose(QStringLiteral("scatter-x")));
+    QVERIFY(model.unexpose(QStringLiteral("scatter-y")));
     QCOMPARE(int(model.exposedProperties().size()), 5);
 
     model.expose(QStringLiteral("texture-strength"));
     model.resetExposure();
     QCOMPARE(int(model.exposedProperties().size()), 5);
-    QCOMPARE(stringField(model.exposedProperties().at(0).toMap(), "key"), QStringLiteral("size"));
+    QCOMPARE(stringField(model.exposedProperties().at(1).toMap(), "key"), QStringLiteral("size"));
     QVERIFY(!model.isExposed(QStringLiteral("texture-strength")));
 }
 
@@ -318,6 +340,22 @@ void TestBrushStudioModel::saveAndLoadRoundTrip() {
     QVERIFY(loaded.save(dir.filePath(QStringLiteral("again.kb"))));
     QVERIFY(loaded.load(dir.filePath(QStringLiteral("again.kb"))));
     QVERIFY(loaded.document() == source.document());
+}
+
+void TestBrushStudioModel::anUnsaveableBrushIsRefused() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    BrushStudioModel model;
+    // Break the document the way a half-finished edit could: a component that
+    // points at a resource nobody stored.
+    const QString id = model.addComponent(int(brush::ComponentKind::ProceduralShape));
+    QVERIFY(model.setComponentTransform(id, QStringLiteral("scale"), 2.0));
+    brush::BrushDocument broken = model.document();
+    broken.components.back().kind = brush::ComponentKind::Image;
+    model.setDocument(std::move(broken));
+    QVERIFY(!model.save(dir.filePath(QStringLiteral("broken.kb"))));
+    QVERIFY(model.error().contains(QStringLiteral("cannot be saved")));
+    QVERIFY(!QFile::exists(dir.filePath(QStringLiteral("broken.kb"))));
 }
 
 void TestBrushStudioModel::aCorruptFileChangesNothing() {

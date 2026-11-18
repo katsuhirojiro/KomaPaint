@@ -276,6 +276,13 @@ const char* parameterSection(std::string_view name) {
     return nullptr;
 }
 
+int sectionRank(std::string_view sectionName) {
+    for (std::size_t i = 0; i < std::size(parameterSections()); ++i) {
+        if (sectionName == parameterSections()[i]) return int(i);
+    }
+    return -1;
+}
+
 std::span<const ParameterInfo> parameterRegistry() {
     return std::span<const ParameterInfo>(kParameters, std::size(kParameters));
 }

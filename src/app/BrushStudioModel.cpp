@@ -5,6 +5,7 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
 #include <string>
 #include <utility>
@@ -139,6 +140,14 @@ bool BrushStudioModel::load(const QString& path) {
 }
 
 bool BrushStudioModel::save(const QString& path) {
+    // A file that cannot be read back is worse than no file: the artist loses
+    // work and finds out later. The same validation that guards loading runs
+    // here first, and its own sentence is what the window shows.
+    const brush::ValidationResult valid = m_document.validate();
+    if (!valid.ok()) {
+        fail(QString::fromStdString("This brush cannot be saved yet: " + valid.summary()));
+        return false;
+    }
     std::string failure;
     if (!brush::saveBrushFile(QFileInfo(path).absoluteFilePath().toStdString(), m_document,
                               &failure)) {
@@ -264,6 +273,43 @@ void BrushStudioModel::setSelectedIndex(int index) {
     emit componentsChanged();
 }
 
+namespace {
+
+// Kinds that paint pixels need pixels. A row that exists but cannot be saved is
+// a trap, so the Studio starts them from a soft round mask the artist replaces.
+bool kindNeedsPixels(ComponentKind kind) {
+    switch (kind) {
+    case ComponentKind::ProceduralShape:
+    case ComponentKind::Particle:
+    case ComponentKind::BristleGroup:
+        return false;
+    default:
+        return true;
+    }
+}
+
+brush::BrushResource makeDotResource(const QString& name) {
+    brush::BrushResource resource;
+    resource.name = name.toStdString();
+    resource.kind = brush::ResourceKind::Grayscale8;
+    resource.width = 32;
+    resource.height = 32;
+    resource.pixels.resize(32u * 32u);
+    const double centre = 15.5;
+    const double radius = 15.5;
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 32; ++x) {
+            const double distance = std::hypot(double(x) - centre, double(y) - centre);
+            const double coverage = std::clamp(1.0 - distance / radius, 0.0, 1.0);
+            resource.pixels[std::size_t(y) * 32u + std::size_t(x)] =
+                static_cast<std::uint8_t>(std::lround(coverage * 255.0));
+        }
+    }
+    return resource;
+}
+
+} // namespace
+
 QString BrushStudioModel::addComponent(int kind) {
     if (kind < 0 || kind >= int(std::size(kComponentKinds))) return QString();
     const ComponentKind componentKind = kComponentKinds[kind];
@@ -276,6 +322,12 @@ QString BrushStudioModel::addComponent(int kind) {
             ? "Tip " + component.id : "Component " + component.id;
         if (componentKind == ComponentKind::ProceduralShape) {
             component.parameters.set("tip-shape", 0.0);
+        }
+        if (kindNeedsPixels(componentKind)) {
+            brush::BrushResource resource = makeDotResource(QStringLiteral("Dot"));
+            resource.id = m_document.allocateId("r");
+            component.resourceId = resource.id;
+            m_document.addResource(std::move(resource));
         }
         id = QString::fromStdString(component.id);
         m_document.addComponent(std::move(component));
@@ -529,9 +581,8 @@ QVariantList BrushStudioModel::exposedProperties() const {
         map.insert(QStringLiteral("label"), QString::fromStdString(
             property->label.empty() && info ? std::string(info->label) : property->label));
         map.insert(QStringLiteral("customLabel"), !property->label.empty());
-        map.insert(QStringLiteral("section"), QString::fromStdString(
-            property->section.empty() && info ? std::string(brush::parameterSection(info->name))
-                                              : property->section));
+        map.insert(QStringLiteral("section"),
+                   QString::fromStdString(brush::effectiveSection(*property)));
         map.insert(QStringLiteral("order"), property->order);
         map.insert(QStringLiteral("control"), QString::fromUtf8(controlName(property->control)));
         map.insert(QStringLiteral("hasRange"), property->hasRangeOverride);
@@ -618,20 +669,37 @@ bool BrushStudioModel::setExposure(const QString& key, const QVariantMap& fields
 }
 
 bool BrushStudioModel::moveExposure(const QString& key, int delta) {
+    if (delta == 0) return false;
     std::vector<brush::ExposedProperty*> ordered;
+    ordered.reserve(m_document.exposed.size());
     for (auto& property : m_document.exposed) ordered.push_back(&property);
-    std::sort(ordered.begin(), ordered.end(), [](const auto* a, const auto* b) {
-        return a->order < b->order;
-    });
-    for (std::size_t i = 0; i < ordered.size(); ++i) ordered[i]->order = int(i);
+    std::stable_sort(ordered.begin(), ordered.end(),
+                     [](const auto* a, const auto* b) { return brush::exposedLess(*a, *b); });
+
     std::size_t index = ordered.size();
     for (std::size_t i = 0; i < ordered.size(); ++i) {
         if (ordered[i]->parameter == key.toStdString()) { index = i; break; }
     }
-    if (index == ordered.size() || delta == 0) return false;
-    const long target = std::clamp<long>(long(index) + delta, 0, long(ordered.size()) - 1);
-    if (target == long(index)) return false;
-    std::swap(ordered[index]->order, ordered[std::size_t(target)]->order);
+    if (index == ordered.size()) return false;
+    // Moving across a group boundary would be undone by the sort, so a move
+    // stops at the edge of the property's own group rather than silently doing
+    // nothing.
+    const std::string section = brush::effectiveSection(*ordered[index]);
+    long target = long(index) + delta;
+    while (target >= 0 && target < long(ordered.size()) &&
+           brush::effectiveSection(*ordered[std::size_t(target)]) != section) {
+        target += delta > 0 ? -1 : 1;
+    }
+    if (target < 0 || target >= long(ordered.size()) || target == long(index)) return false;
+
+    if (target > long(index)) {
+        std::rotate(ordered.begin() + long(index), ordered.begin() + long(index) + 1,
+                    ordered.begin() + target + 1);
+    } else {
+        std::rotate(ordered.begin() + target, ordered.begin() + long(index),
+                    ordered.begin() + long(index) + 1);
+    }
+    for (std::size_t i = 0; i < ordered.size(); ++i) ordered[i]->order = int(i);
     m_modified = true;
     emit exposureChanged();
     emit documentChanged();

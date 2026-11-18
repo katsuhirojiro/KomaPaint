@@ -376,6 +376,49 @@ void testExposedPropertiesOrderingAndVisibility() {
     CHECK(!doc.expose(bogus));
 }
 
+void testExposedPropertiesFollowTheGroupOrder() {
+    // A property with no section of its own is shown under the group the
+    // registry puts its setting in, and the groups appear in the panel's own
+    // order -- not alphabetically, which would bury the tip under "Texture".
+    BrushDocument doc("Grouped");
+    doc.addResource(makeResource("p1", 4, 4));
+    doc.addComponent(makeComponent("c1", "p1"));
+
+    const char* keys[] = {"size", "hardness", "texture-strength", "scatter-x", "opacity"};
+    int order = 0;
+    for (const char* key : keys) {
+        ExposedProperty property;
+        property.parameter = key;
+        property.order = order++;
+        CHECK(doc.expose(property));
+    }
+
+    const auto visible = doc.visibleExposed();
+    CHECK(visible.size() == 5);
+    // size -> Size; hardness -> Brush Tip; texture-strength -> Texture;
+    // scatter-x -> Scatter; opacity -> Opacity & Flow.
+    CHECK(effectiveSection(*visible[0]) == "Brush Tip");
+    CHECK(visible[0]->parameter == "hardness");
+    CHECK(effectiveSection(*visible[1]) == "Size");
+    CHECK(visible[1]->parameter == "size");
+    CHECK(effectiveSection(*visible[2]) == "Opacity & Flow");
+    CHECK(visible[2]->parameter == "opacity");
+    CHECK(effectiveSection(*visible[3]) == "Scatter");
+    CHECK(visible[3]->parameter == "scatter-x");
+    CHECK(effectiveSection(*visible[4]) == "Texture");
+    CHECK(visible[4]->parameter == "texture-strength");
+
+    // A group the artist invented sorts after every built-in one.
+    ExposedProperty custom;
+    custom.parameter = "flow";
+    custom.section = "My own group";
+    custom.order = 0;
+    CHECK(doc.expose(custom));
+    const auto withCustom = doc.visibleExposed();
+    CHECK(withCustom.back()->parameter == "flow");
+    CHECK(effectiveSection(*withCustom.back()) == "My own group");
+}
+
 void testLegacyMigrationIsLosslessForTheOldFields() {
     LegacyBrush legacy;
     legacy.size = 42;
@@ -482,6 +525,7 @@ int main() {
     testResourceAccounting();
     testDynamicsAndRandomizationReplaceRatherThanAccumulate();
     testExposedPropertiesOrderingAndVisibility();
+    testExposedPropertiesFollowTheGroupOrder();
     testLegacyMigrationIsLosslessForTheOldFields();
     testFoliageDocumentIsValid();
     testResponseCurve();
