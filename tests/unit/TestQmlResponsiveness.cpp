@@ -145,6 +145,7 @@ void TestQmlResponsiveness::measuresStartup()
         QStringLiteral("components/MainToolbar.qml"), QStringLiteral("components/StatusBar.qml"),
     };
     double total = 0.0;
+    int created = 0;
     for (const QString& panel : panels) {
         QQmlComponent component(&m_app.engine, QUrl(QStringLiteral("qrc:/") + panel));
         QElapsedTimer timer;
@@ -156,13 +157,14 @@ void TestQmlResponsiveness::measuresStartup()
             continue;
         }
         total += elapsed;
+        ++created;
         QString name = panel.section(QLatin1Char('/'), 1).section(QLatin1Char('.'), 0, 0);
         name.replace(QStringLiteral("Panel"), QString());
         const QString key = QStringLiteral("qml_create_") + name.toLower();
         report(qPrintable(key), elapsed);
         QCoreApplication::processEvents();
     }
-    QVERIFY(total > 0.0);
+    QCOMPARE(created, panels.size());
     report("qml_create_all_panels_total", total);
 }
 
