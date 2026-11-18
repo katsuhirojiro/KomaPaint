@@ -139,6 +139,13 @@ void TestQmlResponsiveness::measuresStartup()
     QElapsedTimer timer;
     timer.start();
     m_app.root.reset(component.create());
+    if (!m_app.root) {
+        // Report every error with its URL, not just the first: "Type X
+        // unavailable" is the symptom, the underlying import failure is the cause.
+        for (const QQmlError& error : component.errors())
+            qInfo("QML load error: %s", qPrintable(error.toString()));
+        qInfo("import paths: %s", qPrintable(m_app.engine.importPathList().join(QStringLiteral(" | "))));
+    }
     QVERIFY2(m_app.root, qPrintable(component.errorString()));
     m_app.window = qobject_cast<QQuickWindow*>(m_app.root.get());
     QVERIFY(m_app.window);
