@@ -148,6 +148,7 @@ void TestQmlResponsiveness::measuresStartup()
     // part of this baseline.
     double total = 0.0;
     int created = 0;
+    QStringList failed;
     for (const QString& panel : panels) {
         QQmlComponent component(&m_app.engine, QUrl(QStringLiteral("qrc:/") + panel));
         QElapsedTimer timer;
@@ -155,7 +156,7 @@ void TestQmlResponsiveness::measuresStartup()
         std::unique_ptr<QObject> object(component.create(m_app.engine.rootContext()));
         const double elapsed = double(timer.nsecsElapsed()) / 1e6;
         if (!object) {
-            qInfo("could not create %s: %s", qPrintable(panel), qPrintable(component.errorString()));
+            failed << panel + QStringLiteral(": ") + component.errorString().trimmed();
             continue;
         }
         total += elapsed;
@@ -166,7 +167,8 @@ void TestQmlResponsiveness::measuresStartup()
         report(qPrintable(key), elapsed);
         QCoreApplication::processEvents();
     }
-    QCOMPARE(created, panels.size());
+    QVERIFY2(failed.isEmpty(),
+             qPrintable(failed.join(QStringLiteral(" || "))));
     report("qml_create_all_panels_total", total);
 }
 
