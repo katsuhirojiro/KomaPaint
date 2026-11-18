@@ -103,11 +103,13 @@ add_test(NAME test_brush_document_engine COMMAND test_brush_document_engine)
 
 # Brush model and the .kb container are pure C++ (no Qt): the same test
 # binaries run in CI and on a machine with only a compiler.
-foreach(brush_test IN ITEMS brush_model brush_format brush_evaluator)
+foreach(brush_test IN ITEMS brush_parameters brush_model brush_format brush_evaluator)
     if(brush_test STREQUAL "brush_model")
         set(brush_source TestBrushModel.cpp)
     elseif(brush_test STREQUAL "brush_format")
         set(brush_source TestBrushFormat.cpp)
+    elseif(brush_test STREQUAL "brush_parameters")
+        set(brush_source TestBrushParameters.cpp)
     else()
         set(brush_source TestBrushEvaluator.cpp)
     endif()

@@ -176,6 +176,106 @@ constexpr ParameterInfo kParameters[] = {
 
 } // namespace
 
+namespace {
+
+// Where an artist finds each setting. Ordered like the registry; the pairing is
+// checked by TestBrushParameters so a new parameter cannot arrive without a
+// home.
+struct SectionEntry {
+    const char* name;
+    const char* section;
+};
+
+constexpr const char* kSections[] = {
+    "Brush Tip", "Size", "Opacity & Flow", "Stroke", "Stabilization", "Rotation",
+    "Scatter", "Texture", "Color", "Material & Blending", "Dynamics", "Rendering",
+    "Advanced",
+};
+
+constexpr SectionEntry kSectionOf[] = {
+    {"size", "Size"},
+    {"min-size-ratio", "Size"},
+    {"pressure-size", "Dynamics"},
+    {"tilt-size", "Dynamics"},
+    {"aspect", "Brush Tip"},
+    {"tip-angle", "Brush Tip"},
+    {"hardness", "Brush Tip"},
+    {"tilt-angle", "Brush Tip"},
+    {"opacity", "Opacity & Flow"},
+    {"flow", "Opacity & Flow"},
+    {"pressure-opacity", "Dynamics"},
+    {"pressure-flow", "Dynamics"},
+    {"pressure-gamma", "Dynamics"},
+    {"accumulate", "Opacity & Flow"},
+    {"spacing", "Stroke"},
+    {"spacing-jitter", "Stroke"},
+    {"taper-in", "Stroke"},
+    {"taper-out", "Stroke"},
+    {"follow-direction", "Rotation"},
+    {"stabilization", "Stabilization"},
+    {"stroke-delay", "Stabilization"},
+    {"rotation-offset", "Rotation"},
+    {"rotation-jitter", "Rotation"},
+    {"follow-rotation", "Rotation"},
+    {"scatter-x", "Scatter"},
+    {"scatter-y", "Scatter"},
+    {"scatter-count", "Scatter"},
+    {"cluster", "Scatter"},
+    {"texture-strength", "Texture"},
+    {"texture-scale", "Texture"},
+    {"texture-rotation", "Texture"},
+    {"texture-offset-x", "Texture"},
+    {"texture-offset-y", "Texture"},
+    {"texture-contrast", "Texture"},
+    {"texture-depth", "Texture"},
+    {"hue-variation", "Color"},
+    {"saturation-variation", "Color"},
+    {"brightness-variation", "Color"},
+    {"color-mix", "Color"},
+    {"paint-load", "Material & Blending"},
+    {"pigment-concentration", "Material & Blending"},
+    {"water-amount", "Material & Blending"},
+    {"paint-body", "Material & Blending"},
+    {"pickup", "Material & Blending"},
+    {"depletion", "Material & Blending"},
+    {"wetness", "Material & Blending"},
+    {"drying-speed", "Material & Blending"},
+    {"tooth-response", "Material & Blending"},
+    {"granulation", "Material & Blending"},
+    {"edge-accumulation", "Material & Blending"},
+    {"pressure-amount", "Material & Blending"},
+    {"pressure-contact", "Material & Blending"},
+    {"persistent-reservoir", "Material & Blending"},
+    {"bristle-count", "Brush Tip"},
+    {"bristle-spread", "Brush Tip"},
+    {"particle-count", "Advanced"},
+    {"particle-spread", "Advanced"},
+    {"sequence-step", "Advanced"},
+    {"antialias", "Rendering"},
+    {"blend-strength", "Rendering"},
+    {"component-opacity", "Advanced"},
+    {"component-scale", "Advanced"},
+    {"component-rotation", "Advanced"},
+    {"component-aspect", "Advanced"},
+    {"component-offset-x", "Advanced"},
+    {"component-offset-y", "Advanced"},
+    {"component-weight", "Advanced"},
+    {"tip-shape", "Brush Tip"},
+};
+
+} // namespace
+
+std::span<const char* const> parameterSections() {
+    return std::span<const char* const>(kSections, std::size(kSections));
+}
+
+const char* parameterSection(std::string_view name) {
+    for (const auto& entry : kSectionOf) {
+        if (name == entry.name) return entry.section;
+    }
+    return nullptr;
+}
+
 std::span<const ParameterInfo> parameterRegistry() {
     return std::span<const ParameterInfo>(kParameters, std::size(kParameters));
 }

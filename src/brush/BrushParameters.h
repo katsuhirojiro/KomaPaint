@@ -31,4 +31,14 @@ std::span<const ParameterInfo> parameterRegistry();
 const ParameterInfo* findParameter(std::string_view name);
 bool parameterInRange(const ParameterInfo& info, double value);
 
+// The thirteen setting groups a brush is presented in (spec Part 5). Every
+// parameter belongs to exactly one of them -- a settings panel with an orphan
+// setting, or a group that is empty, is a lie about the brush. The test for
+// that property is tests/unit/TestBrushParameters.cpp.
+//
+// This is presentation, not behaviour: it decides where an artist finds a
+// setting, and nothing else reads it.
+std::span<const char* const> parameterSections();
+const char* parameterSection(std::string_view name);
+
 } // namespace komapaint::brush
