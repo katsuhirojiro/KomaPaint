@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -315,22 +316,29 @@ void testFailedDecodeLeavesTargetUntouched() {
 }
 
 void testFileRoundTrip() {
-    const std::string path = "/tmp/komapaint-brush-roundtrip.kb";
+    // Written next to the running test rather than in a hard-coded directory:
+    // there is no /tmp on Windows, and CI proved it.
+    namespace fs = std::filesystem;
+    const fs::path path = fs::current_path() / "komapaint-brush-roundtrip.kb";
+    const fs::path absent = fs::current_path() / "komapaint-brush-does-not-exist.kb";
+
     const BrushDocument original = makeDocument();
     std::string error;
-    CHECK(saveBrushFile(path, original, &error));
+    CHECK(saveBrushFile(path.string(), original, &error));
 
     BrushDocument loaded;
     DecodeResult result;
     std::string loadError;
-    CHECK(loadBrushFile(path, &loaded, &result, &loadError));
+    CHECK(loadBrushFile(path.string(), &loaded, &result, &loadError));
     CHECK(loaded == original);
 
     // Loading a file that is not there reports a reason instead of crashing.
     BrushDocument missing;
-    CHECK(!loadBrushFile("/tmp/komapaint-does-not-exist.kb", &missing, &result, &loadError));
+    CHECK(!loadBrushFile(absent.string(), &missing, &result, &loadError));
     CHECK(!loadError.empty());
-    std::remove(path.c_str());
+
+    std::error_code ignored;
+    fs::remove(path, ignored);
 }
 
 void testNoArbitraryComponentLimit() {
