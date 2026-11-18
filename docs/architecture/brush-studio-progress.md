@@ -183,9 +183,63 @@ packaged.
 
 ---
 
+## Stage 9, part 2: it is the shipped path
+
+`CanvasViewport::beginStroke` now builds one `brush::BrushDocument` at the top
+of a stroke and uses it for both engines. The digital branch paints through
+`DocumentStroke`; the Realistic branch resolves its `material::BrushDefinition`
+and its pigment batch through the adapter's document overloads. The inline copy
+of the thirty digital formulae and the inline copy of the twenty material ones
+are gone, so there is one place where a brush becomes engine numbers.
+
+`BrushSettings::toLegacyBrush()` is the single conversion from the Sub-Tool
+settings to that record. It also closed a real gap: `LegacyBrush` could not
+carry `persistentReservoir`, and the registry had no entry for it, so a brush
+that keeps its reservoir across strokes lost that setting on migration.
+
+**Validation:** *CI-tested* on Windows (runs `44311151563`, `44311942139`,
+green). Full suite including the viewport, tablet, docking and UI tests, the
+package, and the extracted-ZIP launch. Not *hardware-tested* (no tablet in CI)
+and not *artist-tested*.
+
+## Stage 10, part 1: settings have homes, and a model the window can use
+
+- Every registry parameter now declares which of the thirteen groups it belongs
+  to, and `test_brush_parameters` enforces the contract: one group per setting,
+  no empty group, the table and the registry name the same set, ranges agree
+  with units, every default inside its own range. 707 checks.
+- `BrushStudioModel` is the Qt face of a document: components, groups, every
+  registry setting with group and range, the Sub-Tool exposure list, undo/redo
+  over whole-document snapshots bounded by memory, and `.kb` open/save that
+  leaves the open brush untouched on failure. Ten test cases run headless.
+
+**Two defects that the first CI run of the model found, both fixed:**
+
+1. The exposure list sorted by the raw section string, so a blank section beat
+   every named one and the tip's settings would have been buried alphabetically.
+   It now sorts by the thirteen groups in their declared order, then the
+   artist's order inside the group; an invented group sorts last.
+2. Adding an image component produced a brush that could be edited but never
+   saved -- the component pointed at no pixel data and the decoder refuses that,
+   correctly. New pixel kinds now arrive with a soft round mask, and saving
+   validates first and refuses with a sentence rather than writing a file that
+   cannot be read back.
+
+**Known limitations at this point:**
+- There is no Brush Studio window yet. The model is not registered for QML and
+  no menu action opens it; that is the next milestone, and until it exists the
+  Studio is *unit-tested* and *CI-tested* but has no artist-facing surface.
+- The model edits one document. Collections, `.sut`/`.abr` import, and storing a
+  document inside a library preset are not written yet.
+- The stroke loop still owns orientation, and `Signal::Time`/`Signal::Progress`
+  are still not driven (see part 1).
+
+---
+
 ## Next
 
-Wire `DocumentStroke` into `CanvasViewport::beginStroke` for the digital engine,
-with the flat path kept as the fallback until the app has documents for the
-shipped presets; then the same for `material::MaterialStroke`. Each step is
-guarded by the tile-hash equivalence above.
+The window: register `BrushStudioModel` for QML, build the approved layout
+(toolbar, component rail, tabbed centre workspace, expandable settings, live
+preview), open it from `Edit -> Brush Studio`, and paint the preview with the
+production engines through `DocumentStroke`. Then the tip/texture editors, the
+guided behaviour blocks, and import/export.
