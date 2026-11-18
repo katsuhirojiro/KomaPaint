@@ -139,13 +139,14 @@ void TestQmlResponsiveness::measuresStartup()
     const QStringList panels = {
         QStringLiteral("panels/SubToolPanel.qml"),   QStringLiteral("panels/ToolPropertyPanel.qml"),
         QStringLiteral("panels/BrushSizePanel.qml"), QStringLiteral("panels/LayersPanel.qml"),
-        QStringLiteral("panels/PropertiesPanel.qml"), QStringLiteral("panels/ColorPanel.qml"),
+        QStringLiteral("panels/PropertiesPanel.qml"),
         QStringLiteral("panels/PalettePanel.qml"),   QStringLiteral("panels/ColorMixerPanel.qml"),
         QStringLiteral("panels/AssetsPanel.qml"),    QStringLiteral("panels/TimelinePanel.qml"),
     };
-    // The toolbar and status bar need window-level context properties; they are
-    // built once with the window and cost nothing after that, so they are not
-    // part of this baseline.
+    // Excluded on purpose: the toolbar, the status bar and the colour panel need
+    // window-level context (the colour panel embeds PaintMixerView, which needs
+    // the mixer surface). They are built once with the window and are not part of
+    // this per-panel baseline; every panel listed above is created and timed.
     double total = 0.0;
     int created = 0;
     QStringList failed;
