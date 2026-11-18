@@ -888,6 +888,16 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
     m_strokeMaskContext.protectedRegion = m_strokeMaskContext.protectInterior ? &m_protectedRegion : nullptr;
     const bool useMaskCallback = m_strokeMaskContext.hasSelection || m_strokeMaskContext.protectInterior;
 
+    // The brush document is what both engines paint from: a Sub-Tool migrated
+    // into the model today, a Studio-authored brush once the editor writes one.
+    // Building it once keeps the two branches reading the same source.
+    StrokeRuntime runtime;
+    runtime.color = color.rgba();
+    runtime.erase = effectiveErase;
+    brush::BrushDocument document =
+        brush::BrushDocument::fromLegacy(brush->toLegacyBrush(), "live-brush", "Brush");
+    document.seed = 20260101u;
+
     if (brush->isRealisticEngine()) {
         if (!m_history->beginMaterialStroke(layer)) {
             emit strokeError(QStringLiteral("Could not start material stroke history; no paint was applied."));
@@ -956,19 +966,15 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
                 emit strokeError(QStringLiteral("The selected material medium is unavailable."));
                 return false;
             }
-            // The flat record and the document both resolve through the adapter,
-            // so the twenty-odd physical numbers below live in one place now.
-            const brush::LegacyBrush legacy = brush->toLegacyBrush();
-            StrokeRuntime runtime;
-            runtime.color = color.rgba();
-            runtime.erase = effectiveErase;
-            definition = drawing::materialDefinition(definition, legacy, runtime);
+            // The document and the flat record both resolve through the adapter,
+            // so the physical numbers below live in one place.
+            definition = drawing::materialDefinition(definition, document, runtime);
             if (useMaskCallback) {
                 definition.pixelMask = &evaluatePixelMask;
                 definition.pixelMaskContext = &m_strokeMaskContext;
             }
             if (!effectiveErase && !mixerPaintLoaded) {
-                drawing::assignInitialPaint(&definition, legacy, color.rgba(),
+                drawing::assignInitialPaint(&definition, document, color.rgba(),
                                             double(color.alphaF()));
             }
             const bool mixtureUpdated = mixerPaintLoaded
@@ -1034,26 +1040,19 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
         emit strokeError(QStringLiteral("Could not start stroke history; no paint was applied."));
         return false;
     }
-    // One conversion, in the adapter: the flat brush record becomes the record
-    // the engine reads. The inline copy of these formulae used to live here, and
-    // two copies of a brush is how a brush stops matching itself.
-    StrokeRuntime runtime;
-    runtime.color = color.rgba();
-    runtime.erase = effectiveErase;
-    const brush::LegacyBrush legacy = brush->toLegacyBrush();
-    BrushDefinition definition = drawing::digitalDefinition(legacy, runtime);
+    // One conversion, in the adapter: the document becomes the record the
+    // engine reads. An inline copy of these formulae used to live here, and two
+    // copies of a brush is how a brush stops matching itself.
+    BrushDefinition definition = drawing::digitalDefinition(document, runtime);
     if (useMaskCallback) {
         definition.pixelMask = &evaluatePixelMask;
         definition.pixelMaskContext = &m_strokeMaskContext;
     }
 
-    // The digital engine paints through the brush document. For a brush that is
-    // one tip and no components that is the single dab it always was -- the
-    // pixels are proved identical by test_brush_document_engine -- and a brush
-    // the Studio has given components paints all of them.
-    brush::BrushDocument document = brush::BrushDocument::fromLegacy(
-        legacy, "live-brush", "Brush");
-    document.seed = 20260101u;
+    // For a brush that is one tip and no components this is the single dab it
+    // always was -- the pixels are proved identical by
+    // test_brush_document_engine -- and a brush the Studio has given components
+    // paints all of them.
     try {
         m_stroke = std::make_unique<drawing::DocumentStroke>(
             layer->tiles(), std::move(document), definition, ++m_strokeSerial);
