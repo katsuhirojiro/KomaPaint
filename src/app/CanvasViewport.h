@@ -9,6 +9,7 @@
 #include "../region/RegionEngine.h"
 #include "CanvasToolExecutor.h"
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <QQuickPaintedItem>
 #include <QBrush>

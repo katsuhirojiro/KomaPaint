@@ -251,7 +251,7 @@ public:
         legacy.tipAngle = double(m_tipAngle);
         legacy.followDirection = m_followDirection;
         legacy.erase = m_erase;
-        legacy.realisticEngine = m_realisticEngine;
+        legacy.realisticEngine = isRealisticEngine();
         legacy.tipStyle = m_tipStyle.toStdString();
         legacy.paintLoad = double(m_paintLoad);
         legacy.pigmentConcentration = double(m_pigmentConcentration);

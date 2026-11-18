@@ -956,68 +956,20 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
                 emit strokeError(QStringLiteral("The selected material medium is unavailable."));
                 return false;
             }
-            definition.size = brush->size();
-            definition.reservoirCapacity = definition.effectiveReservoirCapacity();
-            definition.hardness = brush->hardness() / 100.0;
-            definition.spacingRatio = brush->spacing() / 100.0;
-            definition.aspect = brush->aspectRatio() / 100.0;
-            definition.rotationRadians = brush->tipAngle() * (kPi / 180.0);
-            definition.followDirection = brush->followDirection();
-            definition.initialLoad = brush->paintLoad() / 100.0;
-            definition.depletionRate = brush->depletion() / 100.0;
-            definition.pressureTransfer = brush->pressureToAmount() / 100.0;
-            definition.contactPressureScale = brush->pressureToContact() / 100.0;
-            definition.paintBody = brush->paintBody() / 100.0;
-            definition.dryingRate = brush->dryingSpeed() / 100.0;
-            definition.edgeAccumulation = brush->edgeAccumulation() / 100.0;
-            definition.toothResponse = brush->toothResponse() / 100.0;
-            definition.granulationResponse = brush->granulation() / 100.0;
-            const double pickupFactor = brush->pickup() / 100.0;
-            definition.pickupRate = pickupFactor;
-            definition.paintLiftability = std::clamp(0.15 + pickupFactor * 0.85, 0.0, 1.0);
-            definition.rewetting = pickupFactor * 0.9;
-            definition.releaseRate *= brush->flow() / 100.0;
-            definition.contactTransfer *= brush->opacity() / 100.0
-                * (effectiveErase ? brush->flow() / 100.0 : 1.0);
-            definition.autoReloadOnStroke = !brush->persistentReservoir();
+            // The flat record and the document both resolve through the adapter,
+            // so the twenty-odd physical numbers below live in one place now.
+            const brush::LegacyBrush legacy = brush->toLegacyBrush();
+            StrokeRuntime runtime;
+            runtime.color = color.rgba();
+            runtime.erase = effectiveErase;
+            definition = drawing::materialDefinition(definition, legacy, runtime);
             if (useMaskCallback) {
                 definition.pixelMask = &evaluatePixelMask;
                 definition.pixelMaskContext = &m_strokeMaskContext;
             }
-            if (brush->textured() && definition.tip == material::TipGeometry::Round) {
-                definition.tip = material::TipGeometry::Bristle;
-                definition.bristleCount = 13;
-                definition.bristleSpread = 0.55;
-                definition.textureStrength = std::max(definition.textureStrength, 0.45);
-            }
             if (!effectiveErase && !mixerPaintLoaded) {
-                if (preset->initialPaint.pigments.empty()) {
-                    definition.initialPaint = preset->initialPaint;
-                    const double waterScale = std::max(0.1, brush->waterAmount() / 100.0);
-                    definition.initialPaint.water = std::max(0.25, preset->initialPaint.water * waterScale);
-                    definition.initialPaint.wetness = 1.0;
-                    definition.initialPaint.consistency = 0.0;
-                } else {
-                    const double alpha = std::max(0.05, double(color.alphaF()));
-                    const double concentration = brush->pigmentConcentration() / 100.0;
-                    const double waterRatio = brush->waterAmount() / 100.0;
-                    const double bodyRatio = brush->paintBody() / 100.0;
-                    if (definition.mediumId == "watercolour") {
-                        const double pigmentMass = alpha * (0.35 + 0.90 * concentration);
-                        const double binderMass = alpha * (0.04 + 0.14 * bodyRatio);
-                        const double waterMass = alpha * (0.40 + 2.20 * waterRatio);
-                        definition.initialPaint = material::makeResidualPaint(
-                            color.rgba(), pigmentMass, waterMass, binderMass, definition.mediumId);
-                    } else {
-                        const double pigmentMass = alpha * (0.35 + 1.25 * concentration);
-                        const double binderMass = alpha * (0.12 + 0.45 * bodyRatio);
-                        const double waterMass = alpha * (0.08 + 1.60 * waterRatio);
-                        definition.initialPaint = material::makeResidualPaint(
-                            color.rgba(), pigmentMass, waterMass, binderMass, definition.mediumId);
-                        if (bodyRatio > 0.0)
-                            definition.initialPaint.addFiller(alpha * 0.22 * bodyRatio);
-                    }
-                }
+                drawing::assignInitialPaint(&definition, legacy, color.rgba(),
+                                            double(color.alphaF()));
             }
             const bool mixtureUpdated = mixerPaintLoaded
                 && brush->mixtureRevision() != m_loadedMixtureRevision;
