@@ -100,12 +100,6 @@ private slots:
     void measuresSettingsDialog();
 
 private:
-    // Touching these types keeps their translation units in the link. They are
-    // what register the C++ QML types the window uses; drop them and the window
-    // fails with "Type ... unavailable" even though the code is fine.
-    const QMetaObject* const m_keepCanvasViewport = &CanvasViewport::staticMetaObject;
-    const QMetaObject* const m_keepMixerSurface = &MixerSurfaceItem::staticMetaObject;
-
     Harness m_app;
 };
 
@@ -114,6 +108,11 @@ void TestQmlResponsiveness::initTestCase()
     // Same software scene graph the other window tests use: the offscreen
     // platform has no GPU context and shader-based items would not instantiate.
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
+    // The application registers these in KomaPaintApp; a test binary has to do
+    // it itself, exactly as the other window tests do, or every panel that
+    // embeds the mixer surface fails to load.
+    qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
+    qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
     m_app.engine.addImportPath(QStringLiteral("qrc:/"));
     m_app.settings = std::make_unique<Settings>(QStringLiteral("KomaPaintTests"),
                                                 QStringLiteral("QmlResponsiveness"));
@@ -139,14 +138,12 @@ void TestQmlResponsiveness::measuresStartup()
     const QStringList panels = {
         QStringLiteral("panels/SubToolPanel.qml"),   QStringLiteral("panels/ToolPropertyPanel.qml"),
         QStringLiteral("panels/BrushSizePanel.qml"), QStringLiteral("panels/LayersPanel.qml"),
-        QStringLiteral("panels/PropertiesPanel.qml"),
+        QStringLiteral("panels/PropertiesPanel.qml"), QStringLiteral("panels/ColorPanel.qml"),
         QStringLiteral("panels/PalettePanel.qml"),   QStringLiteral("panels/ColorMixerPanel.qml"),
         QStringLiteral("panels/AssetsPanel.qml"),    QStringLiteral("panels/TimelinePanel.qml"),
     };
-    // Excluded on purpose: the toolbar, the status bar and the colour panel need
-    // window-level context (the colour panel embeds PaintMixerView, which needs
-    // the mixer surface). They are built once with the window and are not part of
-    // this per-panel baseline; every panel listed above is created and timed.
+    // The toolbar and status bar are built once with the window and need its
+    // context properties, so they are not part of this per-panel baseline.
     double total = 0.0;
     int created = 0;
     QStringList failed;
