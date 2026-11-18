@@ -93,6 +93,21 @@ target_link_libraries(test_stroke_stabilizer PRIVATE komapaint::drawing)
 set_target_properties(test_stroke_stabilizer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_stroke_stabilizer COMMAND test_stroke_stabilizer)
 
+# Brush model and the .kb container are pure C++ (no Qt): the same test
+# binaries run in CI and on a machine with only a compiler.
+foreach(brush_test IN ITEMS brush_model brush_format)
+    if(brush_test STREQUAL "brush_model")
+        set(brush_source TestBrushModel.cpp)
+    else()
+        set(brush_source TestBrushFormat.cpp)
+    endif()
+    add_executable(test_${brush_test} ${brush_source})
+    target_link_libraries(test_${brush_test} PRIVATE komapaint::brush)
+    set_target_properties(test_${brush_test} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+    add_test(NAME test_${brush_test} COMMAND test_${brush_test})
+endforeach()
+
 # Material/pigment model is pure C++ and is exercised independently of QML.
 add_executable(test_material_engine TestMaterialEngine.cpp)
 target_link_libraries(test_material_engine PRIVATE komapaint::material)
