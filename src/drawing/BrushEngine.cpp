@@ -1,4 +1,5 @@
 #include "BrushEngine.h"
+#include "core/FastRounding.h"
 #include <algorithm>
 #include <cmath>
 
@@ -129,7 +130,7 @@ double BrushRasterizer::tipCoverage(BrushTip tip, double dx, double dy, double r
 
 std::uint32_t BrushRasterizer::deposit(std::uint32_t dst, std::uint32_t color, double amount)
 {
-    const auto alpha = static_cast<unsigned>(std::lround(clamp01(amount) * ((color >> 24) & 255U)));
+    const auto alpha = roundHalfUpNonNegative(clamp01(amount) * ((color >> 24) & 255U));
     const auto inverse = 255U - alpha;
     auto channel = [&](unsigned shift) { return std::min(255U, scale((color >> shift) & 255U, alpha) + scale((dst >> shift) & 255U, inverse)); };
     const auto outAlpha = std::min(255U, alpha + scale((dst >> 24) & 255U, inverse));
@@ -143,7 +144,7 @@ std::uint32_t BrushRasterizer::blend(std::uint32_t dst, std::uint32_t carryPremu
 
 std::uint32_t BrushRasterizer::erase(std::uint32_t dst, double amount)
 {
-    const auto keep = 255U - static_cast<unsigned>(std::lround(clamp01(amount) * 255.0));
+    const auto keep = 255U - roundHalfUpNonNegative(clamp01(amount) * 255.0);
     auto channel = [&](unsigned shift) { return scale((dst >> shift) & 255U, keep); };
     return (channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0);
 }

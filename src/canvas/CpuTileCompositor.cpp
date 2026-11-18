@@ -1,4 +1,5 @@
 #include "CpuTileCompositor.h"
+#include "core/FastRounding.h"
 #include <algorithm>
 #include <cmath>
 #include <new>
@@ -28,7 +29,7 @@ std::uint32_t blendOver(std::uint32_t src, std::uint32_t dst, unsigned opacity, 
     const double backdropAlpha = double((dst >> 24) & 255U) / 255.0;
     const double effectiveAlpha = sourceAlpha * double(opacity) / 255.0;
     const double outAlpha = effectiveAlpha + backdropAlpha * (1.0 - effectiveAlpha);
-    const unsigned a = static_cast<unsigned>(std::lround(outAlpha * 255.0));
+    const unsigned a = roundHalfUpNonNegative(outAlpha * 255.0);
     auto channel = [&](unsigned shift) {
         const double sourcePremul = double((src >> shift) & 255U) / 255.0;
         const double backdropPremul = double((dst >> shift) & 255U) / 255.0;
@@ -44,7 +45,7 @@ std::uint32_t blendOver(std::uint32_t src, std::uint32_t dst, unsigned opacity, 
         const double result = cs * effectiveAlpha * (1 - backdropAlpha)
                             + backdropPremul * (1 - effectiveAlpha)
                             + blended * effectiveAlpha * backdropAlpha;
-        return std::min(a, static_cast<unsigned>(std::lround(std::clamp(result, 0.0, 1.0) * 255.0)));
+        return std::min(a, roundHalfUpNonNegative(std::clamp(result, 0.0, 1.0) * 255.0));
     };
     return (a << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0);
 }
@@ -97,7 +98,7 @@ bool CpuTileCompositor::composeInto(const TileGeometry& geometry, TilePoint tile
                 pixels = layer.store->tilePixels(tile);
             }
             if (pixels.empty()) continue;
-            const auto opacity = static_cast<unsigned>(std::lround(layer.opacity * 255.0));
+            const auto opacity = roundHalfUpNonNegative(layer.opacity * 255.0);
             if (opacity == 0U) continue;
             const std::uint32_t* srcBase = pixels.data();
 

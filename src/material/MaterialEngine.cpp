@@ -1,5 +1,6 @@
 #include "MaterialEngine.h"
 #include "MaterialTileStore.h"
+#include "core/FastRounding.h"
 
 #include <algorithm>
 #include <array>
@@ -122,7 +123,7 @@ double gaussian(double x, double center, double width) noexcept
 
 std::uint32_t packStraight(double r, double g, double b, double a = 1.0) noexcept
 {
-    const auto byte = static_cast<std::uint32_t>(std::lround(clamp01(a) * 255.0));
+    const auto byte = static_cast<std::uint32_t>(roundHalfUpNonNegative(clamp01(a) * 255.0));
     return (byte << 24U) | (linearToSrgbByte(r) << 16U)
         | (linearToSrgbByte(g) << 8U) | linearToSrgbByte(b);
 }
@@ -450,10 +451,11 @@ std::uint32_t blendPremultiplied(std::uint32_t dst, std::uint32_t srcStraight,
     for (int i = 0; i < 3; ++i) {
         const double srcPremul = double(srcChannels[i]) * alpha;
         const double dstPremul = double((dst >> shifts[i]) & 0xffU);
-        out |= static_cast<std::uint32_t>(std::clamp(std::lround(srcPremul + dstPremul * inverse), 0L, 255L)) << shifts[i];
+        out |= static_cast<std::uint32_t>(
+            std::min(255U, roundHalfUpNonNegative(std::max(0.0, srcPremul + dstPremul * inverse)))) << shifts[i];
     }
     const double dstAlpha = double((dst >> 24U) & 0xffU) / 255.0;
-    const auto outAlpha = static_cast<std::uint32_t>(std::lround((alpha + dstAlpha * inverse) * 255.0));
+    const auto outAlpha = std::min(255U, roundHalfUpNonNegative((alpha + dstAlpha * inverse) * 255.0));
     return (out & 0x00ffffffU) | (outAlpha << 24U);
 }
 

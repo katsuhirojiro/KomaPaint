@@ -140,6 +140,48 @@ that cheaper means changing the optics or accepting coarser caching, both of
 which change what an artist sees, so it is left as the next deliberate project
 rather than a silent tweak.
 
+## Reference run: 2026-11-17, MSVC 2022 Release (Qt 6.8.3), Windows x64 CI runner
+
+The shipping platform, taken from the CI smoke run that now executes
+`bench_compositing`, `bench_brush` and `bench_material` (numbers published as a
+check annotation, `bench/README.md` describes the harnesses). Shared two-core
+runner, so absolute values are pessimistic; the point is what is *disproportionate*
+compared with Linux.
+
+| workload | Linux g++ -O2 | Windows MSVC Release |
+| --- | --- | --- |
+| brush 12 px, 700 samples | 6.74 ms | 6.68 ms |
+| brush 60 px | 20.68 ms | 17.80 ms |
+| brush 200 px round | 51.8 ms | 49.71 ms |
+| brush 200 px soft | 92.3 ms | 85.56 ms |
+| brush 200 px textured | 89.5 ms | 76.11 ms |
+| brush 200 px smudge | 46.5 ms | 57.68 ms |
+| brush 400 px round | 99.3 ms | 92.20 ms |
+| compositing, 4 opaque layers, disc 12% | 0.144 ms | 0.184 ms |
+| compositing, 4 opaque layers, full tile | 0.146 ms | 0.201 ms |
+| compositing, 4 half-alpha layers, disc 40% | 0.240 ms | 0.326 ms |
+| compositing, 4 Multiply layers, disc 40% | 0.876 ms | **4.054 ms** |
+| material wash stroke, 1600x1200 | 122.3 ms | 193.9 ms |
+| material render pass, 22 tiles | 8.87 ms | 11.92 ms |
+
+Most rows sit within a few tens of percent of each other - expected for a slower
+shared runner. Two do not:
+
+* **Multiply content blending is 3.4-4.6x slower on MSVC than on GCC.** The
+  rest of the compositor is integer and roughly equal on both, so this is not
+  the runner. The blend path evaluates the W3C formula in doubles per channel
+  and rounds four times per pixel with `std::lround`, which MSVC does not
+  inline: without SSE4.1 (not part of the baseline the shipping build targets)
+  it becomes a CRT call. `src/core/FastRounding.h` replaces those calls with an
+  exactly equivalent two-instruction form; `TestFastRounding` asserts
+  equivalence against `std::lround` over five million values on every compiler
+  we build with, and the compositor, material and brush outputs were verified
+  pixel-identical before the change.
+* **The material stroke is 1.6x slower on MSVC.** Same class of problem, more
+  sources: `linearToSrgbByte`, `blendPremultiplied` and `packStraight` all round
+  per channel, so the wash stroke was paying the same CRT calls several times
+  per pixel. The same replacement applies there.
+
 ## What is still missing
 
 * No Windows Release measurements yet: startup, pan/zoom, rotation, dock
