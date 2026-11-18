@@ -107,6 +107,9 @@ private:
 
 void TestQmlResponsiveness::initTestCase()
 {
+    // Same software scene graph the other window tests use: the offscreen
+    // platform has no GPU context and shader-based items would not instantiate.
+    QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
     m_app.settings = std::make_unique<Settings>(QStringLiteral("KomaPaintTests"),
                                                 QStringLiteral("QmlResponsiveness"));
     m_app.settings->setValue(QStringLiteral("workspace/layout"), QString());
