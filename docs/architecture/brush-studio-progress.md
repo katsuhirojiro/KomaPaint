@@ -65,7 +65,9 @@ changed.
 **Validation:** *unit-tested* (here, g++ + sanitizers) and *CI-tested*
 (Windows MSVC 2022 / Qt 6.8.3 run `44299599985`, green; both test executables
 are run by the CI test step and gate the build — proved by run `44298945946`,
-which failed only on defect 3).
+which failed only on defect 3). Confirmed again, with the counts printed in the
+run summary, on run `44300815450`: `test_brush_format=467 checks/0 failures`,
+`test_brush_model=125 checks/0 failures`.
 
 **Known limitations:**
 - No Qt binding, so nothing is visible in the application yet.
@@ -102,8 +104,14 @@ group contribution, scatter bounds, and a 500-component brush.
    children, so nested sets contributed nothing.
 2. The stroke seed did not influence selection order as intended.
 
-**Validation:** *unit-tested* (g++ + ASan/UBSan) and *CI-tested* (`44299599985`,
-green: build, 46 test executables, packaging, extracted-ZIP launch).
+**Validation:** *unit-tested* (g++ + ASan/UBSan) and *CI-tested* (`44299599985`
+and `44300815450`, green: build, 46 test executables, `test_brush_evaluator=5728
+checks/0 failures`, packaging 33.4 MB / 1354 files, extracted-ZIP launch from a
+clean PATH, exit code 0).
+
+The packaged application is *launch-tested*, not *hardware-tested* and not
+*artist-tested*. No Brush Studio UI exists yet, so there is nothing for an
+artist to test at this stage.
 
 **Known limitations:**
 - `Sequence` advances by stamp index, not by a cursor the caller owns; a stroke
