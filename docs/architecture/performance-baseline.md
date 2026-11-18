@@ -211,3 +211,158 @@ gap is well outside the run-to-run spread of the neighbouring rows.
   frame. At 4K that is ~33 MB of upload per update, which is a plausible
   bottleneck that no C++ harness can see; replacing it with per-tile scene-graph
   textures is a rendering change that needs its own verification pass.
+
+## Final performance investigation (2026-11-17): what was measured, and the decisions
+
+This pass was bounded on purpose: find the real bottlenecks with evidence, fix
+what is safely fixable, and record clearly why anything else was left alone.
+
+### Method
+
+C++ work is measured with the harnesses in `bench/` (see `bench/README.md`),
+which link the shipping core libraries. Attribution inside the material engine
+came from a statistical sampler built for the job: `SIGPROF` at 100 us records
+the interrupted program counter and walks the frame pointer, and `addr2line`
+resolves each sample *through inlined frames* to its source line. That is what
+found the tooth-field cost; a function-level profile cannot see it, because the
+work is inlined into `MaterialDab::apply`.
+
+Ablation experiments were tried first and were mostly *rejected as evidence*:
+disabling paint pickup made the stroke 36% faster only because the reservoir
+emptied and later dabs stopped painting. Every ablation result in this document
+is therefore either discarded or reported with that caveat.
+
+### Material wash stroke: the one dominant cost, found and removed
+
+Profile of one 1600x1200 watercolour wash (22 active tiles), before any change:
+
+| share | where |
+| --- | --- |
+| 22.5% | `computeSurfaceToothHeight` called from `MaterialDab::apply` (four sin/cos per pixel) |
+| 9% | `clamp01` (compiled to `std::min`/`std::max`) in batch bookkeeping |
+| 6% | `MaterialEntry` vector construction in `patchTileEntries` |
+| 3% | `validProfile` inside `validateCell` |
+| remainder | spread thin across contact evaluation, optics, reservoir work |
+
+Instrumenting the tooth function showed why 22.5%: **456,903 evaluations for
+35,280 distinct pixels**, a ratio of 12.95. A wash dab covers every pixel under
+it, and thirteen dabs cover the same pixel, so the paper texture was being
+recomputed ~13 times per pixel even though it depends only on `(x, y)` and two
+surface fields.
+
+`SurfaceToothCache` keeps the 64x64 block around the last touched pixels in a
+per-thread LRU keyed on the exact profile values, filled by
+`computeSurfaceToothHeight` itself. Eviction and paper changes can only cost
+work, never alter a value.
+
+| workload | before | after |
+| --- | --- | --- |
+| wash stroke, 1600x1200, p50 | 120.7 / 120.8 / 122.1 ms | 97.1 / 99.4 / 99.7 ms (**-19%**) |
+| long stroke, 2700 px, mean | 200.1 / 201.4 ms | 172.6 / 170.3 ms (**-15%**) |
+| render pass over 22 tiles | 8.18 ms | 8.10 ms (unchanged) |
+
+Output verified identical: the same hash of rendered tiles for watercolour,
+gouache and ink strokes over 86 tiles after a wet-advance step.
+
+Two further "optimisations" were implemented, measured, and **reverted** because
+they were slower: rewriting `clamp01` as comparisons (102-104 ms vs 97-100 ms;
+the cmov form wins) and rewriting `PaintBatch::totalMass` without `std::max`
+(101-103 ms). The sampler had attributed 13% to `std::min`/`std::max`; that was
+the cmov instructions themselves, not call overhead.
+
+### Why the stroke still costs ~97 ms
+
+The remaining time is not concentrated: after the tooth fix no single site holds
+more than a few percent. It is per-cell contact evaluation, Kubelka-Munk optics
+per distinct deposited value, cell validation, and tile entry building - all of
+which run once per painted pixel and all of which change rendered output if
+touched. Cutting it further means either changing the material model or caching
+results across pixels, and both need an artist's eye, not a benchmark. This is
+the documented reason not to go further in this pass.
+
+### Viewport: measured, decided not to rewrite
+
+`CanvasViewport` is a `QQuickPaintedItem`. It repaints only the dirty rectangle
+into its frame image, but Qt uploads the item's whole texture on any update.
+
+`bench_viewport` measures both halves:
+
+| frame size | upload floor (one memcpy of the frame) | compositing 1 / 12 / 64 dirty 256 px tiles |
+| --- | --- | --- |
+| 1280x720 (3.5 MB) | 0.25 ms | 0.19 / 0.44 / 1.56 ms |
+| 1920x1080 (7.9 MB) | 0.54 ms | same CPU work |
+| 2560x1440 (14.1 MB) | 1.01 ms | |
+| 3840x2160 (31.6 MB) | 2.08 ms | |
+
+(15 GB/s measured copy bandwidth on this machine; a real GPU upload is slower,
+so treat 2.08 ms as a floor for 4K.)
+
+Decision: **no renderer rewrite now.** At 1080p and below the upload is a
+fraction of a 16.7 ms frame and smaller than the work the material engine does
+per stroke. At 4K it is comparable to all the CPU compositing, but still inside
+budget; per-tile scene-graph textures would trade that for a second copy of
+every visible tile and a cross-thread hand-off between painting and rendering.
+Recorded as the next candidate *if* measurement on real 4K hardware shows frame
+drops during strokes - not before.
+
+Two things were checked and are already correct: brush-settings changes do not
+trigger a canvas repaint for painting tools, and the brush cursor is a QML
+overlay rather than part of the painted frame, so hovering costs no uploads.
+
+### QML and interface responsiveness
+
+`TestQmlResponsiveness` drives the real window offscreen and prints `MEASURE`
+lines that CI publishes as an annotation. Baseline on the Windows runner:
+
+| interaction | median |
+| --- | --- |
+| create all ten panels | 90.97 ms total |
+| - ToolPropertyPanel | 33.73 ms |
+| - SubToolPanel | 19.92 ms |
+| - ColorPanel | 13.49 ms |
+| - ColorMixerPanel | 8.38 ms |
+| - LayersPanel | 6.45 ms |
+| - BrushSizePanel | 4.52 ms |
+| - every other panel | under 2 ms each |
+| tool switch | 0.004 ms (worst 0.008 ms) |
+| Sub-Tool selection | 0.003 ms |
+| Sub-Tool tab switch | 0.003 ms |
+| panel toggle | 0.007 ms |
+| layer select / visibility | 0.001 ms |
+| settings dialog creation | 12.3 ms |
+
+Interactions are already in the microsecond range - there is no binding storm or
+delegate churn to fix. The only sizeable cost is *building* panels, and that is
+a one-off: panels live in dock `Loader`s and are created once per layout. The
+identified, unapplied improvement is to defer ToolPropertyPanel's non-stroke
+section (it and the stroke section are mutually exclusive `Flickable`s, both
+created eagerly) behind a `Loader`; that is a UI restructuring that needs visual
+verification on hardware, so it is documented rather than done blind.
+
+### Memory
+
+`bench_memory`, measured on this machine:
+
+| scenario | result |
+| --- | --- |
+| 2048x2048, 50 -> 200 strokes | 11.0 MB resident at both points; no growth with session length |
+| tiles actually held | 7.8 MB, 31 tiles |
+| 4096x4096 with 8 painted layers | 23.5 MB resident |
+| 30 project open/close cycles | 20.8 MB, flat from cycle 10 to cycle 30; no leak |
+| 300 full-tile undo snapshots | 133 MB retained, fully released afterwards |
+
+The undo figure is the full-snapshot worst case; the shipping history stores
+compact records (see `docs/architecture/artwork-history.md`).
+
+### Undo limits
+
+Verified in code and in the settings UI: `performance/undoHistoryLimit` defaults
+to 0 (unlimited), accepts any positive value up to 100000, and is only ever
+trimmed by the real memory budget with a `historyTrimmed` notice. No fixed
+command cap remains.
+
+### Sanitizers
+
+`bench_material`, `bench_brush` and `bench_memory` built with
+`-fsanitize=address,undefined` and `detect_leaks=1`: no ASan, UBSan or leak
+reports on the optimised paths.

@@ -36,6 +36,14 @@ sizes from 12 px to 400 px, plus soft, textured and smudging variants. This is
 the digital brush path including dab spacing, tile writes and per-stroke
 allocation count.
 
+**`bench_viewport`** — the two halves of a canvas update: compositing the dirty
+tiles on the CPU, and the floor cost of uploading one frame (a memcpy of the same
+size). Used to decide whether the painted item's whole-texture upload is worth
+replacing with per-tile scene-graph textures.
+
+**`bench_memory`** — resident memory through a long session, a large canvas with
+many layers, repeated project open/close, and retained undo snapshots.
+
 **`bench_material`** — the Traditional Material Engine twice over: a watercolour
 wash stroke through the reservoir/deposition path (1600x1200, 22 active tiles),
 and the render pass the viewport runs over the wet tiles the stroke dirtied.
@@ -58,6 +66,9 @@ be taken on the target hardware.
 | brush | 200 px round, 700 samples | 51.8 ms | — | — |
 | material | watercolour wash stroke, 1600x1200 | 122.3 ms | 125.3 ms | 126.6 ms |
 | material | render pass over 22 wet tiles | 8.87 ms | 9.16 ms | 9.30 ms |
+
+After the paper-tooth cache (`SurfaceToothCache`), the same wash stroke measures
+97-100 ms p50 on this machine instead of 121 ms.
 
 Percentiles are interpolated over the sample set; a dash means the case has not
 been re-measured since the harness moved into the repository.
