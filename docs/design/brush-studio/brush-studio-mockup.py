@@ -1,52 +1,69 @@
 #!/usr/bin/env python3
-"""Brush Studio mockup renderer.
+"""KomaPaint — Brush Studio, mockup renderer (v2).
 
-Draws a 1600x1000 desktop window at 2x and downsamples, so every edge and
-glyph is antialiased. Colour, type and spacing come straight from
-ui/themes/KomaTheme.qml ("ink and ember"), which is why the result belongs to
-KomaPaint rather than to a generic dark editor.
+Source of truth is the application itself, not another paint program:
+
+  * colours, type scale and spacing  -> ui/themes/KomaTheme.qml
+  * window chrome                   -> ui/workspaces/MainWindow.qml
+                                    (menu band, command bar, docks, status bar)
+  * tool icons                      -> the real PNGs in ui/assets/icons/tools,
+                                       tinted the way KpIcon tints them
+  * interface glyphs                -> drawn in the KpGlyph family: 20-unit grid,
+                                       1.7-unit stroke, round caps, one weight
+  * brush vocabulary                -> resources/brush-presets.json and
+                                       src/app/SubToolLibrary.h (Digital /
+                                       Realistic engines, Sub-Tool presets)
+
+Rendered at 2x and downsampled so every edge and glyph is antialiased.
 """
 
 import math
+import os
 import random
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-S = 2                      # supersample factor
-W, H = 1600, 1000          # design size, in points
-FDIR = "/tmp/mock/fonts"
+S = 2
+W, H = 1728, 1080
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+ICONS = os.path.join(REPO, "ui", "assets", "icons", "tools")
+# Inter 400/500/600, as .ttf (any folder; set KOMAPAINT_MOCKUP_FONTS to override)
+FDIR = os.environ.get("KOMAPAINT_MOCKUP_FONTS",
+                      os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts"))
 
-# --- tokens (dark theme, KomaTheme.qml) -------------------------------------
+# --- KomaTheme.qml, dark theme ----------------------------------------------
 class C:
-    windowBg      = "#2c2c2c"
-    paneBg        = "#383838"
-    paneBgAlt     = "#333333"
-    paneHeaderBg  = "#2c2c2c"
-    panelInsetBg  = "#292929"
-    canvasBg      = "#454545"
-    canvasEdge    = "#1b1d20"
-    previewPaper  = "#dde1e6"
-    inputBg       = "#292929"
-    buttonBg      = "#404040"
-    buttonHover   = "#4a4a4a"
-    toolRailBg    = "#292929"
-    statusbarBg   = "#2c2c2c"
-    toolActive    = "#505050"
-    rowSelected   = "#505050"
+    windowBg = "#2c2c2c"
+    menubarBg = "#2c2c2c"
+    toolbarBg = "#2c2c2c"
+    paneBg = "#383838"
+    paneBgAlt = "#333333"
+    paneHeaderBg = "#2c2c2c"
+    panelInsetBg = "#292929"
+    canvasBg = "#454545"
+    canvasEdge = "#1b1d20"
+    previewPaper = "#dde1e6"
+    inputBg = "#292929"
+    buttonBg = "#404040"
+    toolRailBg = "#292929"
+    statusbarBg = "#2c2c2c"
+    toolActive = "#505050"
+    rowSelected = "#505050"
     transparencyLight = "#828282"
-    transparencyDark  = "#666666"
-    hairline      = "#5c5c5c"
-    border        = "#666666"
-    outline       = "#888888"
-    text          = "#ededed"
-    textMuted     = "#c6c6c6"
-    textSubtle    = "#909090"
-    textSection   = "#bdbdbd"
-    accent        = "#c8c8c8"
-    accentWash    = "#505050"
-    warning       = "#d2a054"
-    success       = "#7fb27f"
-    ink           = "#222222"
+    transparencyDark = "#666666"
+    hairline = "#5c5c5c"
+    border = "#666666"
+    text = "#ededed"
+    textMuted = "#c6c6c6"
+    textSubtle = "#909090"
+    textSection = "#bdbdbd"
+    accent = "#c8c8c8"
+    warning = "#d2a054"
+    success = "#7fb27f"
+    ink = "#222222"
+    iconNormal = "#dedede"
+    iconSubtle = "#909090"
 
 
 _fonts = {}
@@ -60,8 +77,7 @@ def F(size, weight=400):
 def rect(d, x, y, w, h, fill=None, outline=None, width=1, radius=0):
     box = [x * S, y * S, (x + w) * S - 1, (y + h) * S - 1]
     if radius:
-        d.rounded_rectangle(box, radius=radius * S, fill=fill,
-                            outline=outline, width=int(width * S))
+        d.rounded_rectangle(box, radius=radius * S, fill=fill, outline=outline, width=int(width * S))
     else:
         d.rectangle(box, fill=fill, outline=outline, width=int(width * S) if outline else 0)
 
@@ -79,7 +95,6 @@ def text_w(s, size=11, weight=400):
 
 
 def tracked(d, x, y, s, size=9, weight=600, color=C.textSection, tracking=0.9, anchor="l"):
-    """Uppercase micro label with letterspacing, as the theme uses above sections."""
     total = sum(text_w(ch, size, weight) + tracking for ch in s) - tracking
     if anchor == "r":
         x -= total
@@ -90,140 +105,122 @@ def tracked(d, x, y, s, size=9, weight=600, color=C.textSection, tracking=0.9, a
     return total
 
 
-# --- icons: single-colour line art, 1.5 pt strokes, the KomaPaint icon style -
-def icon(d, name, x, y, size, color, alpha_color=None):
-    """Draw a 1.5 pt line icon inside a size x size box at (x, y)."""
-    col = alpha_color or color
-    lw = 1.4
-    cx, cy = x + size / 2, y + size / 2
+# --- authored PNG tool icons, tinted like KpIcon ----------------------------
+_png_cache = {}
 
-    def L(a, b, c, e):
-        line(d, x + a * size, y + b * size, x + c * size, y + e * size, col, lw)
 
-    def E(bx0, by0, bx1, by1, **kw):
-        d.ellipse([(x + bx0 * size) * S, (y + by0 * size) * S,
-                   (x + bx1 * size) * S, (y + by1 * size) * S], **kw)
+def hex_rgba(h, a=255):
+    h = h.lstrip("#")
+    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), a)
 
-    def POLY(points, **kw):
-        d.polygon([((x + a * size) * S, (y + b * size) * S) for a, b in points], **kw)
 
-    def ARC(bx0, by0, bx1, by1, a0, a1, **kw):
-        d.arc([(x + bx0 * size) * S, (y + by0 * size) * S,
-               (x + bx1 * size) * S, (y + by1 * size) * S], a0, a1, **kw)
+def tool_icon(img, name, x, y, size, color):
+    """Tint ui/assets/icons/tools/<name>.png with the interface colour."""
+    key = (name, size, color)
+    if key not in _png_cache:
+        src = Image.open(os.path.join(ICONS, name + ".png")).convert("RGBA")
+        a = src.split()[-1].resize((int(size * S), int(size * S)), Image.LANCZOS)
+        solid = Image.new("RGBA", a.size, hex_rgba(color))
+        solid.putalpha(a)
+        _png_cache[key] = solid
+    img.paste(_png_cache[key], (int(x * S), int(y * S)), _png_cache[key])
 
-    if name == "brush":
-        L(0.30, 0.78, 0.62, 0.30)
-        line(d, x + 0.62 * size, y + 0.30 * size, x + 0.74 * size, y + 0.20 * size, col, lw * 1.7)
-        L(0.20, 0.86, 0.30, 0.78)
-        L(0.20, 0.86, 0.26, 0.72)
-    elif name == "eraser":
-        POLY([(0.22, 0.70), (0.55, 0.28), (0.80, 0.46), (0.50, 0.82)],
-             outline=col, width=max(1, int(lw * S)))
-        L(0.22, 0.70, 0.50, 0.82)
-    elif name == "smudge":
-        L(0.25, 0.72, 0.62, 0.35)
-        L(0.42, 0.78, 0.78, 0.45)
-        L(0.25, 0.72, 0.42, 0.78)
-    elif name == "shape":
-        rect(d, x + 0.18 * size, y + 0.42 * size, 0.42 * size, 0.40 * size, outline=col, width=lw)
-        E(0.52, 0.14, 0.86, 0.48, outline=col, width=max(1, int(lw * S)))
-    elif name == "lasso":
-        ARC(0.16, 0.14, 0.84, 0.66, 200, 20, fill=col, width=max(1, int(lw * S)))
-        L(0.24, 0.52, 0.28, 0.80)
-        L(0.28, 0.80, 0.40, 0.84)
-    elif name == "select":
-        for a, b, c, e in ((0.20, 0.20, 0.34, 0.20), (0.66, 0.20, 0.80, 0.20),
-                           (0.20, 0.80, 0.34, 0.80), (0.66, 0.80, 0.80, 0.80),
-                           (0.20, 0.20, 0.20, 0.34), (0.20, 0.66, 0.20, 0.80),
-                           (0.80, 0.20, 0.80, 0.34), (0.80, 0.66, 0.80, 0.80)):
-            L(a, b, c, e)
-    elif name == "move":
-        L(0.50, 0.18, 0.50, 0.82)
-        L(0.18, 0.50, 0.82, 0.50)
-        L(0.42, 0.26, 0.50, 0.18)
-        L(0.58, 0.26, 0.50, 0.18)
-        L(0.42, 0.74, 0.50, 0.82)
-        L(0.58, 0.74, 0.50, 0.82)
-    elif name == "fill":
-        POLY([(0.22, 0.52), (0.52, 0.22), (0.80, 0.50), (0.50, 0.80)],
-             outline=col, width=max(1, int(lw * S)))
-        E(0.62, 0.66, 0.80, 0.86, fill=col)
-    elif name == "dropper":
-        L(0.26, 0.78, 0.58, 0.44)
-        line(d, x + 0.56 * size, y + 0.26 * size, x + 0.76 * size, y + 0.46 * size, col, lw * 1.6)
-        L(0.26, 0.78, 0.20, 0.82)
-    elif name == "zoom":
-        E(0.18, 0.18, 0.66, 0.66, outline=col, width=max(1, int(lw * S)))
-        L(0.68, 0.68, 0.86, 0.86)
-    elif name == "plus":
-        L(0.50, 0.22, 0.50, 0.78)
-        L(0.22, 0.50, 0.78, 0.50)
-    elif name == "copy":
-        rect(d, x + 0.18 * size, y + 0.18 * size, 0.44 * size, 0.50 * size, outline=col, width=lw)
-        rect(d, x + 0.36 * size, y + 0.34 * size, 0.46 * size, 0.48 * size, outline=col, width=lw)
-    elif name == "import":
-        L(0.50, 0.16, 0.50, 0.58)
-        L(0.36, 0.44, 0.50, 0.58)
-        L(0.64, 0.44, 0.50, 0.58)
-        L(0.20, 0.70, 0.20, 0.84)
-        L(0.20, 0.84, 0.80, 0.84)
-        L(0.80, 0.70, 0.80, 0.84)
-    elif name == "export":
-        L(0.50, 0.58, 0.50, 0.16)
-        L(0.36, 0.30, 0.50, 0.16)
-        L(0.64, 0.30, 0.50, 0.16)
-        L(0.20, 0.70, 0.20, 0.84)
-        L(0.20, 0.84, 0.80, 0.84)
-        L(0.80, 0.70, 0.80, 0.84)
+
+# --- KpGlyph family: 20-unit grid, 1.7 stroke, round caps -------------------
+def stroke(d, pts, color, width=1.7):
+    for i in range(len(pts) - 1):
+        line(d, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], color, width)
+    for (px, py) in (pts[0], pts[-1]):
+        r = width / 2
+        d.ellipse([(px - r) * S, (py - r) * S, (px + r) * S, (py + r) * S], fill=color)
+
+
+def glyph(d, name, x, y, size, color):
+    u = size / 20.0  # one grid unit
+
+    def P(a, b):
+        return (x + a * u, y + b * u)
+
+    if name == "new":
+        stroke(d, [P(5, 3), P(12, 3), P(15, 6), P(15, 17), P(5, 17), P(5, 3)], color)
+        stroke(d, [P(10, 7), P(10, 13)], color)
+        stroke(d, [P(7, 10), P(13, 10)], color)
+    elif name == "open":
+        stroke(d, [P(3, 16), P(3, 6), P(8, 6), P(9.5, 8), P(16, 8), P(16, 16), P(3, 16)], color)
     elif name == "save":
-        L(0.22, 0.78, 0.22, 0.24)
-        L(0.22, 0.24, 0.68, 0.24)
-        L(0.68, 0.24, 0.80, 0.36)
-        L(0.80, 0.36, 0.80, 0.78)
-        L(0.22, 0.78, 0.80, 0.78)
-        rect(d, x + 0.36 * size, y + 0.24 * size, 0.30 * size, 0.20 * size, fill=col)
+        stroke(d, [P(4, 16.5), P(4, 4), P(14, 4), P(16, 6), P(16, 16.5), P(4, 16.5)], color)
+        stroke(d, [P(7, 4), P(7, 8.5), P(13, 8.5), P(13, 4)], color)
+        stroke(d, [P(7, 16.5), P(7, 12), P(13, 12), P(13, 16.5)], color)
+    elif name == "duplicate":
+        stroke(d, [P(3.5, 6.5), P(3.5, 16.5), P(13.5, 16.5)], color)
+        stroke(d, [P(6.5, 3.5), P(16.5, 3.5), P(16.5, 13.5), P(6.5, 13.5), P(6.5, 3.5)], color)
+    elif name == "folder":
+        stroke(d, [P(3, 16), P(3, 5), P(8, 5), P(9.5, 7.5), P(17, 7.5), P(17, 16), P(3, 16)], color)
     elif name == "close":
-        L(0.26, 0.26, 0.74, 0.74)
-        L(0.74, 0.26, 0.26, 0.74)
-    elif name == "chevron":
-        L(0.38, 0.30, 0.60, 0.50)
-        L(0.60, 0.50, 0.38, 0.70)
-    elif name == "chevron_down":
-        L(0.28, 0.42, 0.50, 0.62)
-        L(0.50, 0.62, 0.72, 0.42)
-    elif name == "nodes":
-        E(0.12, 0.16, 0.36, 0.40, outline=col, width=max(1, int(lw * S)))
-        E(0.62, 0.58, 0.86, 0.82, outline=col, width=max(1, int(lw * S)))
-        L(0.36, 0.28, 0.70, 0.28)
-        L(0.70, 0.28, 0.74, 0.58)
-        L(0.36, 0.36, 0.54, 0.66)
-        L(0.54, 0.66, 0.62, 0.70)
+        stroke(d, [P(5.5, 5.5), P(14.5, 14.5)], color)
+        stroke(d, [P(14.5, 5.5), P(5.5, 14.5)], color)
+    elif name == "plus":
+        stroke(d, [P(10, 4.5), P(10, 15.5)], color)
+        stroke(d, [P(4.5, 10), P(15.5, 10)], color)
+    elif name == "minus":
+        stroke(d, [P(4.5, 10), P(15.5, 10)], color)
+    elif name == "chevron-down":
+        stroke(d, [P(5, 7.5), P(10, 12.5), P(15, 7.5)], color)
+    elif name == "chevron-right":
+        stroke(d, [P(7.5, 5), P(12.5, 10), P(7.5, 15)], color)
+    elif name == "dots-h":
+        for cx in (5, 10, 15):
+            d.ellipse([(x + cx * u - 1) * S, (y + 10 * u - 1) * S,
+                       (x + cx * u + 1) * S, (y + 10 * u + 1) * S], fill=color)
     elif name == "search":
-        E(0.18, 0.18, 0.68, 0.68, outline=col, width=max(1, int(lw * S)))
-        L(0.70, 0.70, 0.86, 0.86)
-    elif name == "undo":
-        ARC(0.20, 0.26, 0.80, 0.86, 200, 20, fill=col, width=max(1, int(lw * S)))
-        L(0.20, 0.46, 0.20, 0.26)
-        L(0.20, 0.26, 0.38, 0.26)
-    elif name == "warning":
-        POLY([(0.50, 0.16), (0.88, 0.82), (0.12, 0.82)], outline=col, width=max(1, int(lw * S)))
-        L(0.50, 0.40, 0.50, 0.60)
-        line(d, x + 0.50 * size, y + 0.68 * size, x + 0.50 * size, y + 0.72 * size, col, lw * 1.6)
-    elif name == "eye":
-        E(0.12, 0.26, 0.88, 0.74, outline=col, width=max(1, int(lw * S)))
-        E(0.42, 0.40, 0.58, 0.60, fill=col)
-    elif name == "grid":
-        rect(d, x + 0.18 * size, y + 0.18 * size, 0.64 * size, 0.64 * size, outline=col, width=lw)
-        L(0.18, 0.50, 0.82, 0.50)
-        L(0.50, 0.18, 0.50, 0.82)
-    elif name == "dots":
-        for i, j in ((0.30, 0.50), (0.50, 0.50), (0.70, 0.50)):
-            E(i - 0.05, j - 0.05, i + 0.05, j + 0.05, fill=col)
+        d.ellipse([(x + 4 * u) * S, (y + 4 * u) * S, (x + 12 * u) * S, (y + 12 * u) * S],
+                  outline=color, width=max(1, int(1.7 * S)))
+        stroke(d, [P(12.4, 12.4), P(16, 16)], color)
+    elif name == "check":
+        stroke(d, [P(4.5, 10.5), P(8.5, 14.5), P(15.5, 6)], color)
     elif name == "reset":
-        ARC(0.20, 0.20, 0.80, 0.80, 30, 330, fill=col, width=max(1, int(lw * S)))
-        L(0.72, 0.20, 0.86, 0.20)
-        L(0.86, 0.20, 0.86, 0.34)
-
+        d.arc([(x + 4 * u) * S, (y + 4 * u) * S, (x + 16 * u) * S, (y + 16 * u) * S],
+              40, 320, fill=color, width=max(1, int(1.7 * S)))
+        stroke(d, [P(14, 3.4), P(15.6, 6.4), P(12.2, 7)], color)
+    elif name == "warning":
+        stroke(d, [P(10, 3.5), P(17.5, 16.5), P(2.5, 16.5), P(10, 3.5)], color)
+        stroke(d, [P(10, 8), P(10, 12)], color)
+        d.ellipse([(x + 9 * u) * S, (y + 13.4 * u) * S, (x + 11 * u) * S, (y + 15.4 * u) * S], fill=color)
+    elif name == "grid":
+        stroke(d, [P(3.5, 3.5), P(16.5, 3.5), P(16.5, 16.5), P(3.5, 16.5), P(3.5, 3.5)], color)
+        stroke(d, [P(3.5, 10), P(16.5, 10)], color)
+        stroke(d, [P(10, 3.5), P(10, 16.5)], color)
+    elif name == "transform":
+        stroke(d, [P(4, 4), P(11, 4)], color)
+        stroke(d, [P(4, 4), P(4, 11)], color)
+        stroke(d, [P(16, 16), P(9, 16)], color)
+        stroke(d, [P(16, 16), P(16, 9)], color)
+        stroke(d, [P(6.5, 13.5), P(13.5, 6.5)], color)
+    elif name == "brush":
+        stroke(d, [P(6, 15), P(12.5, 6.5)], color)
+        stroke(d, [P(11.4, 5.2), P(13.6, 7.2)], color)
+    elif name == "size":
+        stroke(d, [P(3.5, 16), P(16, 3.5)], color)
+        d.ellipse([(x + 3.5 * u - 1.6 * u) * S, (y + 16 * u - 1.6 * u) * S,
+                   (x + 3.5 * u + 1.6 * u) * S, (y + 16 * u + 1.6 * u) * S], fill=color)
+        d.ellipse([(x + 16 * u - 2.6 * u) * S, (y + 3.5 * u - 2.6 * u) * S,
+                   (x + 16 * u + 2.6 * u) * S, (y + 3.5 * u + 2.6 * u) * S], fill=color)
+    elif name == "opacity":
+        d.ellipse([(x + 3.5 * u) * S, (y + 3.5 * u) * S, (x + 16.5 * u) * S, (y + 16.5 * u) * S],
+                  outline=color, width=max(1, int(1.7 * S)))
+        d.pieslice([(x + 3.5 * u) * S, (y + 3.5 * u) * S, (x + 16.5 * u) * S, (y + 16.5 * u) * S],
+                   90, 270, fill=color)
+    elif name == "nodes":
+        d.ellipse([(x + 2.5 * u) * S, (y + 4.5 * u) * S, (x + 8.5 * u) * S, (y + 10.5 * u) * S],
+                  outline=color, width=max(1, int(1.7 * S)))
+        d.ellipse([(x + 11.5 * u) * S, (y + 9.5 * u) * S, (x + 17.5 * u) * S, (y + 15.5 * u) * S],
+                  outline=color, width=max(1, int(1.7 * S)))
+        stroke(d, [P(8.5, 7.5), P(13.5, 11)], color)
+    elif name == "reset-all":
+        d.arc([(x + 4 * u) * S, (y + 4 * u) * S, (x + 16 * u) * S, (y + 16 * u) * S],
+              40, 320, fill=color, width=max(1, int(1.7 * S)))
+    else:
+        raise KeyError(name)
 
 
 # --- composite artwork ------------------------------------------------------
@@ -237,11 +234,16 @@ def checker(d, x, y, w, h, cell=8):
                      fill=C.transparencyDark)
 
 
-def bristle_tip(layer, box, seed=7, density=1.0, blur=0.22, ink=(11, 11, 13)):
-    """A brush-tip mask, built as a field: silhouette x thickness x bristles.
+def _smoothstep(e0, e1, x):
+    t = np.clip((x - e0) / (e1 - e0), 0, 1)
+    return t * t * (3 - 2 * t)
 
-    Working on a field rather than on drawn lines is what makes it read as a
-    loaded bristle imprint instead of a picket fence.
+
+def bristle_tip(layer, box, seed=7, density=1.0, blur=0.15, ink=(11, 11, 13)):
+    """A brush-tip mask: flat opaque core, ragged bristle edges, striated body.
+
+    Built as a field so the striations run with the bristles instead of looking
+    like scattered dots, which is what a real tip mask looks like at 1:1.
     """
     x, y, w, h = [v * S for v in box]
     wp, hp = max(2, int(w)), max(2, int(h))
@@ -249,31 +251,27 @@ def bristle_tip(layer, box, seed=7, density=1.0, blur=0.22, ink=(11, 11, 13)):
     fx = np.linspace(0, 1, wp)[None, :]
     fy = np.linspace(0, 1, hp)[:, None]
 
-    ex = np.clip((fx - 0.015) / 0.97, 0, 1)
-    ex = np.sin(np.pi * ex) ** 0.28
-    ex = ex * (0.84 + 0.16 * np.sin(fx * 6.7 + seed) * np.sin(fx * 3.1 + seed * 0.6))
-    half = 0.30 + 0.10 * np.sin(fx * 5.3 + 1.7) + 0.04 * np.sin(fx * 11.0)
-    ey = np.exp(-(((fy - 0.5) / half) ** 4) * 2.2)
+    # ends: hold almost to the tip, then bite
+    ex = _smoothstep(0.0, 0.030, fx) * _smoothstep(0.0, 0.030, 1 - fx)
+    # vertical: flat core with a fast, slightly wavy falloff
+    half = 0.345 + 0.020 * np.sin(fx * 9.3 + 1.1) + 0.012 * np.sin(fx * 23.0)
+    dist = np.abs(fy - 0.5)
+    ey = 1.0 - _smoothstep(half - 0.055, half + 0.030, dist)
 
-    freqs = np.array([37, 61, 97, 131, 173, 211, 257, 307, 349], float)
+    # bristles: high frequency across the width
+    freqs = np.array([48, 77, 113, 151, 197, 251, 313, 383, 461, 557, 673], float)
     ph = rng.uniform(0, 2 * np.pi, freqs.size)
     fibre = np.sum(np.sin(fx[0][:, None] * 2 * np.pi * freqs[None, :] + ph[None, :]), axis=1)[None, :] / freqs.size
-    fibre = 0.62 + 0.38 * fibre
+    fibre = np.clip(0.5 + 0.5 * fibre, 0, 1)
 
-    cfreq = np.array([5.0, 9.0, 13.0, 21.0, 33.0])
+    # clumps: where the bristles bunch up, with real gaps between them
+    cfreq = np.array([4.0, 7.0, 12.0, 19.0, 31.0])
     cph = rng.uniform(0, 2 * np.pi, cfreq.size)
     clump = np.sum(np.sin(fx[0][:, None] * 2 * np.pi * cfreq[None, :] + cph[None, :]), axis=1)[None, :] / cfreq.size
-    clump = np.clip(0.72 + 0.45 * clump, 0.10, 1.05)
+    clump = np.clip(0.45 + 0.55 * clump, 0.18, 1.0)
 
-    # per-column random walk: real bristles bunch unevenly along the stroke
-    walk = np.cumsum(rng.normal(0, 0.05, wp))
-    walk = np.clip(0.88 + 0.12 * np.tanh(walk), 0.6, 1.1)
-
-    a = ex * ey * fibre * clump * walk * density
-    a = np.clip(a, 0, 1) ** 0.62
-    # the wet centre of the band carries more pigment than its edges
-    a = a * (0.92 + 0.16 * np.exp(-(((fy - 0.5) / 0.22) ** 2)))
-    alpha = np.clip(a * 322, 0, 255).astype(np.uint8)
+    a = ex * ey * (0.30 + 0.70 * fibre) * (0.55 + 0.45 * clump) * density
+    alpha = (np.clip(a, 0, 1) ** 0.82 * 255).astype(np.uint8)
     rgba = np.zeros((hp, wp, 4), np.uint8)
     rgba[..., 0], rgba[..., 1], rgba[..., 2] = ink
     rgba[..., 3] = alpha
@@ -283,16 +281,35 @@ def bristle_tip(layer, box, seed=7, density=1.0, blur=0.22, ink=(11, 11, 13)):
     layer.alpha_composite(im, (int(x), int(y)))
 
 
-def paint_stroke(layer, pts, w_start, w_end, ink=(26, 30, 38), seed=1,
-                 fibre=420, dry=0.0, opacity=240, taper=0.55):
-    """A tapered, fibre-split stroke along a polyline - the actual brush look.
+def smooth_path(pts, per_seg=14):
+    """Catmull-Rom through the points: brush strokes curve, they do not kink."""
+    if len(pts) < 3:
+        return pts
+    p = [pts[0]] + list(pts) + [pts[-1]]
+    out = []
+    for i in range(len(p) - 3):
+        p0, p1, p2, p3 = p[i], p[i + 1], p[i + 2], p[i + 3]
+        for j in range(per_seg):
+            t = j / per_seg
+            t2, t3 = t * t, t * t * t
+            out.append((
+                0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t
+                       + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2
+                       + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3),
+                0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t
+                       + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2
+                       + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3),
+            ))
+    out.append(pts[-1])
+    return out
 
-    Nothing is ever erased: dry-brush variation comes from thinning the fibres
-    in bands, which is what a real brush does when the reservoir runs low.
-    """
+
+def paint_stroke(layer, pts, w_start, w_end, ink=(24, 28, 36), seed=1,
+                 fibre=420, dry=0.0, opacity=242, taper=0.55, comb_n=11):
+    """A tapered, bristle-split stroke. Nothing is erased: dry areas thin out."""
     d = ImageDraw.Draw(layer)
     rnd = random.Random(seed)
-    pts = [(p[0] * S, p[1] * S) for p in pts]
+    pts = [(p[0] * S, p[1] * S) for p in smooth_path(pts)]
     samples = []
     for i in range(len(pts) - 1):
         x0, y0 = pts[i]
@@ -309,30 +326,24 @@ def paint_stroke(layer, pts, w_start, w_end, ink=(26, 30, 38), seed=1,
         edge = min(1.0, (t + 0.02) / taper) * min(1.0, (1.02 - t) / taper)
         return (base * (0.30 + 0.70 * edge) + 0.4) * S
 
-    # the comb: a fixed bristle profile per stroke, so the striations run along
-    # the stroke instead of shimmering from dab to dab
-    comb = [rnd.uniform(0.72, 1.0) for _ in range(11)]
+    comb = [rnd.uniform(0.72, 1.0) for _ in range(comb_n)]
     for _ in range(2):
-        comb[rnd.randrange(11)] = rnd.uniform(0.10, 0.26)
+        comb[rnd.randrange(comb_n)] = rnd.uniform(0.10, 0.26)
 
     def normal(k):
         a = samples[max(0, k - 1)]
-        bb = samples[min(total - 1, k + 1)]
-        tx, ty = bb[0] - a[0], bb[1] - a[1]
+        b = samples[min(total - 1, k + 1)]
+        tx, ty = b[0] - a[0], b[1] - a[1]
         ln = math.hypot(tx, ty) or 1.0
         return -ty / ln, tx / ln
 
-    # soft halo under everything
     for k, (px_, py_) in enumerate(samples):
         r = radius(k / max(1, total - 1)) / 2
-        d.ellipse([px_ - r * 1.2, py_ - r * 1.2, px_ + r * 1.2, py_ + r * 1.2],
-                  fill=ink + (34,))
-    # core with bristle striations
+        d.ellipse([px_ - r * 1.2, py_ - r * 1.2, px_ + r * 1.2, py_ + r * 1.2], fill=ink + (34,))
     for k, (px_, py_) in enumerate(samples):
         t = k / max(1, total - 1)
         r = radius(t) / 2
         nx, ny = normal(k)
-        # a faint base keeps the gaps from cutting the stroke in half
         d.ellipse([px_ - r * 0.94, py_ - r * 0.94, px_ + r * 0.94, py_ + r * 0.94],
                   fill=ink + (int(opacity * 0.80),))
         for i, cp in enumerate(comb):
@@ -344,12 +355,8 @@ def paint_stroke(layer, pts, w_start, w_end, ink=(26, 30, 38), seed=1,
                       fill=ink + (max(0, min(255, a)),))
 
     def band(t):
-        # low-frequency reservoir variation along the stroke
         return 0.62 + 0.38 * math.sin(t * 9.0 + seed) * math.sin(t * 3.7 + seed * 0.5)
 
-    # bristle fibres: they only stray a little outside the core and thin out
-    # where the reservoir is low. ImageDraw replaces pixels instead of blending
-    # them, so they go on their own layer and are composited in.
     fibres = Image.new("RGBA", layer.size, (0, 0, 0, 0))
     fd = ImageDraw.Draw(fibres)
     for _ in range(fibre):
@@ -373,7 +380,6 @@ def paint_stroke(layer, pts, w_start, w_end, ink=(26, 30, 38), seed=1,
 
 
 def stamp(layer, x, y, r, seed=3, ink=(30, 34, 42), press=1.0):
-    """One bristle dab: short radial fibres inside a soft disc."""
     d = ImageDraw.Draw(layer)
     rnd = random.Random(seed)
     cx, cy = x * S, y * S
@@ -393,228 +399,290 @@ def stamp(layer, x, y, r, seed=3, ink=(30, 34, 42), press=1.0):
                 fill=ink + (a,), width=S)
     layer.alpha_composite(fibres.filter(ImageFilter.GaussianBlur(0.3 * S)))
 
-
-# ---------------------------------------------------------------------------
+# =============================================================================
 img = Image.new("RGB", (W * S, H * S), C.windowBg)
 d = ImageDraw.Draw(img)
 
-TITLE_H, CMD_H, STATUS_H, PREVIEW_H = 30, 40, 24, 152
-LEFT_W, RIGHT_W, RAIL_W = 248, 300, 34
-BODY_Y = TITLE_H + CMD_H
+TITLE_H, MENU_H, CMD_H = 30, 30, 40
+STATUS_H, PREVIEW_H = 24, 250
+BODY_Y = TITLE_H + MENU_H + CMD_H
 BODY_H = H - BODY_Y - PREVIEW_H - STATUS_H
 PREV_Y = BODY_Y + BODY_H
-LEFT_X, RIGHT_X = 0, W - RIGHT_W
+LEFT_W, RIGHT_W, RAIL_W = 260, 320, 34
+RIGHT_X = W - RIGHT_W
 CENTER_X = LEFT_W
 CENTER_W = RIGHT_X - CENTER_X
 
-# --- title bar -------------------------------------------------------------
+BRUSH = "Wet Bristle"
+
+# --- title strip -----------------------------------------------------------
 rect(d, 0, 0, W, TITLE_H, fill=C.windowBg)
 line(d, 0, TITLE_H - 0.5, W, TITLE_H - 0.5, "#3a3a3a", 1)
 rect(d, 14, 7, 16, 16, fill="#3a3a3a", outline=C.border, radius=3)
 rect(d, 18, 11, 8, 8, fill=C.accent, radius=1)
-text(d, 38, 8, "Brush Studio", 12, 500, C.text)
-text(d, 38 + text_w("Brush Studio", 12, 500) + 8, 9, "— Krita5 prototypes 1", 11, 400, C.textSubtle)
-# window controls, drawn rather than typed
+text(d, 38, 8, "KomaPaint — Brush Studio", 12, 500, C.text)
 for i in range(3):
-    bx = W - 26 - i * 24
+    bx = W - 30 - i * 24
     if i == 0:
-        icon(d, "close", bx - 6, 9, 12, C.textMuted)
+        glyph(d, "close", bx - 5, 10, 11, C.textMuted)
     elif i == 1:
-        rect(d, bx - 5, 10, 10, 9, outline=C.textSubtle, width=1)
+        rect(d, bx - 5, 10, 10, 9, outline=C.iconSubtle, width=1)
     else:
-        line(d, bx - 6, 14, bx + 4, 14, C.textSubtle, 1)
+        line(d, bx - 5, 14, bx + 4, 14, C.iconSubtle, 1)
+
+# --- menu band -------------------------------------------------------------
+rect(d, 0, TITLE_H, W, MENU_H, fill=C.menubarBg)
+line(d, 0, TITLE_H + MENU_H - 0.5, W, TITLE_H + MENU_H - 0.5, C.hairline, 1)
+mx = 12
+for item in ("File", "Edit", "View", "Brush", "Window", "Help"):
+    text(d, mx, TITLE_H + 8, item, 12, 400, C.textMuted)
+    mx += text_w(item, 12, 400) + 22
+# the entry point that opens this window, shown for context
+_bc = "Brush Studio"
+_bx = W - 12 - text_w(_bc, 11, 400)
+text(d, _bx, TITLE_H + 8, _bc, 11, 400, C.textSubtle)
+glyph(d, "chevron-right", _bx - 16, TITLE_H + 10, 10, C.textSubtle)
+_ex = _bx - 24 - text_w("Edit", 11, 400)
+text(d, _ex, TITLE_H + 8, "Edit", 11, 400, C.textSubtle)
 
 # --- command bar -----------------------------------------------------------
-rect(d, 0, TITLE_H, W, CMD_H, fill=C.windowBg)
-line(d, 0, TITLE_H + CMD_H - 0.5, W, TITLE_H + CMD_H - 0.5, "#3a3a3a", 1)
-cy = TITLE_H + (CMD_H - 24) / 2
+rect(d, 0, BODY_Y - CMD_H, W, CMD_H, fill=C.toolbarBg)
+line(d, 0, BODY_Y - 0.5, W, BODY_Y - 0.5, C.hairline, 1)
+cy = BODY_Y - CMD_H + (CMD_H - 24) / 2
 
-rect(d, 14, TITLE_H + 6, 28, 28, fill=C.inputBg, outline=C.border, radius=2)
-thumb = Image.new("RGBA", (28 * S, 28 * S), (0, 0, 0, 0))
-paint_stroke(thumb, [(13, 20), (21, 13), (25, 8)], 5.0, 1.6, seed=11, fibre=160, opacity=230)
-img.paste(thumb.convert("RGB"), (14 * S, (TITLE_H + 6) * S), thumb)
+rect(d, 14, cy, 24, 24, fill=C.inputBg, outline=C.border, radius=2)
+thumb = Image.new("RGBA", (24 * S, 24 * S), (0, 0, 0, 0))
+paint_stroke(thumb, [(11, 18), (18, 11), (21, 7)], 4.4, 1.4, seed=11, fibre=150,
+             ink=(206, 208, 212), opacity=232)
+img.paste(thumb.convert("RGB"), (int(14 * S), int(cy * S)), thumb)
 
-name_x = 50
-rect(d, name_x, cy, 190, 24, fill=C.inputBg, outline=C.border, radius=2)
-text(d, name_x + 8, cy + 5, "Krita5 prototypes 1", 11, 500, C.text)
-icon(d, "chevron_down", name_x + 190 - 18, cy + 5, 14, C.textSubtle)
+name_x = 44
+rect(d, name_x, cy, 208, 24, fill=C.inputBg, outline=C.border, radius=2)
+text(d, name_x + 8, cy + 5, BRUSH, 11, 500, C.text)
+text(d, name_x + 8 + text_w(BRUSH, 11, 500) + 8, cy + 5, "Sub-Tool", 9, 400, C.textSubtle)
+glyph(d, "chevron-down", name_x + 208 - 17, cy + 5, 14, C.iconSubtle)
 
-eng_x = name_x + 190 + 8
-seg_w = 236
+eng_x = name_x + 208 + 10
+seg_w = 216
 rect(d, eng_x, cy, seg_w, 24, fill=C.paneBgAlt, outline=C.border, radius=2)
 rect(d, eng_x + 1, cy + 1, seg_w / 2 - 1.5, 22, fill=C.toolActive, radius=2)
-icon(d, "warning", eng_x + 10, cy + 6, 12, C.warning)
-text(d, eng_x + 26, cy + 5, "Pixel Engine", 10, 500, C.text)
-text(d, eng_x + seg_w / 2 + 12, cy + 5, "Realistic Engine", 10, 400, C.textSubtle)
-note = "Digital brush · 128 settings"
-text(d, eng_x + seg_w + 10, cy + 5, note, 10, 400, C.textSubtle)
+text(d, eng_x + 16, cy + 5, "Digital", 10, 500, C.text)
+text(d, eng_x + seg_w / 2 + 16, cy + 5, "Realistic", 10, 400, C.textSubtle)
+glyph(d, "warning", eng_x + seg_w / 2 + 16 + text_w("Realistic", 10, 400) + 7, cy + 6, 12, C.warning)
 
-div_x = eng_x + seg_w + 10 + text_w(note, 10) + 16
-line(d, div_x, TITLE_H + 8, div_x, TITLE_H + CMD_H - 8, "#3f3f3f", 1)
-
-btn_y = cy
-x = div_x + 12
+rule_x = eng_x + seg_w + 14
+line(d, rule_x, BODY_Y - CMD_H + 11, rule_x, BODY_Y - 11, C.hairline, 1)
 
 
-def cmd_button(x, icon_name, label):
+def cmd_button(x, glyph_name, label, ghost=True):
     pad = 9
     w = pad + 14 + 6 + text_w(label, 10, 500) + pad
-    rect(d, x, btn_y, w, 24, fill=C.buttonBg, radius=2)
-    icon(d, icon_name, x + pad, btn_y + 5, 14, C.textMuted)
-    text(d, x + pad + 20, btn_y + 6, label, 10, 500, C.textMuted)
+    if not ghost:
+        rect(d, x, cy, w, 24, fill=C.buttonBg, radius=2)
+    glyph(d, glyph_name, x + pad, cy + 5, 14, C.iconNormal)
+    text(d, x + pad + 20, cy + 6, label, 10, 500, C.textMuted)
     return x + w + 6
 
 
-for ic, lbl in (("plus", "New"), ("copy", "Duplicate"), ("import", "Import"), ("export", "Export")):
-    x = cmd_button(x, ic, lbl)
+bx = rule_x + 14
+for gname, lbl in (("new", "New"), ("duplicate", "Duplicate"),
+                   ("folder", "Import"), ("save", "Export")):
+    bx = cmd_button(bx, gname, lbl)
 
-close_w, save_w = 74, 96
+close_w, save_w = 78, 132
 save_x = W - 14 - close_w - 8 - save_w
-line(d, save_x - 14, TITLE_H + 8, save_x - 14, TITLE_H + CMD_H - 8, "#3f3f3f", 1)
-rect(d, save_x, btn_y, save_w, 24, fill=C.accent, radius=2)
-icon(d, "save", save_x + 10, btn_y + 5, 14, C.ink)
-text(d, save_x + 30, btn_y + 6, "Save Brush", 10, 600, C.ink)
-rect(d, W - 14 - close_w, btn_y, close_w, 24, fill=None, outline=C.border, radius=2)
-icon(d, "close", W - 14 - close_w + 9, btn_y + 6, 12, C.textMuted)
-text(d, W - 14 - close_w + 26, btn_y + 6, "Close", 10, 500, C.textMuted)
+line(d, save_x - 16, BODY_Y - CMD_H + 11, save_x - 16, BODY_Y - 11, C.hairline, 1)
+rect(d, save_x, cy, save_w, 24, fill=C.accent, radius=2)
+glyph(d, "save", save_x + 10, cy + 5, 14, C.ink)
+text(d, save_x + 32, cy + 6, "Save to Library", 10, 600, C.ink)
+rect(d, W - 14 - close_w, cy, close_w, 24, fill=None, outline=C.border, radius=2)
+glyph(d, "close", W - 14 - close_w + 9, cy + 6, 12, C.iconNormal)
+text(d, W - 14 - close_w + 27, cy + 6, "Close", 10, 500, C.textMuted)
 
-# --- left panel: brush components -----------------------------------------
-rect(d, LEFT_X, BODY_Y, LEFT_W, BODY_H, fill=C.paneBg)
-rect(d, LEFT_X, BODY_Y, LEFT_W, 30, fill=C.paneHeaderBg)
-tracked(d, 12, BODY_Y + 10, "BRUSH COMPONENTS", 9, 600, C.textSection)
-text(d, LEFT_W - 12, BODY_Y + 10, "12", 10, 500, C.textSubtle, anchor="ra")
-line(d, LEFT_X, BODY_Y + 30, LEFT_X + LEFT_W, BODY_Y + 30, "#3f3f3f", 1)
+# --- left panel: components ------------------------------------------------
+rect(d, 0, BODY_Y, LEFT_W, BODY_H, fill=C.paneBg)
+rect(d, 0, BODY_Y, LEFT_W, 30, fill=C.paneHeaderBg)
+tracked(d, 12, BODY_Y + 10, "COMPONENTS", 9, 600, C.textSection)
+glyph(d, "dots-h", LEFT_W - 30, BODY_Y + 8, 14, C.iconSubtle)
+text(d, LEFT_W - 12, BODY_Y + 10, "8", 10, 500, C.textSubtle, anchor="ra")
+line(d, 0, BODY_Y + 30, LEFT_W, BODY_Y + 30, "#3f3f3f", 1)
 
-chip_y = BODY_Y + 38
-cx0 = 12
-for lbl, active in (("3 TIPS", True), ("2 TEXTURES", False), ("1 IMAGE", False)):
-    wch = text_w(lbl, 9, 600) + 14
-    rect(d, cx0, chip_y, wch, 18, fill=C.toolActive if active else C.paneBgAlt, radius=2)
-    tracked(d, cx0 + 7, chip_y + 5, lbl, 9, 600, C.text if active else C.textSubtle, 0.7)
-    cx0 += wch + 5
-text(d, 12, chip_y + 24, "Composited top-down · drag to reorder", 9, 400, C.textSubtle)
+sy = BODY_Y + 38
+rect(d, 12, sy, LEFT_W - 24, 26, fill=C.inputBg, outline="#555555", radius=2)
+glyph(d, "search", 19, sy + 6, 13, C.iconSubtle)
+text(d, 40, sy + 7, "Search all components", 10, 400, C.textSubtle)
 
-components = [
-    ("Bristle smear 03", "TIP · 1024 × 320 px", "tip", True, 3),
-    ("Fan bristle 01", "TIP · 1024 × 320 px", "tip", False, 5),
-    ("Dry edge streak", "TIP · 512 × 512 px", "tip", False, 9),
-    ("Grain 02", "TEXTURE · 1024 × 1024", "tex", False, 13),
-    ("canvas-weave.png", "IMAGE · 2048 × 2048", "img", False, 17),
-    ("Spike scatter", "TIP · 256 × 256 px", "tip", False, 21),
-    ("Paper fibre scan", "IMAGE · 4096 × 4096", "img", False, 25),
-    ("Grit noise 07", "TEXTURE · 512 × 512", "tex", False, 29),
-    ("Smudge residue", "CUSTOM · shape mask", "cus", False, 33),
-    ("Wet edge profile", "CUSTOM · curve", "cus", False, 37),
+groups = [
+    ("BRUSH TIPS", [
+        ("Bristle Round", "1024 × 480 · mask · 8-bit", "tip", True, 3),
+        ("Dry Fan", "1024 × 480 · mask · 8-bit", "tip", False, 5),
+        ("Chisel Edge", "512 × 512 · mask · 8-bit", "tip", False, 9),
+    ]),
+    ("TEXTURES", [
+        ("Canvas Grain", "1024 × 1024 · grayscale", "tex", False, 13),
+        ("Paper Fibre", "768 × 768 · grayscale", "tex", False, 17),
+    ]),
+    ("IMPORTED IMAGES", [
+        ("bristle-scan.png", "2048 × 2048 · PNG · alpha", "img", False, 21),
+    ]),
+    ("CUSTOM", [
+        ("Wet Edge Profile", "curve · 6 points", "cus", False, 25),
+        ("Scatter Shape", "mask · 256 × 256", "cus", False, 29),
+    ]),
 ]
-row_h = 44
-list_y = chip_y + 42
-for name, sub, kind, selected, seed in components:
-    ry = list_y
-    if selected:
-        rect(d, LEFT_X, ry, LEFT_W, row_h, fill=C.rowSelected)
-        rect(d, LEFT_X, ry, 2, row_h, fill=C.accent)
-    else:
-        line(d, LEFT_X + 12, ry + row_h - 0.5, LEFT_X + LEFT_W - 12, ry + row_h - 0.5, "#404040", 1)
-    tx, ty = 12, ry + 6
-    rect(d, tx, ty, 32, 32, fill=C.inputBg, outline="#555555", radius=2)
-    if kind == "tip":
-        th = Image.new("RGBA", (32 * S, 32 * S), (0, 0, 0, 0))
-        bristle_tip(th, (3, 9, 26, 14), seed=seed, density=0.30, ink=(70, 70, 74), blur=0.2)
-        img.paste(th.convert("RGB"), (tx * S, ty * S), th)
-    elif kind == "cus":
-        th = Image.new("RGBA", (32 * S, 32 * S), (0, 0, 0, 0))
-        paint_stroke(th, [(6, 24), (13, 12), (21, 19), (26, 9)], 3.2, 1.2, seed=seed, fibre=90)
-        img.paste(th.convert("RGB"), (tx * S, ty * S), th)
-    elif kind == "tex":
-        rnd = random.Random(seed)
-        for i in range(9):
-            rect(d, tx + 3, ty + 4 + i * 3, 26, 1, fill="#6e6e6e" if i % 2 else "#8a8a8a")
-        for _ in range(40):
-            rect(d, tx + 3 + rnd.randrange(24), ty + 4 + rnd.randrange(24), 2, 1, fill="#555555")
-    else:
-        rnd = random.Random(seed)
-        for _ in range(70):
-            rect(d, tx + 3 + rnd.random() * 24, ty + 3 + rnd.random() * 24, 2, 2,
-                 fill="#7d7d7d" if rnd.random() > 0.5 else "#9a9a9a")
-    text(d, 52, ry + 8, name, 11, 500, C.text if selected else C.textMuted)
-    text(d, 52, ry + 24, sub, 9, 400, C.textSubtle)
-    tag = {"tip": "TIP", "tex": "TEX", "img": "IMG", "cus": "CST"}[kind]
-    tw_ = text_w(tag, 9, 600) + 10
-    rect(d, LEFT_W - 12 - tw_, ry + 13, tw_, 16, fill="#3f3f3f", radius=2)
-    tracked(d, LEFT_W - 12 - tw_ + 5, ry + 17, tag, 9, 600, C.textMuted, 0.6)
-    list_y += row_h
 
-add_y = BODY_Y + BODY_H - 54
+gy = sy + 36
+row_h = 50
+for title, rows in groups:
+    glyph(d, "chevron-down", 12, gy + 3, 11, C.iconSubtle)
+    tracked(d, 28, gy + 4, title, 9, 600, C.textSection, 0.8)
+    text(d, LEFT_W - 12, gy + 4, str(len(rows)), 9, 500, C.textSubtle, anchor="ra")
+    gy += 22
+    for name, meta, kind, selected, seed in rows:
+        if selected:
+            rect(d, 0, gy, LEFT_W, row_h, fill=C.rowSelected)
+            rect(d, 0, gy, 2, row_h, fill=C.accent)
+        else:
+            line(d, 12, gy + row_h - 0.5, LEFT_W - 12, gy + row_h - 0.5, "#404040", 1)
+        tx, ty = 12, gy + 8
+        rect(d, tx, ty, 34, 34, fill=C.inputBg, outline="#555555", radius=2)
+        if kind == "tip":
+            checker(d, tx + 1, ty + 1, 32, 32, cell=5)
+            th = Image.new("RGBA", (34 * S, 34 * S), (0, 0, 0, 0))
+            bristle_tip(th, (3, 10, 28, 15), seed=seed, density=0.34)
+            img.paste(th.convert("RGB"), (tx * S, ty * S), th)
+        elif kind == "cus":
+            th = Image.new("RGBA", (34 * S, 34 * S), (0, 0, 0, 0))
+            paint_stroke(th, [(7, 26), (14, 13), (22, 20), (28, 10)], 3.4, 1.2,
+                         seed=seed, fibre=90, ink=(96, 96, 100))
+            img.paste(th.convert("RGB"), (tx * S, ty * S), th)
+        elif kind == "tex":
+            rnd = random.Random(seed)
+            for i in range(10):
+                rect(d, tx + 3, ty + 4 + i * 3, 28, 1, fill="#6e6e6e" if i % 2 else "#8a8a8a")
+            for _ in range(46):
+                rect(d, tx + 3 + rnd.randrange(26), ty + 4 + rnd.randrange(27), 2, 1, fill="#555555")
+        else:
+            rnd = random.Random(seed)
+            for _ in range(80):
+                rect(d, tx + 3 + rnd.random() * 27, ty + 3 + rnd.random() * 27, 2, 2,
+                     fill="#7d7d7d" if rnd.random() > 0.5 else "#9a9a9a")
+        text(d, 54, gy + 9, name, 11, 500, C.text if selected else C.textMuted)
+        text(d, 54, gy + 26, meta, 9, 400, C.textSubtle)
+        if selected:
+            tracked(d, LEFT_W - 12, gy + 18, "IN USE", 9, 600, C.text, 0.6, anchor="r")
+        gy += row_h
+    gy += 6
+
+add_y = BODY_Y + BODY_H - 58
 rect(d, 12, add_y, LEFT_W - 24, 26, fill=None, outline="#5f5f5f", radius=2)
 aw = text_w("Add component", 10, 500)
-icon(d, "plus", 12 + (LEFT_W - 24) / 2 - aw / 2 - 18, add_y + 7, 12, C.textMuted)
+glyph(d, "plus", 12 + (LEFT_W - 24) / 2 - aw / 2 - 17, add_y + 7, 12, C.iconNormal)
 text(d, 12 + (LEFT_W - 24) / 2 - aw / 2, add_y + 7, "Add component", 10, 500, C.textMuted)
 text(d, 12, add_y + 32, "or drop an image / PSD layer here", 9, 400, C.textSubtle)
 
-# --- centre: brush tip workspace ------------------------------------------
+# --- centre: tip and texture editor ---------------------------------------
 rect(d, CENTER_X, BODY_Y, CENTER_W, BODY_H, fill=C.canvasBg)
 
+# rail with the authored tool icons
 rect(d, CENTER_X, BODY_Y, RAIL_W, BODY_H, fill=C.toolRailBg)
 line(d, CENTER_X + RAIL_W - 0.5, BODY_Y, CENTER_X + RAIL_W - 0.5, BODY_Y + BODY_H, "#3a3a3a", 1)
-rail_tools = ["brush", "eraser", "smudge", "shape", "select", "lasso", "move", "fill", "dropper", "zoom"]
-for i, nm in enumerate(rail_tools):
-    by = BODY_Y + 6 + i * 34
-    if i == 0:
-        rect(d, CENTER_X + 1, by, RAIL_W - 2, 34, fill=C.toolActive, radius=2)
-        rect(d, CENTER_X + 1, by + 4, 2, 26, fill=C.accent)
-    icon(d, nm, CENTER_X + (RAIL_W - 18) / 2, by + 8, 18, C.text if i == 0 else C.textMuted)
+rail = ["brush", "pencil", "eraser", "smudge", None, "line", "rectangle", "circle",
+        "lasso", "wand", "selection", "transform", "move", None, "eyedropper", "zoom", "hand"]
+ry = BODY_Y + 8
+active_tool = "brush"
+for name in rail:
+    if name is None:
+        line(d, CENTER_X + 9, ry + 5, CENTER_X + RAIL_W - 9, ry + 5, "#3f3f3f", 1)
+        ry += 12
+        continue
+    if name == active_tool:
+        rect(d, CENTER_X + 1, ry, RAIL_W - 2, 34, fill=C.toolActive, radius=2)
+        rect(d, CENTER_X + 1, ry + 5, 2, 24, fill=C.accent)
+    tool_icon(img, name, CENTER_X + (RAIL_W - 18) / 2, ry + 8,
+              18, C.iconNormal if name != active_tool else C.text)
+    ry += 34
 
+# tab strip
 tab_y = BODY_Y
 rect(d, CENTER_X + RAIL_W, tab_y, CENTER_W - RAIL_W, 32, fill=C.paneHeaderBg)
-line(d, CENTER_X + RAIL_W, tab_y + 31.5, RIGHT_X, tab_y + 31.5, "#3f3f3f", 1)
-tabs = [("Tip · Bristle smear 03", True), ("Texture · Grain 02", False), ("Spike scatter", False)]
+line(d, CENTER_X + RAIL_W, tab_y + 31.5, RIGHT_X, tab_y + 31.5, C.hairline, 1)
+tabs = [("Tip · Bristle Round", True), ("Tip · Dry Fan", False), ("Texture · Canvas Grain", False)]
 tx_ = CENTER_X + RAIL_W + 1
 for lbl, active in tabs:
-    tw_ = text_w(lbl, 10, 500) + 36
+    tw_ = text_w(lbl, 10, 500) + 38
     if active:
         rect(d, tx_, tab_y + 1, tw_, 31, fill=C.canvasBg)
         rect(d, tx_, tab_y + 1, tw_, 2, fill=C.accent)
     text(d, tx_ + 12, tab_y + 10, lbl, 10, 500, C.text if active else C.textSubtle)
-    icon(d, "close", tx_ + tw_ - 19, tab_y + 11, 10, C.textSubtle)
+    glyph(d, "close", tx_ + tw_ - 19, tab_y + 11, 10, C.iconSubtle)
     tx_ += tw_ + 1
 rect(d, tx_ + 2, tab_y + 6, 24, 20, fill=None, outline="#4a4a4a", radius=2)
-icon(d, "plus", tx_ + 8, tab_y + 10, 12, C.textSubtle)
+glyph(d, "plus", tx_ + 8, tab_y + 10, 12, C.iconNormal)
 
-cv_y = tab_y + 32
-cv_h = BODY_H - 32 - 18
-rect(d, CENTER_X + RAIL_W, cv_y, CENTER_W - RAIL_W, cv_h, fill=C.canvasBg)
+# tool options strip, the way the main window keeps tool settings in reach
+op_y = tab_y + 32
+rect(d, CENTER_X + RAIL_W, op_y, CENTER_W - RAIL_W, 34, fill=C.paneBgAlt)
+line(d, CENTER_X + RAIL_W, op_y + 33.5, RIGHT_X, op_y + 33.5, "#3f3f3f", 1)
+ox = CENTER_X + RAIL_W + 12
+text(d, ox, op_y + 11, "Brush", 10, 500, C.text)
+ox += text_w("Brush", 10, 500) + 12
+line(d, ox, op_y + 9, ox, op_y + 25, C.hairline, 1)
+ox += 12
+for label, value in (("Size", "60 px"), ("Opacity", "100 %"), ("Flow", "82 %")):
+    text(d, ox, op_y + 11, label, 9, 400, C.textSubtle)
+    vx = ox + text_w(label, 9, 400) + 6
+    vw = text_w(value, 10, 500) + 30
+    rect(d, vx, op_y + 6, vw, 22, fill=C.inputBg, outline="#555555", radius=2)
+    text(d, vx + 7, op_y + 11, value, 10, 500, C.text)
+    glyph(d, "chevron-down", vx + vw - 15, op_y + 11, 10, C.iconSubtle)
+    ox = vx + vw + 14
+line(d, ox, op_y + 9, ox, op_y + 25, C.hairline, 1)
+ox += 12
+for label, on in (("Symmetry", True), ("Grid", False)):
+    rect(d, ox, op_y + 7, 13, 13, fill=None, outline="#6a6a6a", radius=2)
+    if on:
+        glyph(d, "check", ox + 1, op_y + 8, 11, C.accent)
+    text(d, ox + 19, op_y + 11, label, 10, 400, C.textMuted)
+    ox += 19 + text_w(label, 10, 400) + 18
+text(d, RIGHT_X - 14, op_y + 11, "Mask · grayscale", 9, 400, C.textSubtle, anchor="ra")
+glyph(d, "chevron-down", RIGHT_X - 12, op_y + 12, 10, C.iconSubtle)
 
-DOC_PX_W, DOC_PX_H = 1024, 320
-scale = 0.88
-doc_w, doc_h = DOC_PX_W * scale, DOC_PX_H * scale
-doc_x = CENTER_X + RAIL_W + (CENTER_W - RAIL_W - doc_w) / 2
-doc_y = cv_y + (cv_h - doc_h) / 2 - 2
-rect(d, doc_x - 3, doc_y - 3, doc_w + 6, doc_h + 6, fill="#3e3e3e")
-checker(d, doc_x, doc_y, doc_w, doc_h, cell=8)
-layer = Image.new("RGBA", (int(doc_w * S), int(doc_h * S)), (0, 0, 0, 0))
-bristle_tip(layer, (18, doc_h * 0.14, doc_w - 36, doc_h * 0.36), seed=7, density=1.4)
-for i, yy in enumerate((0.62, 0.72, 0.82, 0.91)):
-    paint_stroke(layer, [(doc_w * 0.10, doc_h * yy), (doc_w * 0.30, doc_h * (yy - 0.035)),
-                         (doc_w * 0.56, doc_h * (yy - 0.005)), (doc_w * 0.88, doc_h * (yy - 0.05))],
-                 10 - i * 2, 2, ink=(24, 26, 32), seed=300 + i, fibre=760, dry=0.5, opacity=230)
+# canvas
+cv_y = op_y + 34
+cv_h = BODY_H - 32 - 34 - 16
+cv_x = CENTER_X + RAIL_W
+cv_w = CENTER_W - RAIL_W
+rect(d, cv_x, cv_y, cv_w, cv_h, fill=C.canvasBg)
+
+DOC_W, DOC_H = 1024, 480
+doc_x = cv_x + (cv_w - DOC_W) / 2
+doc_y = cv_y + (cv_h - DOC_H) / 2
+rect(d, doc_x - 3, doc_y - 3, DOC_W + 6, DOC_H + 6, fill="#3e3e3e")
+checker(d, doc_x, doc_y, DOC_W, DOC_H, cell=8)
+layer = Image.new("RGBA", (int(DOC_W * S), int(DOC_H * S)), (0, 0, 0, 0))
+bristle_tip(layer, (18, DOC_H * 0.14, DOC_W - 36, DOC_H * 0.34), seed=7, density=1.4)
+for i, yy in enumerate((0.60, 0.69, 0.78, 0.87)):
+    paint_stroke(layer, [(DOC_W * 0.09, DOC_H * yy), (DOC_W * 0.28, DOC_H * (yy - 0.03)),
+                         (DOC_W * 0.54, DOC_H * (yy - 0.005)), (DOC_W * 0.90, DOC_H * (yy - 0.045))],
+                 11 - i * 2, 2, ink=(22, 24, 30), seed=300 + i, fibre=820, dry=0.5, opacity=232)
 img.paste(layer.convert("RGB"), (int(doc_x * S), int(doc_y * S)), layer)
-rect(d, doc_x, doc_y, doc_w, doc_h, outline=C.canvasEdge, width=1)
+rect(d, doc_x, doc_y, DOC_W, DOC_H, outline=C.canvasEdge, width=1)
 
-# selection marquee, marching-ants style
-m_x0, m_x1 = doc_x + 8, doc_x + doc_w - 8
-m_y0, m_y1 = doc_y + doc_h * 0.11, doc_y + doc_h * 0.96
+m_x0, m_x1 = doc_x + 8, doc_x + DOC_W - 8
+m_y0, m_y1 = doc_y + DOC_H * 0.10, doc_y + DOC_H * 0.96
 
 
 def ants(x0, y0, x1, y1):
     step = 9
     for xx in range(int(x0), int(x1), step):
-        x_end = min(xx + step * 0.55, x1)
-        line(d, xx, y0, x_end, y0, "#ffffff", 1)
-        line(d, xx, y1, x_end, y1, "#ffffff", 1)
+        xe = min(xx + step * 0.55, x1)
+        line(d, xx, y0, xe, y0, "#ffffff", 1)
+        line(d, xx, y1, xe, y1, "#ffffff", 1)
     for yy in range(int(y0), int(y1), step):
-        y_end = min(yy + step * 0.55, y1)
-        line(d, x0, yy, x0, y_end, "#ffffff", 1)
-        line(d, x1, yy, x1, y_end, "#ffffff", 1)
+        ye = min(yy + step * 0.55, y1)
+        line(d, x0, yy, x0, ye, "#ffffff", 1)
+        line(d, x1, yy, x1, ye, "#ffffff", 1)
 
 
 ants(m_x0, m_y0, m_x1, m_y1)
@@ -622,29 +690,29 @@ for hx, hy in ((m_x0, m_y0), (m_x1, m_y0), (m_x0, m_y1), (m_x1, m_y1),
                ((m_x0 + m_x1) / 2, m_y0), ((m_x0 + m_x1) / 2, m_y1)):
     rect(d, hx - 3, hy - 3, 6, 6, fill="#ffffff", outline=C.canvasEdge)
 
-info = "Mask · 8-bit · 1024 × 320 px · edited 2 min ago"
+info = "Tip · Bristle Round · 1024 × 480 · mask 8-bit"
 iw = text_w(info, 9, 500) + 18
 rect(d, doc_x, doc_y - 26, iw, 20, fill="#333333", radius=2)
 text(d, doc_x + 9, doc_y - 21, info, 9, 500, C.textMuted)
 
-zp_w = 128
+zp_w = 132
 zp_x = RIGHT_X - 14 - zp_w
 zp_y = cv_y + cv_h - 30
 rect(d, zp_x, zp_y, zp_w, 22, fill="#333333", outline="#4a4a4a", radius=2)
-text(d, zp_x + 10, zp_y + 5, "−", 12, 500, C.textMuted)
-text(d, zp_x + 28, zp_y + 6, "200%", 10, 500, C.text)
-text(d, zp_x + 62, zp_y + 5, "+", 12, 500, C.textMuted)
+glyph(d, "minus", zp_x + 7, zp_y + 6, 11, C.iconNormal)
+text(d, zp_x + 26, zp_y + 6, "100%", 10, 500, C.text)
+glyph(d, "plus", zp_x + 60, zp_y + 6, 11, C.iconNormal)
 line(d, zp_x + 80, zp_y + 5, zp_x + 80, zp_y + 17, "#4a4a4a", 1)
 text(d, zp_x + 90, zp_y + 6, "Fit", 10, 500, C.textMuted)
 
 # ruler in document pixels
 ruler_y = cv_y + cv_h
-rect(d, CENTER_X + RAIL_W, ruler_y, CENTER_W - RAIL_W, 18, fill=C.paneBgAlt)
-for v in range(0, DOC_PX_W + 1, 32):
-    xx = doc_x + v / DOC_PX_W * doc_w
+rect(d, cv_x, ruler_y, cv_w, 16, fill=C.paneBgAlt)
+for v in range(0, DOC_W + 1, 32):
+    xx = doc_x + v
     major = v % 128 == 0
-    hgt = 8 if major else 4
-    line(d, xx, ruler_y + 18 - hgt, xx, ruler_y + 18, "#6a6a6a", 1)
+    hgt = 7 if major else 3
+    line(d, xx, ruler_y + 16 - hgt, xx, ruler_y + 16, "#6a6a6a", 1)
     if major:
         text(d, xx + 3, ruler_y + 1, str(v), 8, 400, C.textSubtle)
 
@@ -652,21 +720,21 @@ for v in range(0, DOC_PX_W + 1, 32):
 rect(d, RIGHT_X, BODY_Y, RIGHT_W, BODY_H, fill=C.paneBg)
 rect(d, RIGHT_X, BODY_Y, RIGHT_W, 30, fill=C.paneHeaderBg)
 tracked(d, RIGHT_X + 12, BODY_Y + 10, "BRUSH SETTINGS", 9, 600, C.textSection)
-icon(d, "search", RIGHT_X + RIGHT_W - 52, BODY_Y + 8, 14, C.textSubtle)
-icon(d, "dots", RIGHT_X + RIGHT_W - 30, BODY_Y + 6, 16, C.textSubtle)
+glyph(d, "search", RIGHT_X + RIGHT_W - 52, BODY_Y + 8, 14, C.iconSubtle)
+glyph(d, "dots-h", RIGHT_X + RIGHT_W - 30, BODY_Y + 8, 14, C.iconSubtle)
 line(d, RIGHT_X, BODY_Y + 30, RIGHT_X + RIGHT_W, BODY_Y + 30, "#3f3f3f", 1)
 
-PAD = 12
+PAD = 14
 RX = RIGHT_X + PAD
 RW = RIGHT_W - PAD * 2
-FIELD_W = 64
-row_y = BODY_Y + 38
+FIELD_W = 66
+row_y = BODY_Y + 36
 
 
-def value_field(y, value, w=FIELD_W, x=None):
-    x = RX + RW - w if x is None else x
-    rect(d, x, y - 4, w, 19, fill=C.inputBg, outline="#555555", radius=2)
-    text(d, x + 6, y, value, 10, 500, C.text)
+def value_field(y, value, w=FIELD_W):
+    x = RX + RW - w
+    rect(d, x, y - 4, w, 20, fill=C.inputBg, outline="#555555", radius=2)
+    text(d, x + 7, y, value, 10, 500, C.text)
 
 
 def slider_row(y, label, value, frac):
@@ -678,68 +746,72 @@ def slider_row(y, label, value, frac):
     kx = RX + RW * frac
     d.ellipse([(kx - 4) * S, (ty - 2.5) * S, (kx + 4) * S, (ty + 5.5) * S],
               fill="#ededed", outline="#2c2c2c")
-    return y + 30
+    return y + 29
 
 
-def section_expanded(y, title, reset=False):
-    icon(d, "chevron_down", RX - 1, y + 3, 12, C.textSubtle)
+def section_open(y, title, reset=False):
+    glyph(d, "chevron-down", RX - 2, y + 2, 12, C.iconSubtle)
     text(d, RX + 16, y + 1, title, 11, 500, C.text)
     if reset:
         text(d, RX + RW, y + 2, "Reset", 9, 500, C.textSubtle, anchor="ra")
     return y + 22
 
 
-def section_collapsed(y, title, summary):
-    icon(d, "chevron", RX - 1, y + 3, 12, C.textSubtle)
+def section_closed(y, title, summary):
+    glyph(d, "chevron-right", RX - 2, y + 2, 12, C.iconSubtle)
     text(d, RX + 16, y + 1, title, 11, 400, C.textMuted)
     text(d, RX + RW, y + 2, summary, 9, 400, C.textSubtle, anchor="ra")
-    y += 23
+    y += 21
     line(d, RX, y - 0.5, RX + RW, y - 0.5, "#424242", 1)
     return y + 4
 
 
-# Brush Tip (expanded)
-row_y = section_expanded(row_y, "Brush Tip", reset=True)
+# Brush Tip (open)
+row_y = section_open(row_y, "Brush Tip", reset=True)
 text(d, RX, row_y, "Component", 10, 400, C.textMuted)
-comp_w = RW - 54
-rect(d, RX, row_y + 14, comp_w, 22, fill=C.inputBg, outline="#555555", radius=2)
-text(d, RX + 7, row_y + 19, "Bristle smear 03", 10, 500, C.text)
-icon(d, "chevron_down", RX + comp_w - 18, row_y + 19, 12, C.textSubtle)
-rect(d, RX + comp_w + 10, row_y + 9, 40, 40, fill=C.inputBg, outline="#555555", radius=2)
-t2 = Image.new("RGBA", (40 * S, 40 * S), (0, 0, 0, 0))
-paint_stroke(t2, [(7, 29), (16, 18), (24, 22), (33, 11)], 7.5, 2.5, seed=7, fibre=260)
-img.paste(t2.convert("RGB"), (int((RX + comp_w + 10) * S), int((row_y + 9) * S)), t2)
-row_y += 54
+comp_w = RW - 52
+rect(d, RX, row_y + 15, comp_w, 22, fill=C.inputBg, outline="#555555", radius=2)
+text(d, RX + 8, row_y + 20, "Bristle Round", 10, 500, C.text)
+glyph(d, "chevron-down", RX + comp_w - 17, row_y + 20, 11, C.iconSubtle)
+checker(d, RX + comp_w + 11, row_y + 11, 38, 30, cell=5)
+rect(d, RX + comp_w + 10, row_y + 10, 40, 32, outline="#555555", radius=2)
+t2 = Image.new("RGBA", (40 * S, 32 * S), (0, 0, 0, 0))
+bristle_tip(t2, (4, 11, 32, 11), seed=7, density=0.45)
+img.paste(t2.convert("RGB"), (int((RX + comp_w + 10) * S), int((row_y + 10) * S)), t2)
+row_y += 48
 row_y = slider_row(row_y, "Hardness", "62 %", 0.62)
-row_y = slider_row(row_y, "Tip density", "88 %", 0.88)
-fy = row_y + 1
+row_y = slider_row(row_y, "Density", "88 %", 0.88)
+fy = row_y + 3
 for i, lbl in enumerate(("Flip X", "Flip Y")):
-    bx = RX + i * 76
-    rect(d, bx, fy, 12, 12, fill=None, outline="#6a6a6a", radius=2)
+    bx2 = RX + i * 80
+    rect(d, bx2, fy, 13, 13, fill=None, outline="#6a6a6a", radius=2)
     if i == 0:
-        line(d, bx + 3, fy + 8.5, bx + 9, fy + 3.5, C.accent, 1.5)
-        line(d, bx + 6.5, fy + 3.5, bx + 9, fy + 3.5, C.accent, 1.5)
-    text(d, bx + 18, fy - 1, lbl, 10, 400, C.textMuted)
-row_y += 22
+        glyph(d, "check", bx2 + 1, fy + 1, 11, C.accent)
+    text(d, bx2 + 20, fy - 1, lbl, 10, 400, C.textMuted)
+row_y = fy + 26
 line(d, RX, row_y, RX + RW, row_y, "#424242", 1)
-row_y += 7
+row_y += 8
 
-# Size (expanded)
-row_y = section_expanded(row_y, "Size")
+# Size (open) — a real mapping curve, not a wall of sliders
+row_y = section_open(row_y, "Size")
 row_y = slider_row(row_y, "Size", "60 px", 0.42)
-text(d, RX, row_y, "Pressure mapped to size", 10, 400, C.textMuted)
-text(d, RX + RW, row_y, "linear", 9, 400, C.textSubtle, anchor="ra")
-py = row_y + 14
-rect(d, RX, py, RW, 30, fill=C.inputBg, radius=2)
-pts = [(RX + 6, py + 24), (RX + RW * 0.32, py + 19), (RX + RW * 0.62, py + 10), (RX + RW - 6, py + 5)]
+row_y = slider_row(row_y, "Minimum", "8 px", 0.12)
+text(d, RX, row_y + 2, "Pressure to size", 10, 400, C.textMuted)
+text(d, RX + RW, row_y + 2, "smooth", 9, 400, C.textSubtle, anchor="ra")
+py = row_y + 18
+rect(d, RX, py, RW, 40, fill=C.inputBg, radius=2)
+for gi in range(1, 3):
+    line(d, RX + RW * gi / 3, py + 4, RX + RW * gi / 3, py + 40, "#3a3a3a", 1)
+pts = [(RX + 8, py + 36), (RX + RW * 0.28, py + 30), (RX + RW * 0.55, py + 18),
+       (RX + RW * 0.78, py + 11), (RX + RW - 8, py + 8)]
 for i in range(len(pts) - 1):
     line(d, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], C.accent, 1.3)
 for px_, py_ in pts:
     d.ellipse([(px_ - 2.5) * S, (py_ - 2.5) * S, (px_ + 2.5) * S, (py_ + 2.5) * S],
               fill="#ededed", outline="#2c2c2c")
-row_y = py + 36
+row_y = py + 46
 line(d, RX, row_y, RX + RW, row_y, "#424242", 1)
-row_y += 6
+row_y += 8
 
 for title, summary in (
     ("Opacity", "100 % · flow 82 %"),
@@ -747,87 +819,108 @@ for title, summary in (
     ("Stabilization", "balanced · 12"),
     ("Rotation", "follow direction"),
     ("Scatter", "18 % · 2 per dab"),
-    ("Texture", "Grain 02 · overlay 74 %"),
-    ("Color", "digital · pigment mixing"),
+    ("Texture", "Canvas Grain · 74 %"),
+    ("Color", "pigment mixing · load 62 %"),
     ("Blending", "multiply · 1.00"),
     ("Dynamics", "pressure, tilt, speed"),
     ("Rendering", "tip anti-alias · 4×"),
 ):
-    row_y = section_collapsed(row_y, title, summary)
+    row_y = section_closed(row_y, title, summary)
 
-# Advanced holds the optional node workspace rather than putting it on screen
-icon(d, "chevron", RX - 1, row_y + 3, 12, C.textSubtle)
+# Advanced: the optional node workspace lives here, not on the main screen
+glyph(d, "chevron-right", RX - 2, row_y + 2, 12, C.iconSubtle)
 text(d, RX + 16, row_y + 1, "Advanced", 11, 400, C.textMuted)
 text(d, RX + RW, row_y + 2, "0 overrides", 9, 400, C.textSubtle, anchor="ra")
-row_y += 22
+row_y += 24
 rect(d, RX, row_y, RW, 26, fill=C.paneBgAlt, outline="#5f5f5f", radius=2)
-icon(d, "nodes", RX + 9, row_y + 6, 14, C.textMuted)
-text(d, RX + 31, row_y + 7, "Open node graph editor…", 10, 500, C.textMuted)
+glyph(d, "nodes", RX + 9, row_y + 6, 13, C.iconNormal)
+text(d, RX + 30, row_y + 7, "Open node graph editor…", 10, 500, C.textMuted)
 text(d, RX + RW - 9, row_y + 7, "Alt N", 9, 400, C.textSubtle, anchor="ra")
-text(d, RX, row_y + 33, "Node editing is optional - the settings above cover", 9, 400, C.textSubtle)
-text(d, RX, row_y + 45, "every brush; the graph is for layered behaviour.", 9, 400, C.textSubtle)
+print("right panel used", round(row_y + 26 - BODY_Y, 1), "of", BODY_H - 30)
 
-foot_y = BODY_Y + BODY_H - 34
-line(d, RX - PAD, foot_y - 1, RIGHT_X + RIGHT_W, foot_y - 1, "#3f3f3f", 1)
+foot_y = BODY_Y + BODY_H - 32
+line(d, RIGHT_X, foot_y - 1, RIGHT_X + RIGHT_W, foot_y - 1, "#3f3f3f", 1)
 text(d, RX, foot_y + 9, "12 of 128 settings changed", 9, 400, C.textSubtle)
 text(d, RX + RW, foot_y + 9, "Reset all", 9, 500, C.textMuted, anchor="ra")
-print("right panel used", round(row_y + 26 - BODY_Y, 1), "of", BODY_H - 30)
 
 # --- bottom: live preview -------------------------------------------------
 rect(d, 0, PREV_Y, W, PREVIEW_H, fill=C.paneBgAlt)
-line(d, 0, PREV_Y + 0.5, W, PREV_Y + 0.5, "#4a4a4a", 1)
+line(d, 0, PREV_Y + 0.5, W, PREV_Y + 0.5, C.hairline, 1)
 rect(d, 0, PREV_Y, W, 30, fill=C.paneHeaderBg)
 tracked(d, 12, PREV_Y + 10, "LIVE PREVIEW", 9, 600, C.textSection)
-text(d, 12 + 110, PREV_Y + 10, "Pixel engine · actual brush · 8.4 ms", 9, 400, C.textSubtle)
+text(d, 12 + 108, PREV_Y + 10, "Rendered by the brush engine as you paint · not a saved preview",
+     9, 400, C.textSubtle)
 
-pm_w, pm_seg = 186, 62
-pm_x = W - 12 - pm_w - 108
+pm_w, pm_seg = 196, 2
+pm_x = W - 14 - pm_w - 104
 rect(d, pm_x, PREV_Y + 5, pm_w, 20, fill=C.paneBgAlt, outline=C.border, radius=2)
-for i, lbl in enumerate(("Stroke", "Stamps", "Grid")):
+for i, lbl in enumerate(("Stroke", "Stamps")):
+    seg = pm_w / 2
     if i == 0:
-        rect(d, pm_x + 1, PREV_Y + 6, pm_seg - 1, 18, fill=C.toolActive, radius=2)
-    text(d, pm_x + i * pm_seg + pm_seg / 2, PREV_Y + 10, lbl, 9, 500,
+        rect(d, pm_x + 1, PREV_Y + 6, seg - 1, 18, fill=C.toolActive, radius=2)
+    text(d, pm_x + i * seg + seg / 2, PREV_Y + 10, lbl, 9, 500,
          C.text if i == 0 else C.textSubtle, anchor="ma")
-rect(d, pm_x + pm_w + 8, PREV_Y + 5, 98, 20, fill=None, outline="#5f5f5f", radius=2)
+rect(d, pm_x + pm_w + 8, PREV_Y + 5, 96, 20, fill=None, outline="#5f5f5f", radius=2)
 text(d, pm_x + pm_w + 18, PREV_Y + 10, "Compare A/B", 9, 500, C.textMuted)
 
-paper_x, paper_y = 12, PREV_Y + 38
-paper_w, paper_h = 940, PREVIEW_H - 48
+paper_x, paper_y = 14, PREV_Y + 38
+paper_w, paper_h = RIGHT_X - 28, PREVIEW_H - 48
 rect(d, paper_x, paper_y, paper_w, paper_h, fill=C.previewPaper, radius=2)
-lay = Image.new("RGBA", (paper_w * S, paper_h * S), (0, 0, 0, 0))
-paint_stroke(lay, [(26, 46), (150, 26), (330, 20), (520, 34), (690, 18), (860, 16)],
-             27, 7, ink=(28, 32, 40), seed=41, fibre=1700, opacity=250)
-paint_stroke(lay, [(28, 68), (190, 78), (370, 90), (580, 80), (840, 62)],
-             13, 16, ink=(62, 46, 34), seed=42, fibre=1000, dry=0.4, opacity=220)
-paint_stroke(lay, [(54, 98), (230, 92), (420, 104), (620, 96), (860, 90)],
-             19, 3, ink=(28, 32, 40), seed=43, fibre=1200, dry=0.15, opacity=240)
-img.paste(lay.convert("RGB"), (paper_x * S, paper_y * S), lay)
-text(d, paper_x + 12, paper_y + 7, "800 px · pressure 20 to 100 % · three directions",
+text(d, paper_x + 14, paper_y + 9, "Stroke sheet · 100 % zoom · pressure 20 to 100 %",
      9, 400, "#5a626b")
 
-sx2 = paper_x + paper_w + 14
-sw2 = W - 12 - sx2
-rect(d, sx2, paper_y, sw2, paper_h, fill=C.inputBg, radius=2)
-tracked(d, sx2 + 12, paper_y + 9, "STAMPS · SPACING 1.2 %", 9, 600, C.textSection, 0.7)
-lay2 = Image.new("RGBA", (sw2 * S, paper_h * S), (0, 0, 0, 0))
-for i, (r, press) in enumerate(((8, 0.45), (10, 0.6), (12, 0.75), (13, 0.88), (13, 1.0), (13, 1.0))):
-    stamp(lay2, 28 + i * 44, 68, r, seed=60 + i, ink=(232, 236, 242), press=press)
-img.paste(lay2.convert("RGB"), (int(sx2 * S), int(paper_y * S)), lay2)
-text(d, sx2 + 12, paper_y + 96, "Pressure steps 20 · 40 · 60 · 80 · 90 · 100 %", 9, 400, C.textSubtle)
-line(d, sx2 + 12, paper_y + 112, sx2 + sw2 - 12, paper_y + 112, "#3f3f3f", 1)
-text(d, sx2 + 12, paper_y + 119, "Realistic engine · water load 62 % · bleed 0.35", 9, 400, C.textSubtle)
-text(d, sx2 + 12, paper_y + 133, "Grain 02 locked to canvas · 1:1 texel", 9, 400, C.textSubtle)
+lab_x = paper_x + 16
+s_x0 = paper_x + 96
+s_x1 = paper_x + paper_w - 24
+lay = Image.new("RGBA", (paper_w * S, paper_h * S), (0, 0, 0, 0))
+X0 = s_x0 - paper_x
+X1 = s_x1 - paper_x
+rows = [
+    # label, y, start/end width, ink, dry, fibre, seed, path
+    ("60 px", 46, 30, 9, (26, 30, 38), 0.0, 1700, 40,
+     [(X0, 56), (X0 + 230, 26), (X0 + 520, 50), (X0 + 800, 18), (X1, 34)]),
+    ("60 px dry", 112, 17, 18, (62, 46, 34), 0.55, 1200, 41,
+     [(X0, 118), (X0 + 300, 92), (X0 + 620, 128), (X0 + 900, 100), (X1, 114)]),
+    ("18 px", 168, 11, 4, (26, 30, 38), 0.2, 1100, 42,
+     [(X0, 172), (X0 + 120, 156), (X0 + 240, 172), (X0 + 370, 154), (X0 + 500, 172),
+      (X0 + 640, 156), (X0 + 780, 172), (X0 + 930, 154), (X1, 166)]),
+]
+for label, yy, w0, w1, ink, dry, fib, seed, path in rows:
+    text(d, lab_x, paper_y + yy - 6, label, 8, 500, "#5a626b")
+    paint_stroke(lay, path, w0, w1, ink=ink, seed=seed, fibre=fib, dry=dry, opacity=244)
+img.paste(lay.convert("RGB"), (paper_x * S, paper_y * S), lay)
+
+rx2 = RIGHT_X
+rw2 = RIGHT_W - 14
+rect(d, rx2, paper_y, rw2, paper_h, fill=C.inputBg, radius=2)
+tracked(d, rx2 + 10, paper_y + 9, "STAMPS · SPACING 1.2 %", 9, 600, C.textSection, 0.6)
+lay2 = Image.new("RGBA", (rw2 * S, paper_h * S), (0, 0, 0, 0))
+for i, (r, press) in enumerate(((6, 0.45), (8, 0.6), (9, 0.75), (10, 0.88), (10, 1.0), (10, 1.0))):
+    stamp(lay2, 24 + i * 40, 52, r, seed=60 + i, ink=(232, 236, 242), press=press)
+    text(d, rx2 + 24 + i * 40 - 4, paper_y + 68, ["20", "40", "60", "80", "90", "100"][i],
+         8, 400, C.textSubtle)
+img.paste(lay2.convert("RGB"), (rx2 * S, paper_y * S), lay2)
+line(d, rx2 + 10, paper_y + 92, rx2 + rw2 - 10, paper_y + 92, "#3f3f3f", 1)
+tracked(d, rx2 + 10, paper_y + 100, "SIZES", 9, 600, C.textSection, 0.6)
+lay3 = Image.new("RGBA", (rw2 * S, paper_h * S), (0, 0, 0, 0))
+for i, wd in enumerate((4, 7, 11, 16)):
+    yy = 132 + i * 15
+    paint_stroke(lay3, [(18, yy), (110, yy - 2), (238, yy)], wd, wd * 0.92,
+                 seed=80 + i, fibre=180, ink=(226, 230, 236), opacity=240)
+    text(d, rx2 + 250, paper_y + yy - 5, str(wd * 4), 8, 400, C.textSubtle)
+img.paste(lay3.convert("RGB"), (rx2 * S, paper_y * S), lay3)
+text(d, rx2 + 10, paper_y + paper_h - 18, "Digital engine · 4× tip anti-alias", 9, 400, C.textSubtle)
 
 # --- status bar -----------------------------------------------------------
 rect(d, 0, H - STATUS_H, W, STATUS_H, fill=C.statusbarBg)
-line(d, 0, H - STATUS_H + 0.5, W, H - STATUS_H + 0.5, "#3a3a3a", 1)
-text(d, 12, H - STATUS_H + 7, "12 components  ·  3 tips  ·  2 textures  ·  1 imported image",
-     10, 400, C.textSubtle)
-text(d, W / 2, H - STATUS_H + 7, "Engine: Pixel  ·  60 px  ·  Flow 82 %  ·  Spacing 1.2 %",
-     10, 400, C.textSubtle, anchor="ma")
-d.ellipse([(W - 158) * S, (H - STATUS_H + 9) * S, (W - 151) * S, (H - STATUS_H + 16) * S],
+line(d, 0, H - STATUS_H + 0.5, W, H - STATUS_H + 0.5, C.hairline, 1)
+text(d, 12, H - STATUS_H + 7, "Sub-Tool · Brush / Digital / " + BRUSH, 10, 400, C.textSubtle)
+text(d, W / 2, H - STATUS_H + 7,
+     "8 components  ·  3 tips  ·  2 textures  ·  1 image  ·  2 custom", 10, 400,
+     C.textSubtle, anchor="ma")
+d.ellipse([(W - 148) * S, (H - STATUS_H + 9) * S, (W - 141) * S, (H - STATUS_H + 16) * S],
           fill=C.success)
-text(d, W - 12, H - STATUS_H + 7, "saved · 8.4 ms preview", 10, 400, C.textSubtle, anchor="ra")
+text(d, W - 12, H - STATUS_H + 7, "preview 6.1 ms · saved", 10, 400, C.textSubtle, anchor="ra")
 
 # --- frame ----------------------------------------------------------------
 line(d, 0.5, 0, 0.5, H, "#4f4f4f", 1)
@@ -835,5 +928,6 @@ line(d, W - 0.5, 0, W - 0.5, H, "#4f4f4f", 1)
 line(d, 0, H - 0.5, W, H - 0.5, "#4f4f4f", 1)
 
 out = img.resize((W, H), Image.LANCZOS)
-out.save("/tmp/mock/brush-studio.png")
-print("wrote /tmp/mock/brush-studio.png", out.size)
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brush-studio.png")
+out.save(OUT)
+print("wrote", OUT, out.size)

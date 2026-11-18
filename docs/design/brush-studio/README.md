@@ -1,122 +1,135 @@
-# Brush Studio — visual mockup
+# KomaPaint — Brush Studio (visual mockup)
 
-`brush-studio.png` (1600 × 1000) is a design mockup only. No application code was
-written or changed for it: nothing here is wired into `src/` or `ui/`, and Brush
-Studio does not exist yet.
+`brush-studio.png` (1728 × 1080) is a design mockup. No application code was
+written or changed for it: nothing here is wired into `src/` or `ui/`, and
+Brush Studio does not exist yet.
 
-![Brush Studio mockup](brush-studio.png)
+![KomaPaint — Brush Studio](brush-studio.png)
 
-## Why it looks like this
+This is the second take. The first was built on the wrong foot: it borrowed a
+brush name, an engine label and a layout vocabulary from another painting
+program, and the result read as that application with a KomaPaint title bar. It
+has been replaced rather than patched. Nothing in this image comes from outside
+this repository.
 
-Every colour, size and type step comes from `ui/themes/KomaTheme.qml`, so the
-window reads as a KomaPaint window rather than as a generic dark editor:
+## Where every part comes from
 
-| element | token / value |
+| part of the mockup | source of truth in this repository |
 | --- | --- |
-| window + command bar | `windowBg` `#2c2c2c` |
-| docked panels | `paneBg` `#383838`, headers `paneHeaderBg` `#2c2c2c` |
-| canvas desk | `canvasBg` `#454545` |
-| fields, wells, wells in lists | `inputBg` `#292929` |
-| selected row / active tool | `rowSelected` / `toolActive` `#505050` |
-| hairlines between regions | `hairline` `#5c5c5c`, one pixel only |
-| primary action (Save Brush) | `accent` `#c8c8c8` fill with `textOnAccent` ink |
-| type | Inter, 9 / 10 / 11 / 12 px, micro caps at 9 px with 0.9 px tracking |
-| spacing | 4 px grid, `panelInset` 10, control height 24 |
-| icons | 1.5 pt single-colour line art, tinted `#dedede`/`#909090` |
+| all colours | `ui/themes/KomaTheme.qml` — the dark theme, "ink and ember" |
+| type scale, weights, tracking | `KomaTheme.qml` (`fontMicro`…`fontDisplay1`, `trackingMicro`) |
+| spacing, control heights, rails | `KomaTheme.qml` (4 px grid, `controlHeight` 24, `toolButtonSize` 34) |
+| menu band, command bar, docks, status bar | `ui/workspaces/MainWindow.qml`, `ui/components/MainToolbar.qml` |
+| tool icons (brush, pencil, eraser, …) | the actual PNGs in `ui/assets/icons/tools`, tinted at draw time exactly as `KpIcon` tints them |
+| chrome glyphs (new, save, duplicate, close, chevrons, …) | drawn in the `KpGlyph` family: 20-unit grid, 1.7-unit stroke, round caps, one weight |
+| terminology | `src/app/SubToolLibrary.h` (Sub-Tool, collections), `BrushSettings` (Digital / Realistic engines), `resources/brush-presets.json` (preset names) |
 
-The dark theme has no saturated accent on purpose — ink (`accent`) carries
-structure and selection, so the only "loud" element in the window is the one
-commit action. That is why there is one light button and not a palette of them.
+That is why the rail carries real KomaPaint tool artwork and not look-alike
+icons, and why the settings rows and the command bar use the same hairlines,
+the same 24 px controls and the same two accents as the main window.
 
-Transparency is painted with the theme's own checkerboard
-(`transparencyLight`/`transparencyDark`), not a generic one.
+## Palette discipline
 
-## Window anatomy
+The dark theme has no saturated accent: ink (`#c8c8c8`) carries structure and
+selection, and the ember accent is `warning` (`#d2a054`), used exactly once —
+on the Realistic engine, which is the experimental one. Consequently the window
+has a single light element, **Save to Library**, and that is deliberate: one
+commit action, no rainbow of buttons.
+
+Surfaces form the same shallow ladder as the main window: window `#2c2c2c`,
+panels `#383838`, wells and fields `#292929`, canvas desk `#454545`, with
+one-pixel hairlines wherever structure would otherwise be ambiguous. The
+document sits on the theme's own transparency checkerboard
+(`transparencyLight` / `transparencyDark`), not a generic one.
+
+## Anatomy
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ 30  title bar — Brush Studio · Krita5 prototypes 1           │
-│ 40  command bar — name · engine · New/Duplicate/Import/Export│
-│     … Save Brush · Close                                     │
-├────────┬─────────────────────────────────────────┬───────────┤
-│ 248    │ 34 rail │ 32 tab strip                  │ 300       │
-│ left   │         │                              │ brush     │
-│ brush  │         │ 1024 × 320 mask, 88 %        │ settings  │
-│ compo- │         │ painted tip + pressure tests │ (accordion│
-│ nents  │ 18 ruler                                 │  + sticky │
-│        │                                          │  footer)  │
-├────────┴─────────────────────────────────────────┴───────────┤
-│ 152  live preview — stroke sheet · stamp strip · engine notes │
-│ 24   status bar — component counts · engine · saved state     │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│ 30  KomaPaint — Brush Studio                          – ▢ ✕           │
+│ 30  File  Edit  View  Brush  Window  Help          Edit › Brush Studio│
+│ 40  brush · engine · New Duplicate Import Export … Save · Close       │
+├──────────┬─────────────────────────────────────────────┬─────────────┤
+│ 260      │ 34 rail │ 32 tabs                           │ 320         │
+│ COMPO-   │         │ 34 tool options                    │ BRUSH       │
+│ NENTS    │         │                                    │ SETTINGS    │
+│ search   │         │ 1024 × 480 tip mask at 100 %       │ 13 groups   │
+│ tips     │         │ + four pressure tests              │ 2 open      │
+│ textures │ 16 ruler                                    │ sticky foot │
+│ images   │                                    zoom pill │             │
+│ custom   │                                             │             │
+├──────────┴─────────────────────────────────────────────┴─────────────┤
+│ 250  LIVE PREVIEW — stroke sheet in three directions · stamps · sizes │
+│ 24   status bar — Sub-Tool path · component counts · preview timing   │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## The five areas from the brief
+**Components.** Grouped, not one flat list: Brush Tips, Textures, Imported
+Images, Custom, each with a count, a chevron and rows carrying a thumbnail,
+a name and its real format line (`1024 × 480 · mask · 8-bit`,
+`2048 × 2048 · PNG · alpha`). The brush's active tip is marked *in use* with
+the theme's selection fill and a 2 px accent bar. Tip thumbnails sit on the
+transparency checker so a mask reads as a mask.
 
-**A. Command bar.** Brush identity (thumbnail + name with a library dropdown),
-a Digital / Realistic engine selector with the warning affordance KomaPaint
-already uses for experimental engines, and New / Duplicate / Import / Export on
-the left of the group separator. Save and Close are separated on the right
-because they commit or abandon the whole editing session, not the brush.
+**The editor.** It is the largest region on the screen and it behaves like a
+canvas, not a form: the authored tool rail, a tool-options strip (size,
+opacity, flow, symmetry, grid, mask channel), rulers in document pixels, a
+zoom control and a marching-ants selection with corner and edge handles. The
+tab strip names the component being edited, and a floating chip repeats the
+mask's format, so "what am I editing" is never ambiguous. The four strokes in
+the mask are pressure tests of the tip, which is what an artist actually does
+in this window.
 
-**B. Brush components.** The list is the brush's own stack: three tips, two
-textures and one imported image, each tagged `TIP` / `TEX` / `IMG` / `CST` so
-the type is readable at a glance. The header counts them; the chips under it
-summarise what the current brush is built from; the footer is where a new
-component or a dropped file arrives. Selection is the theme's `rowSelected`
-fill plus a 2 px accent bar, exactly as the brush library uses elsewhere.
+**Settings.** Thirteen collapsible categories, each closed to one line with its
+current values as a summary, so the panel is scannable rather than a wall of
+sliders. Two are open — Brush Tip (component picker, hardness, density, flips)
+and Size (size, minimum, and a pressure-to-size curve). A sticky footer counts
+what changed and offers one way back.
 
-**C. Working area.** The tab strip says which component is being edited
-(`Tip · Bristle smear 03`), the floating chip states the document
-(mask, 8-bit, 1024 × 320, edited), and the marquee is drawn as marching ants
-with corner and edge handles. The rail on the left is the drawing toolbar —
-brush, eraser, smudge, shapes, selection, lasso, move, fill, eyedropper, zoom —
-in the same 34 px tool buttons the main window uses. The ruler is in document
-pixels, not screen pixels, so it stays meaningful at 200 %.
+**Preview.** Given 250 px, a third of the window's left column width: a stroke
+sheet at 100 % with three different sizes and directions, a stamp strip showing
+the same dab at six pressure steps with its spacing, a size ramp, and the
+engine line. It is deliberately labelled as rendered by the brush engine while
+you paint, not a saved preview.
 
-**D. Brush settings.** Thirteen categories, collapsed to a single line each with
-their current values as a summary, so the panel stays scannable. Only the two
-that are open — Brush Tip and Size — show controls. Each category resets
-independently; the sticky footer counts what has been changed and offers one way
-back. Nothing here is a wall of sliders.
+**Advanced.** Node editing appears exactly once, as a row under `Advanced`
+("Open node graph editor… Alt N") with a note-free footer. It is a separate
+workspace and never the default screen.
 
-**E. Live preview.** A large stroke sheet (three directions, pressure 20 → 100 %),
-the stamp strip showing the same dab at six pressure steps with its spacing, and
-the engine-specific notes that explain what the preview is actually simulating.
+## Compared against the previous attempt
 
-## Deliberately deferred
-
-- **Node graph.** Represented as one row inside `Advanced` — "Open node graph
-  editor…" with a small optionality note. It opens its own workspace; it is not
-  a mode of this window and must never be the default screen.
-- **Settings search.** Icon present in the settings header; behaviour not
-  designed yet.
-- **A/B compare.** Button present in the preview header; the interaction
-  (split view vs. alternating strokes) needs its own mockup.
-- **Realistic-engine specifics.** The mockup shows the engine switch and its
-  warning; it does not attempt to show the extra material settings that engine
-  will add.
-
-## Numbers in the mockup
-
-`8.4 ms` preview, `60 px`, `82 %` flow and the component counts are illustrative
-placeholders that match the shape of real values — they are not measurements and
-should not be quoted as performance figures.
+| previous | now |
+| --- | --- |
+| brush named after another program | `Wet Bristle`, a normal KomaPaint Sub-Tool |
+| "Pixel Engine" terminology | **Digital / Realistic**, the engines `BrushSettings` actually defines |
+| hand-drawn look-alike icons | the repository's own tool PNGs, tinted by `KpIcon` rules |
+| no menu band | the main window's menu band, with the `Edit › Brush Studio` entry visible |
+| 152 px preview | 250 px, with stamps and size ramps |
+| flat component list | grouped browser with formats and *in use* state |
+| 1600 × 1000 | 1728 × 1080, a realistic desktop size |
 
 ## Regenerating
 
-`brush-studio-mockup.py` renders the PNG deterministically: it needs Pillow,
-numpy and the Inter family (400/500/600), draws at 2× and downsamples, so every
-edge and glyph is antialiased. It is a design artefact, not a build dependency —
-edit it to try new proportions, then commit both the script and the new PNG.
+`brush-studio-mockup.py` renders the PNG deterministically: Pillow and numpy,
+plus Inter 400/500/600. Icons are read straight from
+`ui/assets/icons/tools`, so the mockup cannot drift from the app's icon set.
+
+```
+KOMAPAINT_MOCKUP_FONTS=/path/to/inter-ttf \
+python3 docs/design/brush-studio/brush-studio-mockup.py
+```
+
+It is a design artefact, not a build dependency.
 
 ## Open questions for review
 
-1. Should the engine selector live in the command bar (as now) or inside the
-   settings panel as its own first section? The bar keeps it visible while
-   switching; the panel keeps the bar quieter.
-2. The component list groups by brush order (tips first). Should it group by
-   *type* instead, with tips, textures and imports as collapsible sections?
-3. Preview occupies 152 px. At 1080p that fits; on a 768 px-tall laptop the
-   settings panel would need to shrink first. Should the preview collapse into a
-   tab of the settings panel at small heights?
+1. Should the engine selector stay in the command bar (visible while switching)
+   or move into the settings panel as its own first group, leaving the bar for
+   brush actions only?
+2. The component browser groups by type. Should it instead show composition
+   order (the stack that actually composites into the tip), with type as a
+   badge? Grouping by type is easier to scan; order is more truthful to how the
+   brush is built.
+3. Preview is 250 px. At 1080p that is comfortable; on a 768 px-tall laptop it
+   would have to collapse. Should it become a collapsible strip, or a tab of the
+   settings panel, at small heights?
