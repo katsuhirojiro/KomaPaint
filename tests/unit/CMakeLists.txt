@@ -95,11 +95,13 @@ add_test(NAME test_stroke_stabilizer COMMAND test_stroke_stabilizer)
 
 # Brush model and the .kb container are pure C++ (no Qt): the same test
 # binaries run in CI and on a machine with only a compiler.
-foreach(brush_test IN ITEMS brush_model brush_format)
+foreach(brush_test IN ITEMS brush_model brush_format brush_evaluator)
     if(brush_test STREQUAL "brush_model")
         set(brush_source TestBrushModel.cpp)
-    else()
+    elseif(brush_test STREQUAL "brush_format")
         set(brush_source TestBrushFormat.cpp)
+    else()
+        set(brush_source TestBrushEvaluator.cpp)
     endif()
     add_executable(test_${brush_test} ${brush_source})
     target_link_libraries(test_${brush_test} PRIVATE komapaint::brush)

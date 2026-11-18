@@ -7,6 +7,7 @@ add_library(komapaint_brush STATIC
     BrushTypes.h BrushTypes.cpp
     BrushParameters.h BrushParameters.cpp
     BrushModel.h BrushModel.cpp
+    BrushEvaluator.h BrushEvaluator.cpp
     BrushFormat.h BrushFormat.cpp
 )
 target_include_directories(komapaint_brush PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
