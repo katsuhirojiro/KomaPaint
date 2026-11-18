@@ -28,6 +28,7 @@
 
 #include "app/CanvasViewport.h"
 #include "app/DockModel.h"
+#include "app/MixerSurfaceItem.h"
 #include "app/PanelManager.h"
 #include "app/SubToolLibrary.h"
 #include "app/ToolSettings.h"
@@ -99,6 +100,12 @@ private slots:
     void measuresSettingsDialog();
 
 private:
+    // Touching these types keeps their translation units in the link. They are
+    // what register the C++ QML types the window uses; drop them and the window
+    // fails with "Type ... unavailable" even though the code is fine.
+    const QMetaObject* const m_keepCanvasViewport = &CanvasViewport::staticMetaObject;
+    const QMetaObject* const m_keepMixerSurface = &MixerSurfaceItem::staticMetaObject;
+
     Harness m_app;
     double m_startupMs = 0.0;
     std::unique_ptr<QObject> m_settingsDialogHolder;
@@ -146,7 +153,12 @@ void TestQmlResponsiveness::measuresStartup()
             qInfo("QML load error: %s", qPrintable(error.toString()));
         qInfo("import paths: %s", qPrintable(m_app.engine.importPathList().join(QStringLiteral(" | "))));
     }
-    QVERIFY2(m_app.root, qPrintable(component.errorString()));
+    if (!m_app.root) {
+        QStringList details;
+        for (const QQmlError& error : component.errors()) details << error.toString();
+        details << QStringLiteral("import paths: ") + m_app.engine.importPathList().join(QStringLiteral(" | "));
+        QFAIL(qPrintable(details.join(QStringLiteral("\n"))));
+    }
     m_app.window = qobject_cast<QQuickWindow*>(m_app.root.get());
     QVERIFY(m_app.window);
     m_app.window->show();
