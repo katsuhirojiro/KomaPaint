@@ -289,6 +289,34 @@ void testRandomizationRespectsRangeAndScope() {
     CHECK(BrushEvaluator::resolvedParameter(doc, "rotation-offset", makeContext(5)) == 0.0);
 }
 
+void testRandomizationVariesPerStrokeUnlessShared() {
+    // A brush with no pinned seed must look different on every stroke; that is
+    // the point of a randomly textured brush. Pinning the seed, or asking for a
+    // shared one, makes it repeat -- which is what tests and sheets need.
+    BrushDocument doc = makeGroupDocument(SelectionMode::All, 1);
+    RandomizationRule rule;
+    rule.parameter = "rotation-offset";
+    rule.enabled = true;
+    rule.minimum = -45.0;
+    rule.maximum = 45.0;
+    rule.perStamp = false;
+    CHECK(doc.addRandomization(rule));
+
+    const double a = BrushEvaluator::resolvedParameter(doc, "rotation-offset", makeContext(0, 5));
+    const double b = BrushEvaluator::resolvedParameter(doc, "rotation-offset", makeContext(0, 6));
+    CHECK(a != b);
+    CHECK(BrushEvaluator::resolvedParameter(doc, "rotation-offset", makeContext(0, 5)) == a);
+
+    doc.randomization[0].sharedSeed = true;
+    const double shared = BrushEvaluator::resolvedParameter(doc, "rotation-offset", makeContext(0, 5));
+    CHECK(BrushEvaluator::resolvedParameter(doc, "rotation-offset", makeContext(0, 6)) == shared);
+
+    doc.randomization[0].sharedSeed = false;
+    doc.randomization[0].seed = 4242;
+    const double pinned = BrushEvaluator::resolvedParameter(doc, "rotation-offset", makeContext(0, 5));
+    CHECK(BrushEvaluator::resolvedParameter(doc, "rotation-offset", makeContext(0, 6)) == pinned);
+}
+
 void testScatterProducesOffsetsWithinRange() {
     BrushDocument doc = makeGroupDocument(SelectionMode::All, 1);
     doc.setParameter("scatter-x", 50.0);
@@ -342,7 +370,10 @@ void testOpacityAndEraseCarryThrough() {
 
     const auto requests = BrushEvaluator::evaluate(doc, makeContext());
     CHECK(requests.size() == 1);
-    CHECK(std::fabs(requests[0].opacity - 0.25) < 0.001);   // 0.5 * 0.5
+    // The request is this component's share only. The brush's own opacity
+    // belongs to the stroke definition the renderer holds, and applying it here
+    // too would apply it twice.
+    CHECK(std::fabs(requests[0].opacity - 0.5) < 0.001);
     CHECK(requests[0].erases);
     CHECK(requests[0].blend == ComponentBlend::Multiply);
 }
@@ -473,6 +504,7 @@ int main() {
     testPressureDynamics();
     testTiltDynamics();
     testRandomizationRespectsRangeAndScope();
+    testRandomizationVariesPerStrokeUnlessShared();
     testScatterProducesOffsetsWithinRange();
     testFollowDirectionAndRotation();
     testCombinationNormalisesWeights();

@@ -24,6 +24,8 @@ constexpr ParameterInfo kParameters[] = {
      "Fixed rotation of the tip, in degrees."},
     {"hardness", "Hardness", ParameterScope::Brush, ParameterUnit::Percent, 0, 100, 100,
      "Edge falloff of the tip: 100 is a crisp edge, 0 fades from the centre to the rim."},
+    {"tilt-angle", "Tilt to angle", ParameterScope::Brush, ParameterUnit::Unit, 0, 1, 0,
+     "Orient and flatten the tip along the stylus tilt direction when the device reports it."},
 
     // ---- opacity and flow --------------------------------------------------
     {"opacity", "Opacity", ParameterScope::Brush, ParameterUnit::Percent, 0, 100, 100,
@@ -128,6 +130,8 @@ constexpr ParameterInfo kParameters[] = {
      "How strongly pressure changes how much paint is released."},
     {"pressure-contact", "Pressure to contact", ParameterScope::Brush, ParameterUnit::Percent, 0, 100, 35,
      "How strongly pressure changes how much of the tip touches the surface."},
+    {"persistent-reservoir", "Keep the reservoir", ParameterScope::Brush, ParameterUnit::Unit, 0, 1, 0,
+     "Keep the paint left on the brush between strokes instead of reloading each time."},
     {"bristle-count", "Bristle count", ParameterScope::Brush, ParameterUnit::Unit, 0, 512, 0,
      "Bristles in the tip; zero means a continuous tip rather than a bundle."},
     {"bristle-spread", "Bristle spread", ParameterScope::Brush, ParameterUnit::Percent, 0, 100, 0,
@@ -162,6 +166,12 @@ constexpr ParameterInfo kParameters[] = {
      "Vertical placement of this component within the tip."},
     {"component-weight", "Weight", ParameterScope::Component, ParameterUnit::Unit, 0, 1000, 1,
      "Relative probability of this component being chosen by a weighted group."},
+    // Transitional: the production engines carry five built-in procedural tip
+    // masks. A brush migrated from the flat record selects one of them here
+    // until Brush Studio authors real tip resources (Stage 3).
+    // 0 round, 1 textured, 2 bristle, 3 graphite, 4 stipple.
+    {"tip-shape", "Tip shape", ParameterScope::Component, ParameterUnit::Unit, 0, 4, 0,
+     "Built-in procedural tip mask: 0 round, 1 textured, 2 bristle, 3 graphite, 4 stipple."},
 };
 
 } // namespace

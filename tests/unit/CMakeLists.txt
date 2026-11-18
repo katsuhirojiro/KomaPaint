@@ -93,6 +93,14 @@ target_link_libraries(test_stroke_stabilizer PRIVATE komapaint::drawing)
 set_target_properties(test_stroke_stabilizer PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_stroke_stabilizer COMMAND test_stroke_stabilizer)
 
+# The document brush on the real engines: a migrated brush must paint the same
+# pixels, and several components must paint per stamp. Also pure C++.
+add_executable(test_brush_document_engine TestBrushDocumentEngine.cpp)
+target_link_libraries(test_brush_document_engine PRIVATE komapaint::drawing)
+set_target_properties(test_brush_document_engine PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_brush_document_engine COMMAND test_brush_document_engine)
+
 # Brush model and the .kb container are pure C++ (no Qt): the same test
 # binaries run in CI and on a machine with only a compiler.
 foreach(brush_test IN ITEMS brush_model brush_format brush_evaluator)

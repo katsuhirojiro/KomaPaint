@@ -390,7 +390,20 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     return changed ? R::Changed : R::Unchanged;
 }
 
-BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush) : m_store(store), m_brush(brush) {
+BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush)
+    : m_store(store), m_brush(brush) {
+    if (std::isfinite(brush.size) && std::isfinite(brush.spacing)
+        && brush.size >= 1 && brush.spacing >= 0.05 && brush.spacing <= 0.5) {
+        m_spacing = std::max(0.25, brush.size * brush.spacing);
+    } else {
+        m_failed = true;
+        m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
+    }
+}
+
+BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush, StampSink sink,
+                         void* context)
+    : m_store(store), m_brush(brush), m_sink(sink), m_sinkContext(context) {
     if (std::isfinite(brush.size) && std::isfinite(brush.spacing)
         && brush.size >= 1 && brush.spacing >= 0.05 && brush.spacing <= 0.5) {
         m_spacing = std::max(0.25, brush.size * brush.spacing);
@@ -437,7 +450,9 @@ void BrushStroke::updateCarry(InputSample p)
 
 bool BrushStroke::stamp(InputSample p) {
     updateCarry(p);
-    auto result = BrushRasterizer::dab(m_store, m_brush, p, m_strokeAngle, m_carryPremul, m_hasCarry);
+    auto result = m_sink
+        ? m_sink(m_store, m_brush, p, m_strokeAngle, m_carryPremul, m_hasCarry, m_sinkContext)
+        : BrushRasterizer::dab(m_store, m_brush, p, m_strokeAngle, m_carryPremul, m_hasCarry);
     if (result != SparseTileStore::WriteResult::Changed && result != SparseTileStore::WriteResult::Unchanged) {
         m_failed = true;
         m_failureReason = result;

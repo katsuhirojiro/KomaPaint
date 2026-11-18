@@ -184,6 +184,7 @@ struct LegacyBrush {
     double dryingSpeed = 115;
     double pressureToAmount = 62;
     double pressureToContact = 35;
+    bool persistentReservoir = false;
 };
 
 class BrushDocument {

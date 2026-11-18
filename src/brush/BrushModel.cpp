@@ -23,6 +23,26 @@ bool needsPixels(ComponentKind kind) {
 
 bool isBrushScope(ParameterScope scope) { return scope == ParameterScope::Brush; }
 
+// The five tip masks the production engines actually implement. Values are
+// stored in the component's parameter bag as `tip-shape`.
+int tipShapeForStyle(const std::string& style) {
+    if (style == "textured") return 1;
+    if (style == "bristle") return 2;
+    if (style == "graphite") return 3;
+    if (style == "stipple") return 4;
+    return 0;  // round
+}
+
+std::string tipStyleForShape(double shape) {
+    switch (static_cast<int>(shape)) {
+    case 1: return "textured";
+    case 2: return "bristle";
+    case 3: return "graphite";
+    case 4: return "stipple";
+    default: return "round";
+    }
+}
+
 // True when following `next` from some node returns to that node. `count` is
 // the "no successor" sentinel. Used for nested groups and component masks.
 template <typename NextFn>
@@ -754,12 +774,15 @@ BrushDocument BrushDocument::fromLegacy(const LegacyBrush& legacy, std::string b
     doc.id = std::move(brushId);
     doc.engine = legacy.realisticEngine ? Engine::Realistic : Engine::Digital;
 
-    // One component: the tip the old record implied.
+    // One component: the tip the old record implied. It is procedural -- the
+    // engines generate these masks themselves -- so it carries no pixel data,
+    // only which of the five masks it uses.
     BrushComponent tip;
     tip.id = "c1";
     tip.name = "Tip";
-    tip.kind = legacy.tipStyle == "bristle" ? ComponentKind::BristleGroup : ComponentKind::Tip;
+    tip.kind = ComponentKind::ProceduralShape;
     tip.erases = legacy.erase;
+    tip.parameters.set("tip-shape", double(tipShapeForStyle(legacy.tipStyle)));
     doc.addComponent(std::move(tip));
 
     // One generator: the continuous stroker both engines use today.
@@ -791,6 +814,8 @@ BrushDocument BrushDocument::fromLegacy(const LegacyBrush& legacy, std::string b
     put("blend-strength", legacy.blendStrength);
     put("follow-direction", legacy.followDirection ? 1.0 : 0.0);
     put("follow-rotation", legacy.stylusRotation ? 1.0 : 0.0);
+    put("tilt-angle", legacy.tiltAngle ? 1.0 : 0.0);
+    put("persistent-reservoir", legacy.persistentReservoir ? 1.0 : 0.0);
 
     if (legacy.realisticEngine) {
         put("paint-load", legacy.paintLoad);
@@ -870,6 +895,8 @@ LegacyBrush BrushDocument::toLegacy() const {
     legacy.blendStrength = take("blend-strength", 0);
     legacy.followDirection = take("follow-direction", 0) != 0.0;
     legacy.stylusRotation = take("follow-rotation", 0) != 0.0;
+    legacy.tiltAngle = take("tilt-angle", 0) != 0.0;
+    legacy.persistentReservoir = take("persistent-reservoir", 0) != 0.0;
     legacy.realisticEngine = engine == Engine::Realistic;
 
     legacy.paintLoad = take("paint-load", 88);
@@ -900,13 +927,7 @@ LegacyBrush BrushDocument::toLegacy() const {
     if (components.size() == 1) {
         const BrushComponent& tip = components.front();
         legacy.erase = tip.erases;
-        switch (tip.kind) {
-        case ComponentKind::BristleGroup: legacy.tipStyle = "bristle"; break;
-        case ComponentKind::Texture: legacy.tipStyle = "textured"; break;
-        case ComponentKind::ProceduralShape: legacy.tipStyle = "graphite"; break;
-        case ComponentKind::Particle: legacy.tipStyle = "stipple"; break;
-        default: legacy.tipStyle = "round"; break;
-        }
+        legacy.tipStyle = tipStyleForShape(tip.parameters.value("tip-shape", 0.0));
     }
     return legacy;
 }

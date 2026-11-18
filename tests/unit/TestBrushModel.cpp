@@ -403,9 +403,11 @@ void testLegacyMigrationIsLosslessForTheOldFields() {
     CHECK(!doc.id.empty());
     CHECK(doc.name == "Legacy");
 
-    // One tip, one continuous generator: the smallest faithful reading.
+    // One procedural tip, one continuous generator: the smallest faithful
+    // reading of a flat record.
     CHECK(doc.components.size() == 1);
-    CHECK(doc.components[0].kind == ComponentKind::BristleGroup);
+    CHECK(doc.components[0].kind == ComponentKind::ProceduralShape);
+    CHECK(doc.components[0].parameters.value("tip-shape") == 2.0);   // bristle
     CHECK(doc.generators.size() == 1);
     CHECK(doc.generators[0].kind == GeneratorKind::Continuous);
     CHECK(doc.engine == Engine::Realistic);
@@ -428,6 +430,7 @@ void testLegacyMigrationIsLosslessForTheOldFields() {
     CHECK(back.aspectRatio == legacy.aspectRatio);
     CHECK(back.tipAngle == legacy.tipAngle);
     CHECK(back.followDirection == legacy.followDirection);
+    CHECK(back.tiltAngle == legacy.tiltAngle);
     CHECK(back.realisticEngine == legacy.realisticEngine);
     CHECK(back.tipStyle == legacy.tipStyle);
     CHECK(back.paintLoad == legacy.paintLoad);

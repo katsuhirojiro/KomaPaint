@@ -73,9 +73,21 @@ public:
 
 // Maintains spacing, directional angle, and smudge carry across input events.
 // One instance is one stroke. Caller owns and keeps the store alive.
+//
+// The stamp sink is the seam between this loop and what a stamp consists of.
+// The default sink is one dab of one tip, which is what every brush did before
+// the document model existed. A document brush supplies a sink that paints
+// several components per stamp, and it inherits this spacing, angle, clipping
+// and carry logic instead of reimplementing it (see BrushDocumentAdapter).
 class BrushStroke {
 public:
+    using StampSink = SparseTileStore::WriteResult (*)(
+        SparseTileStore& store, const BrushDefinition& brush, InputSample sample,
+        double strokeAngle, std::uint32_t carryPremul, bool hasCarry, void* context);
+
     BrushStroke(SparseTileStore& store, BrushDefinition definition);
+    BrushStroke(SparseTileStore& store, BrushDefinition definition, StampSink sink,
+                void* context);
     bool begin(InputSample sample);
     bool extend(InputSample sample);
     bool end(InputSample sample);
@@ -86,6 +98,8 @@ private:
     void updateCarry(InputSample sample);
     SparseTileStore& m_store;
     BrushDefinition m_brush;
+    StampSink m_sink = nullptr;
+    void* m_sinkContext = nullptr;
     InputSample m_previous{};
     double m_remaining = 0;
     double m_spacing = 1;

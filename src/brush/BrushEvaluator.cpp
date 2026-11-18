@@ -111,9 +111,16 @@ double BrushEvaluator::resolvedParameter(const BrushDocument& document, std::str
         // rule draws again for every stamp. sharedSeed lets a brush keep the
         // same variation across strokes when the artist wants that.
         const std::uint64_t index = rule.perStamp ? context.stampIndex : 0u;
-        const std::uint64_t base = (rule.sharedSeed || rule.seed == 0)
-                                       ? static_cast<std::uint64_t>(context.brushSeed)
-                                       : static_cast<std::uint64_t>(rule.seed);
+        // A shared rule (or a rule the artist pinned to a seed) is the same on
+        // every stroke; an unpinned one varies per stroke, which is what a
+        // randomly textured brush is supposed to do. Either way the same
+        // inputs give the same picture.
+        const std::uint64_t base = rule.sharedSeed
+            ? static_cast<std::uint64_t>(context.brushSeed)
+            : (rule.seed != 0
+                   ? static_cast<std::uint64_t>(rule.seed)
+                   : static_cast<std::uint64_t>(context.brushSeed) ^
+                         (static_cast<std::uint64_t>(context.strokeSeed) * 0x9E3779B97F4A7C15ull));
         const std::uint64_t key = keyFor(base, name, index);
         double t = uniform01(key);
         switch (rule.distribution) {
@@ -253,7 +260,6 @@ std::vector<DrawRequest> BrushEvaluator::evaluate(const BrushDocument& document,
     std::vector<DrawRequest> requests;
 
     const double size = resolvedParameter(document, "size", context);
-    const double opacityBase = resolvedParameter(document, "opacity", context) / 100.0;
     const double rotationBase = resolvedParameter(document, "rotation-offset", context);
     const double scatterX = resolvedParameter(document, "scatter-x", context) / 100.0;
     const double scatterY = resolvedParameter(document, "scatter-y", context) / 100.0;
@@ -326,9 +332,13 @@ std::vector<DrawRequest> BrushEvaluator::evaluate(const BrushDocument& document,
                 if (followRotation) rotation += penDegrees;
                 request.rotationDegrees = rotation;
 
+                // Relative, deliberately: the brush's own opacity is a property
+                // of the stroke definition the renderer already holds, so a
+                // request only says what this component contributes to it.
+                // Folding it in here as well would apply it twice.
                 const double componentOpacity =
                     resolvedParameter(document, "component-opacity", context) / 100.0;
-                double opacity = opacityBase * component->opacity * componentOpacity;
+                double opacity = component->opacity * componentOpacity;
                 if (combinationTotal > 0.0) {
                     opacity *= std::max(0.0, component->weight) / combinationTotal;
                 }
