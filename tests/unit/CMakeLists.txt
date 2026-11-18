@@ -176,6 +176,9 @@ komapaint_add_test(test_workspace_session TestWorkspaceSession.cpp)
 target_link_libraries(test_workspace_session PRIVATE komapaint::app)
 
 komapaint_add_test(test_workspace_ui TestWorkspaceUi.cpp)
+komapaint_add_test(test_qml_responsiveness TestQmlResponsiveness.cpp)
+target_sources(test_qml_responsiveness PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_qml_responsiveness PRIVATE komapaint::app komapaint::layers Qt6::Quick)
 target_sources(test_workspace_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
 target_link_libraries(test_workspace_ui PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
 
