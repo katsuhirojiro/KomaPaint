@@ -1,4 +1,6 @@
 #pragma once
+#include "../brush/BrushModel.h"
+
 #include <QObject>
 #include <QString>
 #include <QVariantMap>
@@ -224,6 +226,49 @@ public:
     void setDryingSpeed(int v) { v = qBound(25, v, 200); if (m_dryingSpeed != v) { m_dryingSpeed = v; emit changed(); } }
     void setPressureToAmount(int v) { v = qBound(0, v, 100); if (m_pressureToAmount != v) { m_pressureToAmount = v; emit changed(); } }
     void setPressureToContact(int v) { v = qBound(0, v, 100); if (m_pressureToContact != v) { m_pressureToContact = v; emit changed(); } }
+    // The flat record the brush model migrates from. One conversion lives here,
+    // so the document path and the legacy path read the same numbers and cannot
+    // drift apart; the adapter's equivalence test relies on it.
+    brush::LegacyBrush toLegacyBrush() const {
+        brush::LegacyBrush legacy;
+        legacy.size = double(m_size);
+        legacy.opacity = double(m_opacity);
+        legacy.flow = double(m_flow);
+        legacy.spacing = double(m_spacing);
+        legacy.hardness = double(m_hardness);
+        legacy.stabilization = double(m_stabilization);
+        legacy.pressureSize = double(m_pressureSize);
+        legacy.pressureOpacity = double(m_pressureOpacity);
+        legacy.pressureFlow = double(m_pressureFlow);
+        legacy.pressureGamma = double(m_pressureGamma);
+        legacy.minSizeRatio = double(m_minSizeRatio);
+        legacy.tiltSize = double(m_tiltSize);
+        legacy.tiltAngle = m_tiltAngle;
+        legacy.stylusRotation = m_stylusRotation;
+        legacy.blendStrength = double(m_blendStrength);
+        legacy.colorMix = double(m_colorMix);
+        legacy.aspectRatio = double(m_aspectRatio);
+        legacy.tipAngle = double(m_tipAngle);
+        legacy.followDirection = m_followDirection;
+        legacy.erase = m_erase;
+        legacy.realisticEngine = m_realisticEngine;
+        legacy.tipStyle = m_tipStyle.toStdString();
+        legacy.paintLoad = double(m_paintLoad);
+        legacy.pigmentConcentration = double(m_pigmentConcentration);
+        legacy.waterAmount = double(m_waterAmount);
+        legacy.paintBody = double(m_paintBody);
+        legacy.pickup = double(m_pickup);
+        legacy.depletion = double(m_depletion);
+        legacy.edgeAccumulation = double(m_edgeAccumulation);
+        legacy.toothResponse = double(m_toothResponse);
+        legacy.granulation = double(m_granulation);
+        legacy.dryingSpeed = double(m_dryingSpeed);
+        legacy.pressureToAmount = double(m_pressureToAmount);
+        legacy.pressureToContact = double(m_pressureToContact);
+        legacy.persistentReservoir = m_persistentReservoir;
+        return legacy;
+    }
+
     Q_INVOKABLE bool loadMaterialMixture(const QVariantMap& mixture) {
         if (mixture.isEmpty()) return false;
         m_materialMixture = mixture;

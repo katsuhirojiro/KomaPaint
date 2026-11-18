@@ -26,6 +26,7 @@
 #include <cstring>
 #include <new>
 #include <stdexcept>
+#include <utility>
 
 namespace komapaint {
 namespace {
@@ -1081,44 +1082,41 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
         emit strokeError(QStringLiteral("Could not start stroke history; no paint was applied."));
         return false;
     }
-    BrushDefinition definition;
-    definition.size = brush->size();
-    definition.opacity = brush->opacity() / 100.0;
-    definition.flow = brush->flow() / 100.0;
-    definition.spacing = brush->spacing() / 100.0;
-    const QString tipStyle = brush->tipStyle();
-    if (tipStyle == QStringLiteral("bristle")) definition.tip = BrushTip::Bristle;
-    else if (tipStyle == QStringLiteral("graphite")) definition.tip = BrushTip::Graphite;
-    else if (tipStyle == QStringLiteral("stipple")) definition.tip = BrushTip::Stipple;
-    else if (tipStyle == QStringLiteral("textured") || brush->textured()) definition.tip = BrushTip::Textured;
-    else definition.tip = BrushTip::Round;
-    definition.hardness = brush->hardness() / 100.0;
-    definition.aspectRatio = brush->aspectRatio() / 100.0;
-    definition.angleRadians = qDegreesToRadians(double(brush->tipAngle()));
-    definition.followDirection = brush->followDirection();
-    definition.pressureSize = brush->pressureSize() / 100.0;
-    definition.pressureOpacity = brush->pressureOpacity() / 100.0;
-    definition.pressureFlow = brush->pressureFlow() / 100.0;
-    definition.pressureGamma = brush->pressureGamma() / 100.0;
-    definition.minSizeRatio = brush->minSizeRatio() / 100.0;
-    definition.tiltSize = brush->tiltSize() / 100.0;
-    definition.tiltAngle = brush->tiltAngle();
-    definition.stylusRotation = brush->stylusRotation();
-    definition.blendStrength = brush->blendStrength() / 100.0;
-    definition.colorMix = brush->colorMix() / 100.0;
-    definition.erase = effectiveErase;
-    definition.color = color.rgba();
+    // One conversion, in the adapter: the flat brush record becomes the record
+    // the engine reads. The inline copy of these formulae used to live here, and
+    // two copies of a brush is how a brush stops matching itself.
+    StrokeRuntime runtime;
+    runtime.color = color.rgba();
+    runtime.erase = effectiveErase;
+    const brush::LegacyBrush legacy = brush->toLegacyBrush();
+    BrushDefinition definition = drawing::digitalDefinition(legacy, runtime);
     if (useMaskCallback) {
         definition.pixelMask = &evaluatePixelMask;
         definition.pixelMaskContext = &m_strokeMaskContext;
     }
 
-    try { m_stroke = std::make_unique<BrushStroke>(layer->tiles(), definition); }
+    // The digital engine paints through the brush document. For a brush that is
+    // one tip and no components that is the single dab it always was -- the
+    // pixels are proved identical by test_brush_document_engine -- and a brush
+    // the Studio has given components paints all of them.
+    brush::BrushDocument document = brush::BrushDocument::fromLegacy(
+        legacy, "live-brush", "Brush");
+    document.seed = 20260101u;
+    try {
+        m_stroke = std::make_unique<drawing::DocumentStroke>(
+            layer->tiles(), std::move(document), definition, ++m_strokeSerial);
+    }
     catch (const std::bad_alloc&) {
         m_history->cancelStroke();
         emit strokeError(QStringLiteral("Not enough memory to start a stroke."));
         return false;
     }
+    catch (const std::length_error&) {
+        m_history->cancelStroke();
+        emit strokeError(QStringLiteral("Not enough memory to start a stroke."));
+        return false;
+    }
+
     m_strokeLayer = layer;
     m_stabilizer = StrokeStabilizer(effectiveStab);
     InputSample initSample{

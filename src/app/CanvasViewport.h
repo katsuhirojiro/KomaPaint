@@ -1,5 +1,6 @@
 #pragma once
 #include "../canvas/CpuTileCompositor.h"
+#include "../drawing/BrushDocumentAdapter.h"
 #include "../drawing/BrushEngine.h"
 #include "../drawing/StrokeStabilizer.h"
 #include "../input/PointerInput.h"
@@ -255,7 +256,10 @@ private:
     QColor m_brushColor = QColor(Qt::black);
     QString m_activeTool = QStringLiteral("brush");
     QPointer<Layer> m_strokeLayer;
-    std::unique_ptr<BrushStroke> m_stroke;
+    // The digital engine paints through the brush document (see
+    // BrushDocumentAdapter): one stroke, one document, N components.
+    std::unique_ptr<drawing::DocumentStroke> m_stroke;
+    std::uint32_t m_strokeSerial = 0;
     std::unique_ptr<material::MaterialStroke> m_materialStroke;
     std::unique_ptr<material::BrushReservoir> m_materialReservoir;
     PixelMaskContext m_strokeMaskContext{};
