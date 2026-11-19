@@ -812,23 +812,31 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
     QCOMPARE(QString::fromStdString(draft->document().components.back().name), QStringLiteral("Paper Fibre"));
 
     QVERIFY(chooseStudioSegment(studio, "brushStudioInspectorChoice", 1, 2));
-    QTRY_VERIFY(control("brushStudioExposeChoice") && control("brushStudioExposeChoice")->isVisible());
     auto* exposure = control("brushStudioExposure");
+    auto* choice = control("brushStudioExposeChoice");
     auto* restore = control("brushStudioRestoreExposure");
-    QVERIFY(exposure && restore);
+    QVERIFY(exposure && choice && restore);
+    // StackLayout and the exposure column position the choice on polish.
+    QTRY_VERIFY(choice->isVisible() && choice->width() > 0 && choice->y() > 0);
+    auto* popup = choice->property("popup").value<QObject*>();
+    QVERIFY(popup);
+    const auto defaultExposure = draft->exposedProperties();
+    const auto firstCandidate = draft->exposureCandidates().first().toMap().value(QStringLiteral("key")).toString();
+    QVERIFY(press("brushStudioExposeChoice"));
+    QTRY_VERIFY2(popup->property("opened").toBool(), "The exposure picker did not open after clicking its control");
+    QQuickItem* option = nullptr;
+    QTRY_VERIFY((option = control("brushStudioExposeChoice_option_0")) && option->isVisible() && option->width() > 0);
+    click(studio, option);
+    QTRY_VERIFY2(!popup->property("visible").toBool(), "Clicking the first exposure option did not close the picker");
+    QVERIFY2(draft->isExposed(firstCandidate), qPrintable(draft->error()));
+    QCOMPARE(draft->exposedProperties().size(), defaultExposure.size() + 1);
+
     const QVariant restoreLabel = restore->property("label");
     // A wide fallback font or translation must not widen the whole column
     // and put the row actions behind the scrollbar.
     QVERIFY(restore->setProperty("label", restoreLabel.toString().repeated(4)));
     QTRY_VERIFY(restore->implicitWidth() > exposure->width());
     QTRY_VERIFY(restore->width() > 0 && restore->width() < exposure->width());
-    const auto defaultExposure = draft->exposedProperties();
-    const auto firstCandidate = draft->exposureCandidates().first().toMap().value(QStringLiteral("key")).toString();
-    QVERIFY(press("brushStudioExposeChoice"));
-    QTest::keyClick(studio, Qt::Key_Home);
-    QTest::keyClick(studio, Qt::Key_Return);
-    QTRY_COMPARE(draft->exposedProperties().size(), defaultExposure.size() + 1);
-    QVERIFY(draft->isExposed(firstCandidate));
     QTRY_VERIFY(control("brushStudioExposureLabel_size") && control("brushStudioExposureLabel_size")->isVisible());
     QPointer<QQuickItem> labelField(control("brushStudioExposureLabel_size"));
     QPointer<QQuickItem> removeButton(control("brushStudioUnexpose_size"));

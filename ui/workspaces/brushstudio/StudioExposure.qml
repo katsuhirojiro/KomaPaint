@@ -47,7 +47,14 @@ Flickable {
             currentIndex: -1
             displayText: qsTr("Expose a property…")
             Accessible.name: displayText
-            onActivated: function(index) { exposure.draft.expose(valueAt(index)); currentIndex = -1 }
+            onActivated: function(index) {
+                if (index < 0) return
+                const key = valueAt(index)
+                // The selected entry is about to leave the candidates model.
+                popup.close()
+                exposure.draft.expose(key)
+                currentIndex = -1
+            }
         }
         Repeater {
             model: exposure.metadata.keys

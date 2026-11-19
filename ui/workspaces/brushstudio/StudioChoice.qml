@@ -35,7 +35,8 @@ ComboBox {
         id: entry
         required property int index
         required property var modelData
-        width: box.width - 2 * KP.gapXS
+        objectName: box.objectName + "_option_" + index
+        width: ListView.view ? ListView.view.width : 0
         implicitHeight: KP.controlHeight
         highlighted: box.highlightedIndex === index
         contentItem: Text {
@@ -52,7 +53,10 @@ ComboBox {
         y: box.height
         width: box.width
         padding: KP.gapXS
-        implicitHeight: Math.min(280, list.contentHeight + 2 * padding)
+        topMargin: KP.gapXS
+        bottomMargin: KP.gapXS
+        // Size the popup before the visible list creates its delegates.
+        implicitHeight: Math.min(280, box.count * KP.controlHeight + 2 * padding)
         background: Rectangle {
             color: KP.floatingBg
             border.width: KP.hairlineWidth
@@ -64,6 +68,7 @@ ComboBox {
             clip: true
             model: box.popup.visible ? box.delegateModel : null
             currentIndex: box.highlightedIndex
+            highlightMoveDuration: 0
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: KpScrollBar { opacity: size < 1 ? 1 : 0 }
         }

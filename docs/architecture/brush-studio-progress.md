@@ -491,9 +491,17 @@ showed that fallback font metrics widened the form, putting the Remove button
 under the scrollbar. Exposure controls now size to the viewport, with a
 regression that gives the reset button an oversized label and exercises adding,
 renaming, removing, and restoring exposure without changing brush values.
-All four Studio UI cases passed with normal fonts and with no fonts, all
-49 Linux CTest suites passed (73.20 s), and all nine packaged-resource checks
-passed.
+The viewport fix passed locally with and without fonts. Windows
+[44582639504](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44582639504)
+for `eeaa93a` stopped earlier in the test because the exposure picker did
+not add the first candidate. The picker now sizes to its candidate count
+before delegates are created and closes before changing that list. The UI
+regression waits for the popup to open, selects a real row, and verifies
+closure and the draft result separately.
+
+With these fixes, all four Studio UI cases passed with normal fonts and with
+no fonts, all 49 Linux CTest suites passed (72.65 s), and all nine
+packaged-resource checks passed.
 
 ## Next
 
