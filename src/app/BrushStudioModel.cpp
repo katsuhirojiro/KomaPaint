@@ -4,6 +4,7 @@
 #include "../canvas/MemoryAvailability.h"
 
 #include <QFileInfo>
+#include <QLocale>
 #include <QUuid>
 
 #include <algorithm>
@@ -28,8 +29,8 @@ QString unitName(brush::ParameterUnit unit) {
     switch (unit) {
     case brush::ParameterUnit::Percent: return QStringLiteral("%");
     case brush::ParameterUnit::Pixels: return QStringLiteral("px");
-    case brush::ParameterUnit::Degrees: return QStringLiteral("deg");
-    case brush::ParameterUnit::Ratio: return QStringLiteral("x");
+    case brush::ParameterUnit::Degrees: return QStringLiteral("\u00b0");
+    case brush::ParameterUnit::Ratio: return QStringLiteral("%"); // 100 is 1:1 in the registry
     case brush::ParameterUnit::Unit: break;
     }
     return QString();
@@ -360,6 +361,17 @@ QVariantList BrushStudioModel::componentKinds() const {
     return list;
 }
 
+QVariantList BrushStudioModel::componentBlends() const {
+    QVariantList list;
+    for (const auto blend : {ComponentBlend::Normal, ComponentBlend::Multiply, ComponentBlend::Screen,
+                             ComponentBlend::Overlay, ComponentBlend::Height, ComponentBlend::Mask}) {
+        QString label = blendName(blend);
+        if (!label.isEmpty()) label[0] = label[0].toUpper();
+        list.append(QVariantMap{{QStringLiteral("value"), int(blend)}, {QStringLiteral("label"), label}});
+    }
+    return list;
+}
+
 QVariantList BrushStudioModel::selectionModes() const {
     QVariantList list;
     for (SelectionMode mode : kSelectionModes) {
@@ -644,25 +656,107 @@ bool BrushStudioModel::removeGroup(const QString& groupId) {
 
 // ---- settings ---------------------------------------------------------------
 
+namespace {
+
+QVariantMap parameterPresentation(const brush::ParameterInfo& info) {
+    const QString key = QString::fromUtf8(info.name);
+    QVariantMap map{
+        {QStringLiteral("key"), key},
+        {QStringLiteral("label"), QString::fromUtf8(info.label)},
+        {QStringLiteral("description"), QString::fromUtf8(info.description)},
+        {QStringLiteral("section"), QString::fromUtf8(brush::parameterSection(info.name))},
+        {QStringLiteral("scope"), int(info.scope)},
+        {QStringLiteral("unit"), unitName(info.unit)},
+        {QStringLiteral("min"), info.minimum},
+        {QStringLiteral("max"), info.maximum},
+        {QStringLiteral("default"), info.defaultValue},
+    };
+    if (key == QStringLiteral("tip-shape")) {
+        // Existing procedural tip choices; the numeric storage values are
+        // documented by the registry and validated in setParameterValue().
+        map.insert(QStringLiteral("editor"), QStringLiteral("choice"));
+        map.insert(QStringLiteral("choices"), QStringList{BrushStudioModel::tr("Round"), BrushStudioModel::tr("Textured"),
+            BrushStudioModel::tr("Bristle"), BrushStudioModel::tr("Graphite"), BrushStudioModel::tr("Stipple")});
+    } else {
+        // Very wide domains (such as size) use precision entry, not a rail
+        // where the usual values would all be at the very first pixel.
+        map.insert(QStringLiteral("editor"), info.maximum - info.minimum > 10000
+                   ? QStringLiteral("number") : QStringLiteral("slider"));
+    }
+    return map;
+}
+
+bool parameterApplies(const brush::ParameterInfo& info, const BrushComponent* selected) {
+    if (info.scope == brush::ParameterScope::Brush) return true;
+    if (!selected) return false;
+    const std::string_view key(info.name);
+    if (key == "tip-shape") return selected->kind == ComponentKind::ProceduralShape;
+    return key == "component-opacity" || key == "component-weight" ||
+        std::ranges::any_of(kTransformSettings, [key](const auto& setting) { return key == setting.parameter; });
+}
+
+} // namespace
+
 QVariantList BrushStudioModel::parameters() const {
     QVariantList list;
-    for (const brush::ParameterInfo& info : brush::parameterRegistry()) {
-        QVariantMap map;
-        map.insert(QStringLiteral("key"), QString::fromUtf8(info.name));
-        map.insert(QStringLiteral("label"), QString::fromUtf8(info.label));
-        map.insert(QStringLiteral("description"), QString::fromUtf8(info.description));
-        map.insert(QStringLiteral("section"), QString::fromUtf8(
-            brush::parameterSection(info.name) ? brush::parameterSection(info.name) : "Advanced"));
-        map.insert(QStringLiteral("scope"), int(info.scope));
-        map.insert(QStringLiteral("unit"), unitName(info.unit));
-        map.insert(QStringLiteral("min"), info.minimum);
-        map.insert(QStringLiteral("max"), info.maximum);
-        map.insert(QStringLiteral("default"), info.defaultValue);
-        map.insert(QStringLiteral("value"), parameterValue(QString::fromUtf8(info.name)));
-        map.insert(QStringLiteral("exposed"), isExposed(QString::fromUtf8(info.name)));
-        list.append(map);
+    for (const auto& info : brush::parameterRegistry()) {
+        auto row = parameterPresentation(info);
+        const auto key = row.value(QStringLiteral("key")).toString();
+        row.insert(QStringLiteral("value"), parameterValue(key));
+        row.insert(QStringLiteral("exposed"), isExposed(key));
+        list.append(row);
     }
     return list;
+}
+
+QVariantList BrushStudioModel::settingSections() const {
+    QVariantList list;
+    for (const char* name : brush::parameterSections()) {
+        const std::string_view section(name);
+        QVariantList rows;
+        for (const auto& info : brush::parameterRegistry()) {
+            const char* group = brush::parameterSection(info.name);
+            if (group && section == group) rows.append(parameterPresentation(info));
+        }
+        list.append(QVariantMap{
+            {QStringLiteral("title"), QString::fromUtf8(name)},
+            {QStringLiteral("rows"), rows},
+            {QStringLiteral("tipFirst"), section == "Brush Tip"},
+            {QStringLiteral("textureFirst"), section == "Texture"},
+        });
+    }
+    return list;
+}
+
+QVariantMap BrushStudioModel::settingState() const {
+    QVariantMap values;
+    int changed = 0;
+    QLocale locale;
+    locale.setNumberOptions(locale.numberOptions() | QLocale::OmitGroupSeparator);
+    const auto* selected = selectedComponentData();
+    for (const auto& info : brush::parameterRegistry()) {
+        const auto key = QString::fromUtf8(info.name);
+        const double value = parameterValue(key);
+        const bool available = parameterApplies(info, selected);
+        const bool differs = available && value != info.defaultValue;
+        changed += differs ? 1 : 0;
+        values.insert(key, QVariantMap{
+            {QStringLiteral("value"), value},
+            {QStringLiteral("text"), locale.toString(value, 'g', QLocale::FloatingPointShortest)},
+            {QStringLiteral("available"), available},
+            {QStringLiteral("changed"), differs},
+        });
+    }
+    return {{QStringLiteral("values"), values}, {QStringLiteral("changedCount"), changed}};
+}
+
+bool BrushStudioModel::setParameterText(const QString& key, const QString& text) {
+    bool ok = false;
+    // Use the same locale as the displayed value and reject ambiguity rather
+    // than truncating a fractional value or passing NaN into the document.
+    const double value = QLocale().toDouble(text, &ok);
+    if (!ok) return fail(tr("Enter a number for '%1'.").arg(key));
+    return setParameterValue(key, value);
 }
 
 double BrushStudioModel::parameterValue(const QString& key) const {
@@ -721,21 +815,11 @@ bool BrushStudioModel::setParameterValue(const QString& key, double value) {
 }
 
 QVariantMap BrushStudioModel::parameterInfo(const QString& key) const {
-    QVariantMap map;
-    const brush::ParameterInfo* info = brush::findParameter(key.toStdString());
-    if (!info) return map;
-    map.insert(QStringLiteral("key"), QString::fromUtf8(info->name));
-    map.insert(QStringLiteral("label"), QString::fromUtf8(info->label));
-    map.insert(QStringLiteral("description"), QString::fromUtf8(info->description));
-    map.insert(QStringLiteral("section"),
-               QString::fromUtf8(brush::parameterSection(info->name)));
-    map.insert(QStringLiteral("unit"), unitName(info->unit));
-    map.insert(QStringLiteral("min"), info->minimum);
-    map.insert(QStringLiteral("max"), info->maximum);
-    map.insert(QStringLiteral("default"), info->defaultValue);
-    map.insert(QStringLiteral("scope"), int(info->scope));
-    map.insert(QStringLiteral("value"), parameterValue(key));
-    return map;
+    const auto* info = brush::findParameter(key.toStdString());
+    if (!info) return {};
+    auto row = parameterPresentation(*info);
+    row.insert(QStringLiteral("value"), parameterValue(key));
+    return row;
 }
 
 // ---- exposure ---------------------------------------------------------------
@@ -763,9 +847,23 @@ QVariantList BrushStudioModel::exposedProperties() const {
     return list;
 }
 
+QVariantList BrushStudioModel::exposureCandidates() const {
+    QVariantList list;
+    for (const auto& info : brush::parameterRegistry()) {
+        const auto key = QString::fromUtf8(info.name);
+        if (isExposed(key)) continue;
+        list.append(QVariantMap{
+            {QStringLiteral("key"), key},
+            {QStringLiteral("label"), tr("%1 · %2").arg(QString::fromUtf8(info.label), QString::fromUtf8(brush::parameterSection(info.name)))},
+        });
+    }
+    return list;
+}
+
 bool BrushStudioModel::isExposed(const QString& key) const {
+    const auto name = key.toStdString();
     for (const auto& property : m_document.exposed) {
-        if (property.parameter == key.toStdString()) return property.visible;
+        if (property.parameter == name) return property.visible;
     }
     return false;
 }
@@ -877,7 +975,7 @@ bool BrushStudioModel::moveExposure(const QString& key, int delta) try {
 } catch (const std::bad_alloc&) { return historyMemoryError(); }
 
 void BrushStudioModel::resetExposure() {
-    edit("Reset Sub-Tool settings", [this] {
+    edit("Reset creator exposure", [this] {
         m_document.exposed.clear();
         const char* defaults[] = {"size", "opacity", "flow", "spacing", "hardness"};
         int order = 0;

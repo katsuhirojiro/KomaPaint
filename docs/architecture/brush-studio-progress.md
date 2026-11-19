@@ -413,7 +413,10 @@ file dialog accept handlers, compact panel switching, preview collapse and
 close. The existing lifecycle/isolation regression also passed. The packaged
 self-check now opens the lazy window and round-trips a `.kb`; all nine checks
 passed with zero QML warnings. The offscreen plugin itself does not support
-raising native windows; this is not a QML warning.
+raising native windows; this is not a QML warning. Windows
+[44575353848](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44575353848)
+passed build, all 49 test executables, benchmark smoke and the extracted ZIP
+checks for `7e6131f`.
 
 ## Phase B2.2 — component stack and read-only editor
 
@@ -422,8 +425,8 @@ Add, duplicate, show/hide, remove, and move up/down call the document model
 and are undoable. The stack retains document order (not a fabricated drag or
 compositing operation). The Library rail explicitly says it is unavailable.
 Component tabs share selection with the browser, and choosing Tip or Texture
-selects a matching component when available. Document-wide and component
-settings are still independent of editor navigation.
+selects a matching component when available. Navigating does not write brush
+values.
 
 The center reads existing immutable pixel resources, not a rendered stroke.
 It shows a fitted resource in Tip mode or repeats the stored tile in Texture
@@ -441,9 +444,51 @@ The new GUI regression exercised both modes, component changes, history,
 filtering and zoom, and sampled the actual RGBA tile and its neighbor from
 the rendered window. The nine packaged-resource checks passed. Wide Tip and
 Texture captures were inspected; they showed no fake strokes or node data.
+Windows [44576652228](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44576652228)
+built `6e45e3a` but stopped on the component reorder UI regression (the
+next click added a third component instead of moving the selected row).
+B2.3 explicitly closes the Add menu before editing and tests its complete
+close before clicking the stack controls again.
+
+## Phase B2.3 — registry settings and creator exposure
+
+The inspector derives its thirteen expandable sections, labels, units, ranges
+and defaults from the production registry. Texture mode brings the Texture
+group forward; layout/navigation never changes values. Descriptors remain
+stable while the C++ readback changes, so a field is not replaced on each edit
+or undo. The UI supports exact numeric entry (including fractional values and
+the full brush-size range), bounded sliders that create one history step per
+drag, procedural tip choices, and individual resets. Component values target
+the current selection and unavailable choices are disabled. The selected
+component can also be renamed and assigned a stored blend mode. These values
+belong to the draft; they do not change the active painter or promise engine
+support for every stored value.
+
+**Creator exposure** has a separate page for adding, naming, removing and
+restoring draft exposure metadata. It does not filter the Studio settings or
+modify personal Tool Controls, artist overrides, or application-wide stroke
+controls. No Adaptive Tool Controls were implemented.
+
+**Validation (Debian 12 / Qt 6.8.3):** full desktop build; 49/49 CTest suites
+passed (88.94 s, two workers), including 54 Studio model QtTest passes with
+fixtures. Four focused Studio GUI regressions passed: native lifecycle,
+commands/compact layout, component stack and raw tiling, and the registry
+inspector/creator exposure. They cover exact entry and rejection, one-step
+slider drag, undo/redo, scoped edits, exposure without changing brush values,
+and usable settings at the 540 × 400 minimum. The packaged-resource self-check
+passed all nine checks. Wide Tip/Texture and compact settings captures were
+reviewed; clipping the software-rendered scroll viewports keeps glyphs inside
+their own panels.
 
 ## Next
 
-B2.3 (registry-driven settings) is pending. B3 (tip editor), B4 (brush library
+B2 is implemented and locally verified. B3 (tip editor), B4 (brush library
 integration), and B5 (isolated production-engine preview) are not started.
 Hardware tablet and artist workflow testing are still outstanding.
+
+For human testing, open **Edit → Brush Studio**, add a Texture component to
+see the repeated stored tile, change a setting, and save or reopen the draft
+with a local `.kb` file. Narrow the window to exercise the panel switcher and
+preview collapse. Check that the active artwork, brush and painting undo
+history remain untouched. The Nodes and Live Preview areas are intentionally
+unavailable, not simulated.

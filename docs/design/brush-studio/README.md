@@ -1,8 +1,9 @@
 # KomaPaint — Brush Studio (visual mockup)
 
-`brush-studio.png` (1728 × 1080) is a design mockup. No application code was
-written or changed for it: nothing here is wired into `src/` or `ui/`, and
-Brush Studio does not exist yet.
+The two 1728 × 1080 PNGs here are the approved design mockups, not captures
+of the running application. The five-region B2 implementation and the
+features deferred to later stages are tracked in the
+[Brush Studio progress record](../../architecture/brush-studio-progress.md).
 
 ![KomaPaint — Brush Studio](brush-studio.png)
 

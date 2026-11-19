@@ -89,29 +89,6 @@ Window {
         onAccepted: if (brushDraft.exportDraft(selectedFile)) studio.fileNotice = qsTr("Brush copy exported")
     }
 
-    component PanelScaffold: Rectangle {
-        id: panel
-        property string title: ""
-        property string notice: ""
-        color: KP.paneBg
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: KP.gapM
-            StudioHeader { Layout.fillWidth: true; title: panel.title }
-            Text {
-                Layout.fillWidth: true
-                Layout.leftMargin: KP.panelInset
-                Layout.rightMargin: KP.panelInset
-                text: panel.notice
-                color: KP.textSubtle
-                font.family: KP.fontUi
-                font.pixelSize: KP.fontM
-                wrapMode: Text.WordWrap
-            }
-            Item { Layout.fillHeight: true }
-        }
-    }
-
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -162,14 +139,14 @@ Window {
                 Layout.fillHeight: true
                 draft: brushDraft
             }
-            PanelScaffold {
+            StudioSettings {
                 objectName: "brushStudioSettings"
                 visible: !studio.compact || studio.compactPanel === 2
                 Layout.fillWidth: studio.compact
                 Layout.preferredWidth: studio.compact ? -1 : Math.min(340, Math.round(studio.width * 0.23))
                 Layout.fillHeight: true
-                title: qsTr("Brush Settings")
-                notice: qsTr("Settings here describe the brush draft, not your personal Tool Controls or application stroke controls.")
+                draft: brushDraft
+                textureMode: editor.mode === "texture"
             }
         }
         Text {

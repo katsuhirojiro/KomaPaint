@@ -39,8 +39,12 @@ class BrushStudioModel : public QObject {
     Q_PROPERTY(int hiddenComponentCount READ hiddenComponentCount NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList groups READ groups NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList parameters READ parameters NOTIFY componentsChanged)
+    Q_PROPERTY(QVariantList settingSections READ settingSections CONSTANT)
+    Q_PROPERTY(QVariantMap settingState READ settingState NOTIFY componentsChanged)
+    Q_PROPERTY(QVariantList exposureCandidates READ exposureCandidates NOTIFY exposureChanged)
     Q_PROPERTY(QVariantList exposedProperties READ exposedProperties NOTIFY exposureChanged)
     Q_PROPERTY(QVariantList componentKinds READ componentKinds CONSTANT)
+    Q_PROPERTY(QVariantList componentBlends READ componentBlends CONSTANT)
     Q_PROPERTY(QVariantList selectionModes READ selectionModes CONSTANT)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
@@ -84,6 +88,7 @@ public:
     Q_INVOKABLE bool selectComponentInMode(const QString& mode);
     QVariantList groups() const;
     QVariantList componentKinds() const;
+    QVariantList componentBlends() const;
     QVariantList selectionModes() const;
     QString selectedId() const;
     int selectedIndex() const;
@@ -110,12 +115,18 @@ public:
     // Every registry parameter with its group, range, unit and current value.
     // Component-scoped settings read and write the selected component.
     QVariantList parameters() const;
+    // Static presentation metadata and changing readback are separate so
+    // editing a value never destroys the QML control holding keyboard focus.
+    QVariantList settingSections() const;
+    QVariantMap settingState() const;
     Q_INVOKABLE double parameterValue(const QString& key) const;
     Q_INVOKABLE bool setParameterValue(const QString& key, double value);
+    Q_INVOKABLE bool setParameterText(const QString& key, const QString& text);
     Q_INVOKABLE QVariantMap parameterInfo(const QString& key) const;
 
     // ---- Sub-Tool exposure (Part 10) --------------------------------------
     QVariantList exposedProperties() const;
+    QVariantList exposureCandidates() const;
     Q_INVOKABLE bool isExposed(const QString& key) const;
     Q_INVOKABLE bool expose(const QString& key);
     Q_INVOKABLE bool unexpose(const QString& key);

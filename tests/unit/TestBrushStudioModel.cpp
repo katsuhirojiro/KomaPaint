@@ -10,6 +10,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLocale>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QVariantList>
@@ -48,6 +50,7 @@ private slots:
     void groupsPickModeAndMembers();
     void regroupedComponentsStayConsistentThroughSave();
     void settingsComeFromTheRegistry();
+    void settingSectionsAndReadbackKeepScopesSeparate();
     void settingsRejectNonsense();
     void componentRegistrySettingsReachTheSelectedComponent();
     void invalidComponentEditsAreTransactional_data();
@@ -363,6 +366,60 @@ void TestBrushStudioModel::settingsComeFromTheRegistry() {
     QVERIFY(model.parameterInfo(QStringLiteral("no-such-setting")).isEmpty());
     QVERIFY(model.setParameterValue(QStringLiteral("size"), brush::MaxBrushDiameter));
     QCOMPARE(model.parameterValue(QStringLiteral("size")), double(brush::MaxBrushDiameter));
+}
+
+void TestBrushStudioModel::settingSectionsAndReadbackKeepScopesSeparate() {
+    BrushStudioModel model;
+    const auto sections = model.settingSections();
+    const auto order = brush::parameterSections();
+    QCOMPARE(sections.size(), qsizetype(order.size()));
+    QSet<QString> keys;
+    for (qsizetype index = 0; index < sections.size(); ++index) {
+        const auto group = sections.at(index).toMap();
+        QCOMPARE(stringField(group, "title"), QString::fromUtf8(order[static_cast<std::size_t>(index)]));
+        const auto rows = group.value(QStringLiteral("rows")).toList();
+        QVERIFY(!rows.isEmpty());
+        for (const auto& entry : rows) {
+            const auto meta = entry.toMap();
+            const auto key = stringField(meta, "key");
+            QVERIFY(!keys.contains(key));
+            keys.insert(key);
+            const auto* info = brush::findParameter(key.toStdString());
+            QVERIFY(info);
+            QCOMPARE(numberField(meta, "min"), info->minimum);
+            QCOMPARE(numberField(meta, "max"), info->maximum);
+            QVERIFY(!meta.contains(QStringLiteral("value")) && !meta.contains(QStringLiteral("exposed")));
+        }
+    }
+    QCOMPARE(keys.size(), qsizetype(brush::parameterRegistry().size()));
+    const auto state = [&](const QString& key) {
+        return model.settingState().value(QStringLiteral("values")).toMap().value(key).toMap();
+    };
+    const auto size = QStringLiteral("size");
+    const auto shape = QStringLiteral("tip-shape");
+    const auto spacing = QStringLiteral("spacing");
+    QVERIFY(state(shape).value(QStringLiteral("available")).toBool());
+    QVERIFY(model.setParameterText(spacing, QLocale().toString(12.625)));
+    QCOMPARE(numberField(state(spacing), "value"), 12.625);
+    QCOMPARE(numberField(model.settingState(), "changedCount"), 1.0);
+    QVERIFY(model.setParameterText(size, QString::number(brush::MaxBrushDiameter)));
+    QCOMPARE(numberField(state(size), "value"), double(brush::MaxBrushDiameter));
+    const auto before = model.document();
+    QVERIFY(!model.setParameterText(spacing, QStringLiteral("not a number")));
+    QVERIFY(!model.setParameterText(spacing, QLocale().toString(51.25)));
+    QVERIFY(model.document() == before);
+    const auto texture = model.addComponent(int(brush::ComponentKind::Texture));
+    QVERIFY(!texture.isEmpty());
+    QVERIFY(!state(shape).value(QStringLiteral("available")).toBool());
+    QVERIFY(state(QStringLiteral("component-opacity")).value(QStringLiteral("available")).toBool());
+    model.setSelectedIndex(-1);
+    QVERIFY(!state(QStringLiteral("component-opacity")).value(QStringLiteral("available")).toBool());
+    QVERIFY(state(size).value(QStringLiteral("available")).toBool());
+    QVERIFY(model.unexpose(size));
+    QCOMPARE(numberField(state(size), "value"), double(brush::MaxBrushDiameter));
+    const auto candidates = model.exposureCandidates();
+    QVERIFY(std::ranges::any_of(candidates, [&](const auto& row) { return stringField(row.toMap(), "key") == size; }));
+    QCOMPARE(model.settingSections(), sections);
 }
 
 void TestBrushStudioModel::settingsRejectNonsense() {

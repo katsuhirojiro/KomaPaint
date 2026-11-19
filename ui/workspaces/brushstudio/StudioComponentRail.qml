@@ -64,6 +64,8 @@ Rectangle {
         ListView {
             id: stack
             objectName: "brushStudioComponentStack"
+            // A viewport layer keeps software Shape nodes inside the scroll clip.
+            layer.enabled: GraphicsInfo.api === GraphicsInfo.Software
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -80,6 +82,8 @@ Rectangle {
             preferredHighlightBegin: 0
             preferredHighlightEnd: height
             keyNavigationEnabled: false
+
+            Rectangle { parent: stack; anchors.fill: parent; z: -1; color: KP.paneBg }
 
             delegate: Item {
                 id: row
@@ -183,7 +187,7 @@ Rectangle {
                 variant: "solid"
                 tip: qsTr("Add a built-in component. Importing image files is unavailable.")
                 onClicked: addKinds.popup(add, 0, height)
-                StudioComponentMenu { id: addKinds; draft: rail.draft }
+                StudioComponentMenu { id: addKinds; objectName: "brushStudioAddMenu"; draft: rail.draft }
             }
             KpButton {
                 objectName: "brushStudioComponentUp"

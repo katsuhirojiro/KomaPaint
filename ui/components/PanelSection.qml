@@ -22,6 +22,10 @@ Item {
     property int contentTopMargin: KP.gapM
     property int contentBottomMargin: KP.gapL
     property int headerHeight: 18
+    property bool animateExpansion: true
+    // Loaded forms can provide their implicit height directly, avoiding a
+    // dependency on childrenRect while their delegate layout is being built.
+    property real contentHeight: body.childrenRect.height
 
     default property alias content: body.data
 
@@ -86,23 +90,44 @@ Item {
                 color: headerMouse.containsMouse ? KP.iconHover : KP.iconOff
             }
 
+            Rectangle {
+                anchors.fill: parent
+                visible: headerMouse.activeFocus
+                color: "transparent"
+                border.width: KP.focusWidth
+                border.color: KP.focusRing
+            }
+
             MouseArea {
                 id: headerMouse
+                objectName: root.objectName.length > 0 ? root.objectName + "Toggle" : ""
                 anchors.fill: parent
+                activeFocusOnTab: root.collapsible
+                Accessible.ignored: !root.collapsible
+                Accessible.role: Accessible.Button
+                Accessible.name: root.title
+                Accessible.description: root.expanded ? qsTr("Expanded") : qsTr("Collapsed")
+                Accessible.onPressAction: if (root.collapsible) toggle()
+                function toggle() { root.expanded = !root.expanded }
+                Keys.onSpacePressed: if (root.collapsible) toggle()
+                Keys.onReturnPressed: if (root.collapsible) toggle()
                 enabled: root.collapsible
                 hoverEnabled: root.collapsible
                 cursorShape: root.collapsible ? Qt.PointingHandCursor : Qt.ArrowCursor
-                onClicked: root.expanded = !root.expanded
+                onClicked: toggle()
             }
         }
 
         Item {
             id: body
             width: parent.width
-            height: root.expanded ? Math.max(0, childrenRect.height) : 0
+            height: root.expanded ? Math.max(0, root.contentHeight) : 0
             clip: true
             visible: height > 0
-            Behavior on height { NumberAnimation { duration: KP.durationBase; easing.type: KP.easingCurve } }
+            Behavior on height {
+                enabled: root.animateExpansion
+                NumberAnimation { duration: KP.durationBase; easing.type: KP.easingCurve }
+            }
         }
     }
 }

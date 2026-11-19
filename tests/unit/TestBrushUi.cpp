@@ -14,6 +14,8 @@
 #include <QGuiApplication>
 #include <QColor>
 #include <QImage>
+#include <QInputMethodEvent>
+#include <QLocale>
 #include <QPointer>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -185,6 +187,15 @@ bool chooseStudioSegment(QQuickWindow* studio, const char* name, int index, int 
     return true;
 }
 
+void captureStudio(QQuickWindow* studio, const QString& name)
+{
+    const auto directory = qEnvironmentVariable("KOMAPAINT_SCREENSHOT_DIR");
+    if (directory.isEmpty()) return;
+    QDir().mkpath(directory);
+    QTest::qWait(50);
+    studio->grabWindow().save(QDir(directory).filePath(name + QStringLiteral(".png")));
+}
+
 bool chooseHardness(Running& app, int choice)
 {
     auto* target = item(app, QStringLiteral("brushHardnessChoice"));
@@ -298,7 +309,7 @@ void collectWarnings(QtMsgType type, const QMessageLogContext& context, const QS
         QStringLiteral("ToolPalette.qml"), QStringLiteral("KpIcon.qml"), QStringLiteral("IconButton.qml"),
         QStringLiteral("PropertySlider.qml"), QStringLiteral("SegmentedChoice.qml"), QStringLiteral("SubToolPanel.qml"),
         QStringLiteral("ToolPropertyPanel.qml"), QStringLiteral("BrushSizePanel.qml"), QStringLiteral("LayersPanel.qml"),
-        QStringLiteral("BrushStudioWindow.qml"), QStringLiteral("NewProjectDialog.qml"),
+        QStringLiteral("BrushStudioWindow.qml"), QStringLiteral("PanelSection.qml"), QStringLiteral("NewProjectDialog.qml"),
         QStringLiteral("CanvasWorkspace.qml"), QStringLiteral("MainToolbar.qml"),
         QStringLiteral("PreferencesDialog.qml"), QStringLiteral("KomaSettingsDialog.qml"), QStringLiteral("KomaTheme.qml"),
         QStringLiteral("ColorPanel.qml"), QStringLiteral("PaintMixerView.qml"),
@@ -325,6 +336,7 @@ private slots:
     void brushStudioWindowIsIndependentAndReusable();
     void brushStudioCommandsAndCompactLayout();
     void brushStudioComponentsAndReadOnlyEditor();
+    void brushStudioRegistryInspectorAndCreatorExposure();
     void brushSizeGridSetsTheRealSize();
     void toolPropertyControlsDriveTheBrush();
     void strokesFollowHardnessAndTheEraserErases();
@@ -624,19 +636,19 @@ void TestBrushUi::brushStudioComponentsAndReadOnlyEditor()
     QVERIFY(!asset->isVisible());
     QCOMPARE(stack->property("count").toInt(), 1);
     QTRY_VERIFY(control("brushStudioEditorModes")->width() >= 150 && control("brushStudioEditorModes")->height() > 0);
-    if (qEnvironmentVariableIsSet("KOMAPAINT_SCREENSHOT_DIR")) {
-        const QDir capture(qEnvironmentVariable("KOMAPAINT_SCREENSHOT_DIR"));
-        QDir().mkpath(capture.path());
-        studio->grabWindow().save(capture.filePath(QStringLiteral("studio-tip.png")));
-    }
+    captureStudio(studio, QStringLiteral("studio-tip"));
     QVERIFY(chooseStudioSegment(studio, "brushStudioEditorModes", 1, 3));
     QCOMPARE(editor->property("mode").toString(), QStringLiteral("texture"));
     QVERIFY(!asset->isVisible() && !draft->isModified());
 
+    auto* addMenu = studio->findChild<QObject*>(QStringLiteral("brushStudioAddMenu"));
+    QVERIFY(addMenu);
     QVERIFY(press("brushStudioAddComponent"));
+    QTRY_VERIFY(addMenu->property("opened").toBool());
     QQuickItem* addTexture = nullptr;
     QTRY_VERIFY((addTexture = control("brushStudioAdd_texture")) && addTexture->isVisible());
     click(studio, addTexture);
+    QTRY_VERIFY(!addMenu->property("visible").toBool());
     QTRY_COMPARE(draft->componentCount(), 2);
     const auto texture = draft->selectedId();
     QCOMPARE(draft->document().components.back().kind, brush::ComponentKind::Texture);
@@ -682,7 +694,9 @@ void TestBrushUi::brushStudioComponentsAndReadOnlyEditor()
     QCOMPARE(draft->hiddenComponentCount(), 0);
     QVERIFY(press("brushStudioRedo"));
     QCOMPARE(draft->hiddenComponentCount(), 1);
+    QCOMPARE(draft->componentCount(), 2);
     QVERIFY(press("brushStudioComponentUp"));
+    QCOMPARE(draft->componentCount(), 2);
     QCOMPARE(draft->selectedIndex(), 0);
     QCOMPARE(QString::fromStdString(draft->document().components.front().id), texture);
     QVERIFY(press("brushStudioTab_c1"));
@@ -695,11 +709,7 @@ void TestBrushUi::brushStudioComponentsAndReadOnlyEditor()
     QCOMPARE(draft->selectedId(), texture);
     QCOMPARE(editor->property("mode").toString(), QStringLiteral("texture"));
 
-    const QString capture = qEnvironmentVariable("KOMAPAINT_SCREENSHOT_DIR");
-    if (!capture.isEmpty()) {
-        QDir().mkpath(capture);
-        studio->grabWindow().save(QDir(capture).filePath(QStringLiteral("studio-texture.png")));
-    }
+    captureStudio(studio, QStringLiteral("studio-texture"));
     QVERIFY(press("brushStudioComponentSearch"));
     QTest::keyClick(studio, Qt::Key_T);
     QTest::keyClick(studio, Qt::Key_E);
@@ -713,6 +723,122 @@ void TestBrushUi::brushStudioComponentsAndReadOnlyEditor()
     QCOMPARE(draft->componentCount(), 2);
     QCOMPARE(draft->selectedId(), texture);
     QVERIFY(app.workspace.history() && !app.workspace.history()->canUndo());
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+}
+
+void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiStudioInspector")));
+    QVERIFY(QMetaObject::invokeMethod(app.root.get(), "openBrushStudio"));
+    QQuickWindow* studio = nullptr;
+    QTRY_VERIFY((studio = studioWindow()) && studio->isVisible());
+    studio->resize(1440, 860);
+    auto* draft = studio->findChild<BrushStudioModel*>();
+    QVERIFY(draft);
+    const auto control = [&](const char* name) { return studioControl(studio, name); };
+    const auto press = [&](const char* name) { return pressStudio(studio, name); };
+    const auto enter = [&](const char* name, const QString& value) {
+        if (!press(name)) return false;
+        QTest::keyClick(studio, Qt::Key_A, Qt::ControlModifier);
+        auto* field = studio->activeFocusItem();
+        if (!field) return false;
+        QInputMethodEvent text;
+        text.setCommitString(value);
+        QCoreApplication::sendEvent(field, &text);
+        QTest::keyClick(studio, Qt::Key_Return);
+        QCoreApplication::processEvents();
+        return true;
+    };
+    const auto spacing = QStringLiteral("spacing");
+    const auto size = QStringLiteral("size");
+    const int originalSize = app.workspace.brush()->size();
+    QTRY_VERIFY(control("brushStudioSection_StrokeToggle") && control("brushStudioSection_StrokeToggle")->width() > 0);
+    QVERIFY(press("brushStudioSection_StrokeToggle"));
+    QTRY_VERIFY(control("brushStudioValue_spacing") && control("brushStudioValue_spacing")->width() > 0);
+    QVERIFY(enter("brushStudioValue_spacing", QLocale().toString(12.625)));
+    QCOMPARE(draft->document().parameter("spacing"), 12.625);
+    QCOMPARE(draft->retainedStorage().historyStates, std::size_t(1));
+    auto* spacingField = control("brushStudioValue_spacing");
+    QVERIFY(spacingField);
+    QVERIFY(enter("brushStudioValue_spacing", QStringLiteral("bogus")));
+    QVERIFY(!draft->error().isEmpty());
+    QCOMPARE(spacingField->property("text").toString(), QLocale().toString(12.625));
+    QVERIFY(press("brushStudioUndo"));
+    QCOMPARE(draft->parameterValue(spacing), 15.0);
+    QVERIFY(press("brushStudioRedo"));
+    QCOMPARE(draft->parameterValue(spacing), 12.625);
+    QCOMPARE(control("brushStudioValue_spacing"), spacingField); // no delegate reset on edits/replay
+
+    auto* rail = control("brushStudioRail_spacing");
+    QVERIFY(rail && rail->isVisible());
+    scrollIntoView(rail);
+    const auto railAt = [&](double f) { return rail->mapToScene({rail->width() * f, rail->height() / 2.0}).toPoint(); };
+    QTest::mousePress(studio, Qt::LeftButton, Qt::NoModifier, railAt(0.25));
+    QTest::mouseMove(studio, railAt(0.45));
+    QTest::mouseMove(studio, railAt(0.75));
+    const auto beforeRelease = draft->retainedStorage().historyStates;
+    QTest::mouseRelease(studio, Qt::LeftButton, Qt::NoModifier, railAt(0.75));
+    QVERIFY(draft->parameterValue(spacing) > 30.0);
+    QCOMPARE(draft->retainedStorage().historyStates, beforeRelease + 1);
+    QVERIFY(press("brushStudioReset_spacing"));
+    QCOMPARE(draft->parameterValue(spacing), 15.0);
+
+    QVERIFY(press("brushStudioSection_SizeToggle"));
+    QTRY_VERIFY(control("brushStudioValue_size") && control("brushStudioValue_size")->width() > 0);
+    QVERIFY(enter("brushStudioValue_size", QString::number(brush::MaxBrushDiameter)));
+    QCOMPARE(draft->parameterValue(size), double(brush::MaxBrushDiameter));
+    QCOMPARE(app.workspace.brush()->size(), originalSize);
+    QVERIFY(press("brushStudioValue_tip-shape"));
+    QTest::keyClick(studio, Qt::Key_Down);
+    QTest::keyClick(studio, Qt::Key_Return);
+    QCOMPARE(draft->document().components.front().parameters.value("tip-shape"), 1.0);
+
+    const auto texture = draft->addComponent(int(brush::ComponentKind::Texture));
+    QVERIFY(!texture.isEmpty());
+    QTRY_VERIFY(control("brushStudioValue_texture-scale") && control("brushStudioValue_texture-scale")->isVisible());
+    QVERIFY(enter("brushStudioValue_texture-scale", QLocale().toString(128.25)));
+    QCOMPARE(draft->document().parameter("texture-scale"), 128.25);
+    QVERIFY(press("brushStudioSection_Brush TipToggle"));
+    QTRY_VERIFY(control("brushStudioValue_tip-shape") && !control("brushStudioValue_tip-shape")->isEnabled());
+    QVERIFY(press("brushStudioSection_AdvancedToggle"));
+    QTRY_VERIFY(control("brushStudioValue_component-opacity") && control("brushStudioValue_component-opacity")->isVisible());
+    QVERIFY(enter("brushStudioValue_component-opacity", QStringLiteral("25")));
+    QCOMPARE(draft->document().components.back().opacity, 0.25);
+    QCOMPARE(draft->document().components.front().opacity, 1.0);
+    QVERIFY(press("brushStudioSelectedComponentSectionToggle"));
+    QVERIFY(enter("brushStudioSelectedComponentName", QStringLiteral("Paper Fibre")));
+    QCOMPARE(QString::fromStdString(draft->document().components.back().name), QStringLiteral("Paper Fibre"));
+
+    QVERIFY(chooseStudioSegment(studio, "brushStudioInspectorChoice", 1, 2));
+    QTRY_VERIFY(control("brushStudioExposeChoice") && control("brushStudioExposeChoice")->isVisible());
+    const auto count = draft->exposedProperties().size();
+    const auto firstCandidate = draft->exposureCandidates().first().toMap().value(QStringLiteral("key")).toString();
+    QVERIFY(press("brushStudioExposeChoice"));
+    QTest::keyClick(studio, Qt::Key_Home);
+    QTest::keyClick(studio, Qt::Key_Return);
+    QTRY_COMPARE(draft->exposedProperties().size(), count + 1);
+    QVERIFY(draft->isExposed(firstCandidate));
+    QVERIFY(enter("brushStudioExposureLabel_size", QStringLiteral("Preferred Width")));
+    const auto rows = draft->exposedProperties();
+    const auto row = std::ranges::find_if(rows, [&](const auto& item) { return item.toMap().value(QStringLiteral("key")).toString() == size; });
+    QVERIFY(row != rows.end());
+    QCOMPARE(row->toMap().value(QStringLiteral("label")).toString(), QStringLiteral("Preferred Width"));
+    QVERIFY(press("brushStudioUnexpose_size"));
+    QVERIFY(!draft->isExposed(size));
+    QCOMPARE(draft->parameterValue(size), double(brush::MaxBrushDiameter));
+    QCOMPARE(app.workspace.brush()->size(), originalSize);
+    QVERIFY(!app.workspace.history()->canUndo());
+
+    studio->resize(studio->minimumWidth(), studio->minimumHeight());
+    QTRY_VERIFY(control("brushStudioPanelChoice")->isVisible());
+    QVERIFY(chooseStudioSegment(studio, "brushStudioPanelChoice", 2, 3));
+    QVERIFY(chooseStudioSegment(studio, "brushStudioInspectorChoice", 0, 2));
+    QTRY_VERIFY(control("brushStudioSettingsScroll")->height() > 70);
+    QVERIFY(control("brushStudioSettingsScroll")->property("contentHeight").toReal() > control("brushStudioSettingsScroll")->height());
+    QVERIFY(enter("brushStudioValue_texture-scale", QStringLiteral("150")));
+    QCOMPARE(draft->document().parameter("texture-scale"), 150.0);
+    captureStudio(studio, QStringLiteral("studio-compact"));
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 

@@ -9,6 +9,10 @@
         <file alias="workspaces/brushstudio/StudioComponentMenu.qml">../ui/workspaces/brushstudio/StudioComponentMenu.qml</file>
         <file alias="workspaces/brushstudio/StudioComponentRail.qml">../ui/workspaces/brushstudio/StudioComponentRail.qml</file>
         <file alias="workspaces/brushstudio/StudioEditor.qml">../ui/workspaces/brushstudio/StudioEditor.qml</file>
+        <file alias="workspaces/brushstudio/StudioChoice.qml">../ui/workspaces/brushstudio/StudioChoice.qml</file>
+        <file alias="workspaces/brushstudio/StudioParameter.qml">../ui/workspaces/brushstudio/StudioParameter.qml</file>
+        <file alias="workspaces/brushstudio/StudioExposure.qml">../ui/workspaces/brushstudio/StudioExposure.qml</file>
+        <file alias="workspaces/brushstudio/StudioSettings.qml">../ui/workspaces/brushstudio/StudioSettings.qml</file>
         <file alias="components/MainToolbar.qml">../ui/components/MainToolbar.qml</file>
         <file alias="components/ToolPalette.qml">../ui/components/ToolPalette.qml</file>
         <file alias="components/CanvasWorkspace.qml">../ui/components/CanvasWorkspace.qml</file>

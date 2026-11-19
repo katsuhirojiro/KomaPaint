@@ -11,7 +11,11 @@ KpMenu {
             required property var modelData
             text: modelData.label
             objectName: "brushStudioAdd_" + modelData.name
-            onTriggered: menu.draft.addComponent(modelData.value)
+            onTriggered: {
+                const kind = modelData.value
+                menu.close()
+                menu.draft.addComponent(kind)
+            }
         }
         onObjectAdded: function(index, entry) { menu.insertItem(index, entry) }
         onObjectRemoved: function(index, entry) { menu.removeItem(entry) }

@@ -69,6 +69,8 @@ Rectangle {
                     ListView {
                         id: tabs
                         objectName: "brushStudioComponentTabs"
+                        // A viewport layer keeps software Shape nodes inside the scroll clip.
+                        layer.enabled: GraphicsInfo.api === GraphicsInfo.Software
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         orientation: ListView.Horizontal
@@ -81,6 +83,8 @@ Rectangle {
                         preferredHighlightEnd: width
                         keyNavigationEnabled: false
                         ScrollBar.horizontal: KpScrollBar { policy: ScrollBar.AsNeeded; opacity: size < 1 ? 1 : 0 }
+                        Rectangle { parent: tabs; anchors.fill: parent; z: -1; color: KP.paneHeaderBg }
+
                         delegate: ItemDelegate {
                             id: tab
                             required property var modelData
