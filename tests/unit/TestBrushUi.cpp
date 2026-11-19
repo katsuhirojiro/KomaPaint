@@ -813,12 +813,21 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
 
     QVERIFY(chooseStudioSegment(studio, "brushStudioInspectorChoice", 1, 2));
     QTRY_VERIFY(control("brushStudioExposeChoice") && control("brushStudioExposeChoice")->isVisible());
-    const auto count = draft->exposedProperties().size();
+    auto* exposure = control("brushStudioExposure");
+    auto* restore = control("brushStudioRestoreExposure");
+    QVERIFY(exposure && restore);
+    const QVariant restoreLabel = restore->property("label");
+    // A wide fallback font or translation must not widen the whole column
+    // and put the row actions behind the scrollbar.
+    QVERIFY(restore->setProperty("label", restoreLabel.toString().repeated(4)));
+    QTRY_VERIFY(restore->implicitWidth() > exposure->width());
+    QTRY_VERIFY(restore->width() > 0 && restore->width() < exposure->width());
+    const auto defaultExposure = draft->exposedProperties();
     const auto firstCandidate = draft->exposureCandidates().first().toMap().value(QStringLiteral("key")).toString();
     QVERIFY(press("brushStudioExposeChoice"));
     QTest::keyClick(studio, Qt::Key_Home);
     QTest::keyClick(studio, Qt::Key_Return);
-    QTRY_COMPARE(draft->exposedProperties().size(), count + 1);
+    QTRY_COMPARE(draft->exposedProperties().size(), defaultExposure.size() + 1);
     QVERIFY(draft->isExposed(firstCandidate));
     QTRY_VERIFY(control("brushStudioExposureLabel_size") && control("brushStudioExposureLabel_size")->isVisible());
     QPointer<QQuickItem> labelField(control("brushStudioExposureLabel_size"));
@@ -832,8 +841,13 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
     QTRY_VERIFY(labelField && labelField->property("text").toString() == QStringLiteral("Preferred Width"));
     QCOMPARE(control("brushStudioExposureLabel_size"), labelField.data());
     QCOMPARE(control("brushStudioUnexpose_size"), removeButton.data());
+    const auto removeRect = removeButton->mapRectToItem(exposure, removeButton->boundingRect());
+    QVERIFY(removeRect.left() >= 0 && removeRect.right() < exposure->width());
     QVERIFY(press("brushStudioUnexpose_size"));
     QTRY_VERIFY(!draft->isExposed(size));
+    QVERIFY(restore->setProperty("label", restoreLabel));
+    QVERIFY(press("brushStudioRestoreExposure"));
+    QCOMPARE(draft->exposedProperties(), defaultExposure);
     QCOMPARE(draft->parameterValue(size), double(brush::MaxBrushDiameter));
     QCOMPARE(app.workspace.brush()->size(), originalSize);
     QVERIFY(!app.workspace.history()->canUndo());

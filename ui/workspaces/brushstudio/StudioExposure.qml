@@ -20,23 +20,26 @@ Flickable {
 
     Rectangle { parent: exposure; anchors.fill: parent; z: -1; color: KP.paneBg }
 
-    ColumnLayout {
+    // Use the viewport width, not a column layout's shared minimum. A
+    // wide translated label or fallback font must not move the row actions
+    // into the scrollbar or outside the window.
+    Column {
         id: form
         x: KP.panelInset
         y: KP.panelInset
         width: Math.max(0, exposure.width - 2 * KP.panelInset)
         spacing: KP.gapM
         Text {
-            Layout.fillWidth: true
+            width: form.width
             text: qsTr("Choose which properties the brush should expose by default. This metadata is saved in the .kb; it does not change personal Tool Controls or app-wide stroke controls.")
             color: KP.textMuted
             font.family: KP.fontUi
             font.pixelSize: KP.fontS
-            wrapMode: Text.WordWrap
+            wrapMode: Text.Wrap
         }
         StudioChoice {
             objectName: "brushStudioExposeChoice"
-            Layout.fillWidth: true
+            width: form.width
             model: exposure.draft.exposureCandidates
             textRole: "label"
             valueRole: "key"
@@ -52,7 +55,7 @@ Flickable {
                 id: exposedRow
                 required property string modelData
                 readonly property var entry: exposure.metadata.entries[modelData] || {}
-                Layout.fillWidth: true
+                width: form.width
                 spacing: KP.gapS
                 ColumnLayout {
                     Layout.fillWidth: true
@@ -90,7 +93,10 @@ Flickable {
             }
         }
         KpButton {
-            label: qsTr("Restore default exposure")
+            objectName: "brushStudioRestoreExposure"
+            width: Math.min(implicitWidth, form.width)
+            clip: true
+            label: qsTr("Restore defaults")
             glyph: "reset"
             variant: "solid"
             tip: qsTr("Restore the default creator list without changing any brush values")

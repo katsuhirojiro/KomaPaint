@@ -482,13 +482,18 @@ their own panels. The four focused cases also passed in the light theme;
 three command/editor/inspector cases passed at 150% scaling.
 
 Windows [44578596518](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44578596518)
-built `3e2d825` and passed the component regression, but failed the Remove
-click immediately after an exposure label edit. The follow-up separates
-ordered exposure keys from their metadata so editing a label does not
-recreate the row or move its buttons. The regression now checks that both
-controls remain mounted and that Remove still works. Rebuilt and reran all
-49 Linux CTest suites (79.00 s), four focused UI cases, and all nine packaged
-self-checks; all passed.
+built `3e2d825` and passed the component regression, but failed to remove an
+exposed property after a label edit. `04bfafb` kept the exposure rows mounted
+while relabeling; its Windows run
+[44580465657](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44580465657)
+failed at the same click. Reproducing with an empty font directory on Linux
+showed that fallback font metrics widened the form, putting the Remove button
+under the scrollbar. Exposure controls now size to the viewport, with a
+regression that gives the reset button an oversized label and exercises adding,
+renaming, removing, and restoring exposure without changing brush values.
+All four Studio UI cases passed with normal fonts and with no fonts, all
+49 Linux CTest suites passed (73.20 s), and all nine packaged-resource checks
+passed.
 
 ## Next
 
@@ -498,7 +503,8 @@ Hardware tablet and artist workflow testing are still outstanding.
 
 For human testing, open **Edit → Brush Studio**, add a Texture component to
 see the repeated stored tile, change a setting, and save or reopen the draft
-with a local `.kb` file. Narrow the window to exercise the panel switcher and
-preview collapse. Check that the active artwork, brush and painting undo
-history remain untouched. The Nodes and Live Preview areas are intentionally
-unavailable, not simulated.
+with a local `.kb` file. In **Creator exposure**, try relabeling and removing a
+property, then restore defaults. Narrow the window to exercise the panel
+switcher and preview collapse. Check that the active artwork, brush and
+painting undo history remain untouched. The Nodes and Live Preview areas are
+intentionally unavailable, not simulated.
