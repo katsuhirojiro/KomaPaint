@@ -1,12 +1,15 @@
 #include "BrushStudioModel.h"
 
 #include "../brush/BrushEvaluator.h"
+#include "../canvas/MemoryAvailability.h"
 
 #include <QFileInfo>
 
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
+#include <new>
 #include <string>
 #include <utility>
 
@@ -19,20 +22,6 @@ using brush::ComponentBlend;
 using brush::ComponentKind;
 using brush::Engine;
 using brush::SelectionMode;
-
-std::size_t documentBytes(const BrushDocument& document) {
-    std::size_t bytes = sizeof(BrushDocument);
-    bytes += document.components.size() * sizeof(BrushComponent);
-    bytes += document.groups.size() * sizeof(brush::ComponentGroup);
-    bytes += document.generators.size() * sizeof(brush::BrushGenerator);
-    bytes += document.resources.size() * sizeof(brush::BrushResource);
-    for (const auto& resource : document.resources) bytes += resource.pixels.size();
-    bytes += document.parameters.entries().size() * sizeof(std::pair<std::string, double>);
-    bytes += document.exposed.size() * sizeof(brush::ExposedProperty);
-    bytes += document.dynamics.size() * sizeof(brush::DynamicsBinding);
-    bytes += document.randomization.size() * sizeof(brush::RandomizationRule);
-    return bytes;
-}
 
 QString unitName(brush::ParameterUnit unit) {
     switch (unit) {
@@ -108,7 +97,11 @@ int kindIndex(ComponentKind kind) {
 
 } // namespace
 
-BrushStudioModel::BrushStudioModel(QObject* parent) : QObject(parent) {
+BrushStudioModel::BrushStudioModel(QObject* parent)
+    : BrushStudioModel(parent, [](void*, std::size_t bytes) noexcept { return systemMemoryAvailable(bytes); }, nullptr) {}
+
+BrushStudioModel::BrushStudioModel(QObject* parent, MemoryCheck check, void* context)
+    : QObject(parent), m_memoryCheck(check), m_memoryContext(context) {
     m_document.name = "Untitled brush";
     m_document.id = "studio-brush";
     // A brush you can paint with before you change anything: one procedural tip
@@ -131,21 +124,27 @@ BrushStudioModel::BrushStudioModel(QObject* parent) : QObject(parent) {
         property.order = order++;
         m_document.expose(std::move(property));
     }
-    syncSelection();
+    m_selectedIndex = 0;
 }
 
 // ---- document ---------------------------------------------------------------
 
-void BrushStudioModel::setDocument(BrushDocument document) {
-    pushUndo("Open brush");
-    m_document = std::move(document);
-    m_modified = true;
-    m_selectedIndex = m_document.components.empty() ? -1 : 0;
-    emit documentChanged();
-    emit componentsChanged();
-    emit selectionChanged();
-    emit exposureChanged();
-    emit historyChanged();
+bool BrushStudioModel::setDocument(const BrushDocument& document) {
+    return edit("Open brush", [&] {
+        m_document = document;
+        m_selectedIndex = m_document.components.empty() ? -1 : 0;
+    }, EditMode::Replace, &document);
+}
+
+bool BrushStudioModel::setDocument(BrushDocument&& document) {
+    return replaceDocument(std::move(document), EditMode::Replace);
+}
+
+bool BrushStudioModel::replaceDocument(BrushDocument&& document, EditMode mode) {
+    return edit("Open brush", [&] {
+        m_document = std::move(document);
+        m_selectedIndex = m_document.components.empty() ? -1 : 0;
+    }, mode);
 }
 
 bool BrushStudioModel::load(const QString& path) {
@@ -157,11 +156,7 @@ bool BrushStudioModel::load(const QString& path) {
         fail(QString::fromStdString(failure.empty() ? result.error : failure));
         return false;
     }
-    clearError();
-    setDocument(std::move(loaded));
-    m_modified = false;
-    emit documentChanged();
-    return true;
+    return replaceDocument(std::move(loaded), EditMode::LoadSaved);
 }
 
 bool BrushStudioModel::save(const QString& path) {
@@ -169,8 +164,9 @@ bool BrushStudioModel::save(const QString& path) {
     if (!brush::saveBrushFile(QFileInfo(path).filesystemAbsoluteFilePath(), m_document, &failure)) {
         return fail(QString::fromStdString(failure));
     }
+    commitStep();
+    markSaved();
     clearError();
-    m_modified = false;
     emit documentChanged();
     return true;
 }
@@ -309,27 +305,31 @@ brush::BrushResource makeDotResource(const QString& name) {
     resource.kind = brush::ResourceKind::Grayscale8;
     resource.width = 32;
     resource.height = 32;
-    resource.pixels.resize(32u * 32u);
+    std::vector<std::uint8_t> pixels(32u * 32u);
     const double centre = 15.5;
     const double radius = 15.5;
     for (int y = 0; y < 32; ++y) {
         for (int x = 0; x < 32; ++x) {
             const double distance = std::hypot(double(x) - centre, double(y) - centre);
             const double coverage = std::clamp(1.0 - distance / radius, 0.0, 1.0);
-            resource.pixels[std::size_t(y) * 32u + std::size_t(x)] =
+            pixels[std::size_t(y) * 32u + std::size_t(x)] =
                 static_cast<std::uint8_t>(std::lround(coverage * 255.0));
         }
     }
+    resource.setPixels(std::move(pixels));
     return resource;
 }
 
 } // namespace
 
 QString BrushStudioModel::addComponent(int kind) {
-    if (kind < 0 || kind >= int(std::size(kComponentKinds))) return QString();
+    if (kind < 0 || kind >= int(std::size(kComponentKinds))) {
+        fail(QStringLiteral("That component kind is not valid."));
+        return {};
+    }
     const ComponentKind componentKind = kComponentKinds[kind];
     QString id;
-    edit("Add component", [this, componentKind, &id] {
+    const bool added = edit("Add component", [this, componentKind, &id] {
         BrushComponent component;
         component.id = m_document.allocateId("c");
         component.kind = componentKind;
@@ -342,14 +342,14 @@ QString BrushStudioModel::addComponent(int kind) {
             brush::BrushResource resource = makeDotResource(QStringLiteral("Dot"));
             resource.id = m_document.allocateId("r");
             component.resourceId = resource.id;
-            m_document.addResource(std::move(resource));
+            if (!m_document.addResource(std::move(resource))) return false;
         }
         id = QString::fromStdString(component.id);
-        m_document.addComponent(std::move(component));
+        if (!m_document.addComponent(std::move(component))) return false;
         m_selectedIndex = int(m_document.components.size()) - 1;
+        return true;
     });
-    emit selectionChanged();
-    return id;
+    return added ? id : QString{};
 }
 
 QString BrushStudioModel::duplicateComponent(const QString& id) {
@@ -359,13 +359,14 @@ QString BrushStudioModel::duplicateComponent(const QString& id) {
         fail(QStringLiteral("There is no component with that id."));
         return QString();
     }
-    edit("Duplicate component", [this, source, &created] {
+    const bool duplicated = edit("Duplicate component", [this, &source, &created] {
         std::string newId;
-        if (m_document.duplicateComponent(source, &newId)) created = QString::fromStdString(newId);
+        if (!m_document.duplicateComponent(source, &newId)) return false;
+        m_selectedIndex = m_document.componentIndex(newId);
+        created = QString::fromStdString(newId);
+        return true;
     });
-    if (created.isEmpty()) return QString();
-    setSelectedIndex(m_document.componentIndex(created.toStdString()));
-    return created;
+    return duplicated ? created : QString{};
 }
 
 bool BrushStudioModel::removeComponent(const QString& id) {
@@ -374,14 +375,13 @@ bool BrushStudioModel::removeComponent(const QString& id) {
         fail(QStringLiteral("There is no component with that id."));
         return false;
     }
-    edit("Delete component", [this, target] {
-        m_document.removeComponent(target);
+    return edit("Delete component", [this, &target] {
+        if (!m_document.removeComponent(target)) return false;
         if (m_selectedIndex >= int(m_document.components.size())) {
             m_selectedIndex = int(m_document.components.size()) - 1;
         }
+        return true;
     });
-    emit selectionChanged();
-    return true;
 }
 
 bool BrushStudioModel::moveComponent(const QString& id, int newIndex) {
@@ -390,13 +390,14 @@ bool BrushStudioModel::moveComponent(const QString& id, int newIndex) {
         fail(QStringLiteral("There is no component with that id."));
         return false;
     }
-    if (newIndex < 0 || newIndex >= int(m_document.components.size())) return false;
-    edit("Reorder components", [this, target, newIndex] {
-        m_document.moveComponent(target, newIndex);
-        m_selectedIndex = m_document.componentIndex(target);
+    if (newIndex < 0 || static_cast<std::size_t>(newIndex) >= m_document.components.size()) {
+        return fail(QStringLiteral("That component position is outside the list."));
+    }
+    return edit("Reorder components", [this, &target, newIndex] {
+        if (!m_document.moveComponent(target, newIndex)) return false;
+        m_selectedIndex = newIndex;
+        return true;
     });
-    emit selectionChanged();
-    return true;
 }
 
 BrushComponent* BrushStudioModel::editableComponent(const QString& id) {
@@ -405,12 +406,12 @@ BrushComponent* BrushStudioModel::editableComponent(const QString& id) {
     return component;
 }
 
-bool BrushStudioModel::setComponentName(const QString& id, const QString& value) {
+bool BrushStudioModel::setComponentName(const QString& id, const QString& value) try {
     auto* component = editableComponent(id);
     if (!component) return false;
     if (value.trimmed().isEmpty()) return fail(QStringLiteral("A component needs a name."));
     return changeSetting("Rename component", component->name, value.toStdString());
-}
+} catch (const std::bad_alloc&) { return historyMemoryError(); }
 
 bool BrushStudioModel::setComponentVisible(const QString& id, bool visible) {
     auto* component = editableComponent(id);
@@ -475,15 +476,15 @@ bool BrushStudioModel::setComponentWeight(const QString& id, double weight) {
 
 QString BrushStudioModel::createGroup(const QString& name) {
     QString id;
-    edit("Add group", [this, name, &id] {
+    const bool added = edit("Add group", [this, &name, &id] {
         brush::ComponentGroup group;
         group.id = m_document.allocateId("g");
         group.name = name.isEmpty() ? "Group " + group.id : name.toStdString();
         group.mode = SelectionMode::All;
         id = QString::fromStdString(group.id);
-        m_document.addGroup(std::move(group));
+        return m_document.addGroup(std::move(group));
     });
-    return id;
+    return added ? id : QString{};
 }
 
 bool BrushStudioModel::assignToGroup(const QString& componentId, const QString& groupId) {
@@ -499,9 +500,7 @@ bool BrushStudioModel::assignToGroup(const QString& componentId, const QString& 
         return false;
     }
     if (component->groupId == destination) return false;
-    edit("Move component to group", [&] { m_document.setComponentGroup(id, destination); });
-    clearError();
-    return true;
+    return edit("Move component to group", [&] { return m_document.setComponentGroup(id, destination); });
 }
 
 bool BrushStudioModel::setGroupMode(const QString& groupId, int mode) {
@@ -535,9 +534,7 @@ bool BrushStudioModel::removeGroup(const QString& groupId) {
         fail(QStringLiteral("Move or remove this group's generators before deleting it."));
         return false;
     }
-    edit("Delete group", [&] { m_document.removeGroup(id); });
-    clearError();
-    return true;
+    return edit("Delete group", [&] { return m_document.removeGroup(id); });
 }
 
 // ---- settings ---------------------------------------------------------------
@@ -606,13 +603,13 @@ bool BrushStudioModel::setParameterValue(const QString& key, double value) {
                 return fail(QStringLiteral("Tip shape must be a built-in shape on a procedural component."));
             }
             if (component->parameters.value(info->name, info->defaultValue) != value) {
-                edit("Component tip shape", [&] { component->parameters.set(info->name, value); });
+                return edit("Component tip shape", [&] { component->parameters.set(info->name, value); });
             }
         } else {
             return fail(QStringLiteral("There is no component editor for '%1'.").arg(key));
         }
     } else if (m_document.parameters.value(info->name, info->defaultValue) != value) {
-        edit("Change setting", [&] { m_document.setParameter(info->name, value); });
+        return edit("Change setting", [&] { return m_document.setParameter(info->name, value); });
     }
     clearError();
     return true;
@@ -674,103 +671,105 @@ bool BrushStudioModel::expose(const QString& key) {
         fail(QStringLiteral("There is no brush setting called '%1'.").arg(key));
         return false;
     }
-    if (isExposed(key)) return true;
-    edit("Expose setting", [this, info] {
+    if (isExposed(key)) {
+        clearError();
+        return true;
+    }
+    return edit("Expose setting", [this, info] {
         brush::ExposedProperty property;
         property.parameter = info->name;
         property.order = int(m_document.exposed.size());
-        m_document.expose(std::move(property));
+        return m_document.expose(std::move(property));
     });
-    return true;
 }
 
 bool BrushStudioModel::unexpose(const QString& key) {
-    if (!isExposed(key)) return false;
-    edit("Hide setting", [this, key] { m_document.unexpose(key.toStdString()); });
-    return true;
+    if (!isExposed(key)) return fail(QStringLiteral("'%1' is not exposed.").arg(key));
+    return edit("Hide setting", [this, &key] { return m_document.unexpose(key.toStdString()); });
 }
 
-bool BrushStudioModel::setExposure(const QString& key, const QVariantMap& fields) {
-    bool found = false;
-    for (auto& property : m_document.exposed) {
-        if (property.parameter != key.toStdString()) continue;
-        found = true;
-        if (fields.contains(QStringLiteral("label"))) {
-            property.label = fields.value(QStringLiteral("label")).toString().toStdString();
-        }
-        if (fields.contains(QStringLiteral("section"))) {
-            property.section = fields.value(QStringLiteral("section")).toString().toStdString();
-        }
-        if (fields.contains(QStringLiteral("order"))) {
-            property.order = fields.value(QStringLiteral("order")).toInt();
-        }
-        if (fields.contains(QStringLiteral("control"))) {
-            brush::ControlType control = property.control;
-            if (brush::parseControlType(
-                    fields.value(QStringLiteral("control")).toString().toStdString(), &control)) {
-                property.control = control;
+bool BrushStudioModel::setExposure(const QString& key, const QVariantMap& fields) try {
+    const auto name = key.toStdString();
+    const auto* info = brush::findParameter(name);
+    const auto it = std::ranges::find(m_document.exposed, name, &brush::ExposedProperty::parameter);
+    if (!info || it == m_document.exposed.end()) return fail(QStringLiteral("'%1' is not exposed.").arg(key));
+
+    auto next = *it;
+    double low = next.hasRangeOverride ? next.minimumOverride : info->minimum;
+    double high = next.hasRangeOverride ? next.maximumOverride : info->maximum;
+    bool rangeEdited = false;
+    for (auto field = fields.cbegin(); field != fields.cend(); ++field) {
+        const auto& k = field.key();
+        const auto& v = field.value();
+        if (k == QStringLiteral("label") || k == QStringLiteral("section")) {
+            if (v.typeId() != QMetaType::QString) return fail(QStringLiteral("'%1' must be text.").arg(k));
+            (k == QStringLiteral("label") ? next.label : next.section) = v.toString().toStdString();
+        } else if (k == QStringLiteral("order")) {
+            bool ok;
+            const double order = v.toDouble(&ok);
+            if (!ok || !std::isfinite(order) || order != std::trunc(order) ||
+                order < std::numeric_limits<int>::min() || order > std::numeric_limits<int>::max()) {
+                return fail(QStringLiteral("Exposure order must be a whole number in range."));
             }
+            next.order = static_cast<int>(order);
+        } else if (k == QStringLiteral("control")) {
+            if (!brush::parseControlType(v.toString().toStdString(), &next.control)) {
+                return fail(QStringLiteral("That exposure control is not valid."));
+            }
+        } else if (k == QStringLiteral("minimum") || k == QStringLiteral("maximum")) {
+            bool ok;
+            const double value = v.toDouble(&ok);
+            if (!ok || !brush::parameterInRange(*info, value)) {
+                return fail(QStringLiteral("The exposure range must stay within the brush setting's range."));
+            }
+            (k == QStringLiteral("minimum") ? low : high) = value;
+            rangeEdited = true;
+        } else if (k != QStringLiteral("hasRange")) {
+            return fail(QStringLiteral("There is no exposure field called '%1'.").arg(k));
         }
-        if (fields.contains(QStringLiteral("minimum")) ||
-            fields.contains(QStringLiteral("maximum"))) {
-            property.hasRangeOverride = true;
-            property.minimumOverride = fields.value(QStringLiteral("minimum"),
-                                                    property.minimumOverride).toDouble();
-            property.maximumOverride = fields.value(QStringLiteral("maximum"),
-                                                    property.maximumOverride).toDouble();
-        }
-        if (fields.contains(QStringLiteral("hasRange"))) {
-            property.hasRangeOverride = fields.value(QStringLiteral("hasRange")).toBool();
-        }
-        break;
     }
-    if (!found) {
-        fail(QStringLiteral("'%1' is not exposed, so it has nothing to rename.").arg(key));
-        return false;
+    const auto hasRange = fields.constFind(QStringLiteral("hasRange"));
+    if (hasRange != fields.cend()) {
+        if (hasRange->typeId() != QMetaType::Bool) return fail(QStringLiteral("Exposure range must be on or off."));
+        next.hasRangeOverride = hasRange->toBool();
+    } else if (rangeEdited) {
+        next.hasRangeOverride = true;
     }
-    m_modified = true;
-    emit exposureChanged();
-    emit documentChanged();
-    return true;
-}
+    if (rangeEdited || next.hasRangeOverride) {
+        if (!brush::parameterInRange(*info, low) || !brush::parameterInRange(*info, high) || low > high) {
+            return fail(QStringLiteral("Set an exposure minimum and maximum in order, within the brush setting's range."));
+        }
+        next.minimumOverride = low;
+        next.maximumOverride = high;
+    }
+    return changeSetting("Edit exposed setting", *it, std::move(next));
+} catch (const std::bad_alloc&) { return historyMemoryError(); }
 
-bool BrushStudioModel::moveExposure(const QString& key, int delta) {
-    if (delta == 0) return false;
+bool BrushStudioModel::moveExposure(const QString& key, int delta) try {
+    if (!delta) return fail(QStringLiteral("Specify a position to move the exposed setting to."));
+    if (m_document.exposed.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        return fail(QStringLiteral("Too many exposed settings to order."));
+    }
+    const auto name = key.toStdString();
     std::vector<brush::ExposedProperty*> ordered;
     ordered.reserve(m_document.exposed.size());
     for (auto& property : m_document.exposed) ordered.push_back(&property);
-    std::stable_sort(ordered.begin(), ordered.end(),
-                     [](const auto* a, const auto* b) { return brush::exposedLess(*a, *b); });
-
-    std::size_t index = ordered.size();
-    for (std::size_t i = 0; i < ordered.size(); ++i) {
-        if (ordered[i]->parameter == key.toStdString()) { index = i; break; }
+    std::sort(ordered.begin(), ordered.end(),
+              [](const auto* a, const auto* b) { return brush::exposedLess(*a, *b); });
+    const auto from = std::ranges::find_if(ordered, [&](const auto* p) { return p->parameter == name; });
+    if (from == ordered.end()) return fail(QStringLiteral("'%1' is not exposed.").arg(key));
+    const auto target = static_cast<std::int64_t>(from - ordered.begin()) + delta;
+    if (target < 0 || target >= static_cast<std::int64_t>(ordered.size()) ||
+        brush::effectiveSection(*ordered[static_cast<std::size_t>(target)]) != brush::effectiveSection(**from)) {
+        return fail(QStringLiteral("An exposed setting can only move inside its own section."));
     }
-    if (index == ordered.size()) return false;
-    // Moving across a group boundary would be undone by the sort, so a move
-    // stops at the edge of the property's own group rather than silently doing
-    // nothing.
-    const std::string section = brush::effectiveSection(*ordered[index]);
-    long target = long(index) + delta;
-    while (target >= 0 && target < long(ordered.size()) &&
-           brush::effectiveSection(*ordered[std::size_t(target)]) != section) {
-        target += delta > 0 ? -1 : 1;
-    }
-    if (target < 0 || target >= long(ordered.size()) || target == long(index)) return false;
-
-    if (target > long(index)) {
-        std::rotate(ordered.begin() + long(index), ordered.begin() + long(index) + 1,
-                    ordered.begin() + target + 1);
-    } else {
-        std::rotate(ordered.begin() + target, ordered.begin() + long(index),
-                    ordered.begin() + long(index) + 1);
-    }
-    for (std::size_t i = 0; i < ordered.size(); ++i) ordered[i]->order = int(i);
-    m_modified = true;
-    emit exposureChanged();
-    emit documentChanged();
-    return true;
-}
+    return edit("Move exposed setting", [&] {
+        const auto to = ordered.begin() + static_cast<std::ptrdiff_t>(target);
+        if (to > from) std::rotate(from, from + 1, to + 1);
+        else std::rotate(to, from, from + 1);
+        for (std::size_t i = 0; i < ordered.size(); ++i) ordered[i]->order = static_cast<int>(i);
+    });
+} catch (const std::bad_alloc&) { return historyMemoryError(); }
 
 void BrushStudioModel::resetExposure() {
     edit("Reset Sub-Tool settings", [this] {
@@ -786,87 +785,6 @@ void BrushStudioModel::resetExposure() {
     });
 }
 
-// ---- history ----------------------------------------------------------------
-
-void BrushStudioModel::pushUndo(const char* label) {
-    Step step;
-    step.document = m_document;
-    step.selectedIndex = m_selectedIndex;
-    step.label = QString::fromUtf8(label);
-    step.bytes = documentBytes(m_document);
-    m_undo.push_back(std::move(step));
-    m_historyBytes += m_undo.back().bytes;
-    m_redo.clear();
-    // Memory, not an arbitrary step count: the oldest steps go first, which is
-    // what an artist expects and what the undo stack in the editor already does.
-    while (m_historyBytes > HistoryBudget && m_undo.size() > 1) {
-        m_historyBytes -= m_undo.front().bytes;
-        m_undo.erase(m_undo.begin());
-    }
-}
-
-void BrushStudioModel::undo() {
-    if (m_undo.empty()) return;
-    Step step = std::move(m_undo.back());
-    m_undo.pop_back();
-    m_historyBytes -= std::min(m_historyBytes, step.bytes);
-    Step forward;
-    forward.document = m_document;
-    forward.selectedIndex = m_selectedIndex;
-    forward.bytes = documentBytes(m_document);
-    m_redo.push_back(std::move(forward));
-    m_document = std::move(step.document);
-    m_selectedIndex = step.selectedIndex;
-    m_modified = true;
-    emit documentChanged();
-    emit componentsChanged();
-    emit selectionChanged();
-    emit exposureChanged();
-    emit historyChanged();
-}
-
-void BrushStudioModel::redo() {
-    if (m_redo.empty()) return;
-    Step step = std::move(m_redo.back());
-    m_redo.pop_back();
-    Step back;
-    back.document = m_document;
-    back.selectedIndex = m_selectedIndex;
-    back.bytes = documentBytes(m_document);
-    m_undo.push_back(std::move(back));
-    m_historyBytes += m_undo.back().bytes;
-    m_document = std::move(step.document);
-    m_selectedIndex = step.selectedIndex;
-    m_modified = true;
-    emit documentChanged();
-    emit componentsChanged();
-    emit selectionChanged();
-    emit exposureChanged();
-    emit historyChanged();
-}
-
-void BrushStudioModel::beginStep(const QString& label) {
-    if (m_inStep) return;
-    pushUndo(label.toUtf8().constData());
-    m_inStep = true;
-    emit historyChanged();
-}
-
-void BrushStudioModel::commitStep() {
-    if (!m_inStep) return;
-    m_inStep = false;
-    m_modified = true;
-    emit documentChanged();
-    emit componentsChanged();
-    emit historyChanged();
-}
-
-void BrushStudioModel::setModified(bool modified) {
-    if (m_modified == modified) return;
-    m_modified = modified;
-    emit documentChanged();
-}
-
 bool BrushStudioModel::fail(const QString& message) {
     m_error = message;
     emit errorChanged();
@@ -877,11 +795,6 @@ void BrushStudioModel::clearError() {
     if (m_error.isEmpty()) return;
     m_error.clear();
     emit errorChanged();
-}
-
-void BrushStudioModel::syncSelection() {
-    m_selectedIndex = m_document.components.empty() ? -1 : 0;
-    emit selectionChanged();
 }
 
 QString BrushStudioModel::validationSummary() const {

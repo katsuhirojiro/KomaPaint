@@ -29,7 +29,7 @@ BrushResource makeResource(const std::string& id) {
     r.id = id;
     r.width = 2;
     r.height = 2;
-    r.pixels.assign(4, 0x80);
+    r.setPixels(std::vector<std::uint8_t>(4, 0x80));
     return r;
 }
 

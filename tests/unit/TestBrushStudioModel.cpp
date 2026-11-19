@@ -15,6 +15,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <algorithm>
 #include <limits>
 
 #include "app/BrushStudioModel.h"
@@ -51,6 +52,10 @@ private slots:
     void invalidComponentEditsAreTransactional();
     void exposureCanBeRenamedReorderedAndReset();
     void undoAndRedoRestoreExactly();
+    void exposedEditsAreValidatedAndUndoable();
+    void largeHistorySharesImmutablePixelsAndReplays();
+    void pressureRejectsNewEditsWithoutDroppingRedo();
+    void batchesAndSavePointFollowReplay();
     void saveAndLoadRoundTrip();
     void anUnsaveableBrushIsRefused();
     void failedOverwriteLeavesUnicodeBrushAndDraftIntact();
@@ -198,7 +203,7 @@ void TestBrushStudioModel::regroupedComponentsStayConsistentThroughSave() {
     child.mode = brush::SelectionMode::Sequence;
     QVERIFY(seed.addGroup(child));
     seed.generators.front().groupId = parent.id;
-    model.setDocument(std::move(seed));
+    QVERIFY(model.setDocument(std::move(seed)));
 
     const QString root = QStringLiteral("parent");
     const QString nested = QStringLiteral("child");
@@ -535,6 +540,234 @@ void TestBrushStudioModel::undoAndRedoRestoreExactly() {
     QVERIFY(!model.canRedo());
 }
 
+void TestBrushStudioModel::exposedEditsAreValidatedAndUndoable() {
+    BrushStudioModel model;
+    const auto key = QStringLiteral("opacity");
+    const auto original = model.document();
+    QSignalSpy history(&model, &BrushStudioModel::historyChanged);
+    const QVariantMap bad = {{QStringLiteral("label"), QStringLiteral("Transparency")},
+                             {QStringLiteral("maximum"), std::numeric_limits<double>::infinity()}};
+    QVERIFY(!model.setExposure(key, bad));
+    QVERIFY(!model.setExposure(key, {{QStringLiteral("order"), 1.25}}));
+    QVERIFY(!model.setExposure(key, {{QStringLiteral("control"), QStringLiteral("invalid")}}));
+    QVERIFY(!model.setExposure(key, {{QStringLiteral("minimum"), 75.0}, {QStringLiteral("maximum"), 15.0}}));
+    QVERIFY(!model.error().isEmpty());
+    QVERIFY(model.document() == original);
+    QCOMPARE(history.count(), 0);
+    QVERIFY(!model.isModified());
+
+    // A partial range starts from the registry's other endpoint, not zero.
+    const QVariantMap valid = {{QStringLiteral("label"), QStringLiteral("Transparency")},
+                               {QStringLiteral("minimum"), 10.0}};
+    QVERIFY(model.setExposure(key, valid));
+    const auto edited = model.document();
+    const auto prop = std::ranges::find(edited.exposed, std::string("opacity"), &brush::ExposedProperty::parameter);
+    QVERIFY(prop != edited.exposed.end());
+    QVERIFY(prop->hasRangeOverride);
+    QCOMPARE(prop->minimumOverride, 10.0);
+    QCOMPARE(prop->maximumOverride, 100.0);
+    QVERIFY(model.moveExposure(key, 1)); // past flow, within the same section
+    const auto reordered = model.document();
+    QVERIFY(reordered != edited);
+    QCOMPARE(history.count(), 2);
+    QVERIFY(!model.moveExposure(key, std::numeric_limits<int>::max()));
+    QVERIFY(model.document() == reordered);
+    QCOMPARE(history.count(), 2);
+
+    model.undo();
+    QVERIFY(model.document() == edited);
+    model.undo();
+    QVERIFY(model.document() == original);
+    model.redo();
+    model.redo();
+    QVERIFY(model.document() == reordered);
+}
+
+void TestBrushStudioModel::largeHistorySharesImmutablePixelsAndReplays() {
+    BrushStudioModel model;
+    auto seed = model.document();
+    auto& tip = seed.components.front();
+    tip.kind = brush::ComponentKind::AlphaMask;
+    tip.parameters.clear();
+    tip.resourceId = "large-mask";
+    brush::BrushResource resource;
+    resource.id = tip.resourceId;
+    resource.width = 16 * 1024;
+    resource.height = 6400;
+    constexpr std::size_t imageBytes = 100u * 1024u * 1024u;
+    QCOMPARE(resource.expectedBytes(), imageBytes);
+    std::vector<std::uint8_t> pixels(imageBytes, 0x35);
+    pixels.back() = 0x7d;
+    const auto* image = pixels.data();
+    resource.setPixels(std::move(pixels));
+    QVERIFY(seed.addResource(std::move(resource)));
+    QVERIFY(seed.validate().ok());
+    QVERIFY(model.setDocument(std::move(seed)));
+    model.setModified(false);
+    constexpr int editCount = 512;
+    for (int i = 1; i <= editCount; ++i) {
+        QVERIFY2(model.setParameterValue(QStringLiteral("size"), 16 + i), qPrintable(model.error()));
+        QCOMPARE(model.document().resources.front().pixels().data(), image);
+    }
+    const auto measured = model.retainedStorage();
+    QCOMPARE(measured.historyStates, std::size_t(editCount + 1));
+    QCOMPARE(measured.pixelBytes, imageBytes);
+    QVERIFY(measured.metadataBytes < 2u * 1024u * 1024u);
+    for (int i = editCount - 1; i >= 0; --i) {
+        QVERIFY(model.canUndo());
+        model.undo();
+        QCOMPARE(model.parameterValue(QStringLiteral("size")), double(16 + i));
+        QCOMPARE(model.document().resources.front().pixels().data(), image);
+    }
+    QVERIFY(!model.isModified());
+    QCOMPARE(model.retainedStorage().pixelBytes, imageBytes); // redo storage is counted too
+    QCOMPARE(model.retainedStorage().historyStates, measured.historyStates);
+    for (int i = 1; i <= editCount; ++i) {
+        QVERIFY(model.canRedo());
+        model.redo();
+        QCOMPARE(model.parameterValue(QStringLiteral("size")), double(16 + i));
+    }
+    QVERIFY(!model.canRedo());
+    QVERIFY(model.isModified());
+
+    // Replacing a resource must not mutate the bytes held by older revisions.
+    auto replacement = model.document();
+    auto& mask = replacement.resources.front();
+    mask.width = 2;
+    mask.height = 2;
+    mask.setPixels({1, 2, 3, 4});
+    QVERIFY(model.setDocument(std::move(replacement)));
+    QCOMPARE(model.document().resources.front().pixels().size(), std::size_t(4));
+    QCOMPARE(model.retainedStorage().pixelBytes, imageBytes + 4);
+    model.undo();
+    QCOMPARE(model.document().resources.front().pixels().data(), image);
+    QCOMPARE(model.document().resources.front().pixels().back(), std::uint8_t(0x7d));
+    model.redo();
+    QCOMPARE(model.document().resources.front().pixels().back(), std::uint8_t(4));
+    model.undo();
+    QVERIFY(model.setParameterValue(QStringLiteral("size"), 26));
+    QVERIFY(!model.canRedo());
+    QCOMPARE(model.retainedStorage().pixelBytes, imageBytes); // discarded branch released
+}
+
+void TestBrushStudioModel::pressureRejectsNewEditsWithoutDroppingRedo() {
+    struct Pressure {
+        bool reject = false;
+        int attempts = 0;
+    } pressure;
+    BrushStudioModel model(nullptr, [](void* context, std::size_t bytes) noexcept {
+        auto& state = *static_cast<Pressure*>(context);
+        ++state.attempts;
+        return !state.reject || bytes == 0;
+    }, &pressure);
+    const auto original = model.document();
+    const QString first = model.selectedId();
+    const QString second = model.addComponent(int(brush::ComponentKind::Image));
+    QVERIFY(!second.isEmpty());
+    const auto edited = model.document();
+    model.undo();
+    QVERIFY(!model.canUndo());
+    QVERIFY(model.canRedo());
+    QVERIFY(!model.isModified());
+    const auto beforeBytes = model.retainedStorage();
+    QSignalSpy documents(&model, &BrushStudioModel::documentChanged);
+    QSignalSpy history(&model, &BrushStudioModel::historyChanged);
+    QSignalSpy messages(&model, &BrushStudioModel::errorChanged);
+    QSignalSpy selections(&model, &BrushStudioModel::selectionChanged);
+
+    pressure.reject = true;
+    model.beginStep(QStringLiteral("Cancelled brush gesture"));
+    QVERIFY(!model.setComponentOpacity(first, 0.30));
+    QVERIFY(!model.setParameterValue(QStringLiteral("size"), 12000.0));
+    QVERIFY(model.addComponent(int(brush::ComponentKind::Image)).isEmpty());
+    QVERIFY(!model.setDocument(edited));
+    QVERIFY(model.error().contains(QStringLiteral("available memory")));
+    QVERIFY(messages.count() >= 1);
+    model.commitStep();
+    QVERIFY(model.document() == original);
+    QCOMPARE(model.selectedId(), first);
+    QVERIFY(!model.isModified());
+    QVERIFY(!model.canUndo() && model.canRedo());
+    QCOMPARE(documents.count(), 0);
+    QCOMPARE(history.count(), 0);
+    QCOMPARE(selections.count(), 0);
+    QCOMPARE(model.retainedStorage().historyStates, beforeBytes.historyStates);
+    QCOMPARE(model.retainedStorage().pixelBytes, beforeBytes.pixelBytes);
+
+    const int attempts = pressure.attempts;
+    model.redo();
+    QVERIFY(model.document() == edited);
+    QCOMPARE(model.selectedId(), second);
+    QVERIFY(model.isModified());
+    model.undo();
+    QVERIFY(model.document() == original);
+    QCOMPARE(model.selectedId(), first);
+    QCOMPARE(pressure.attempts, attempts); // replay needed no new memory admission
+    QVERIFY(model.error().isEmpty());
+
+    pressure.reject = false;
+    model.beginStep(QStringLiteral("Brush gesture"));
+    QVERIFY(model.setParameterValue(QStringLiteral("size"), 12345.0));
+    const auto accepted = model.document();
+    pressure.reject = true;
+    QVERIFY(!model.setParameterValue(QStringLiteral("flow"), 20.0));
+    QVERIFY(model.document() == accepted);
+    pressure.reject = false;
+    QVERIFY(model.setParameterValue(QStringLiteral("flow"), 30.0));
+    model.commitStep();
+    QVERIFY(!model.canRedo());
+    QCOMPARE(model.retainedStorage().historyStates, std::size_t(1));
+    model.undo();
+    QVERIFY(model.document() == original);
+    QVERIFY(!model.isModified());
+}
+
+void TestBrushStudioModel::batchesAndSavePointFollowReplay() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    BrushStudioModel model;
+    const auto firstFile = dir.filePath(QStringLiteral("before.kb"));
+    const auto secondFile = dir.filePath(QStringLiteral("after.kb"));
+    QVERIFY2(model.save(firstFile), qPrintable(model.error()));
+    const auto before = model.document();
+    model.beginStep(QStringLiteral("Empty gesture"));
+    model.commitStep();
+    QVERIFY(!model.canUndo());
+    QVERIFY(!model.isModified());
+
+    model.beginStep(QStringLiteral("Build tip"));
+    const auto id = model.addComponent(int(brush::ComponentKind::Image));
+    QVERIFY(!id.isEmpty());
+    QVERIFY(model.setComponentOpacity(id, 0.5));
+    QVERIFY(model.setParameterValue(QStringLiteral("size"), 77.0));
+    model.commitStep();
+    const auto after = model.document();
+    QCOMPARE(model.retainedStorage().historyStates, std::size_t(1));
+    model.undo();
+    QVERIFY(model.document() == before);
+    QVERIFY(!model.isModified());
+    model.redo();
+    QVERIFY(model.document() == after);
+    QCOMPARE(model.selectedId(), id);
+    QVERIFY(model.isModified());
+    QVERIFY2(model.save(secondFile), qPrintable(model.error()));
+    model.undo();
+    QVERIFY(model.document() == before);
+    QVERIFY(model.isModified()); // the newer file is the saved revision now
+    model.redo();
+    QVERIFY(model.document() == after);
+    QVERIFY(!model.isModified());
+    QVERIFY2(model.load(firstFile), qPrintable(model.error()));
+    QVERIFY(model.document() == before);
+    QVERIFY(!model.isModified());
+    model.undo();
+    QVERIFY(model.document() == after);
+    QVERIFY(model.isModified());
+    model.redo();
+    QVERIFY(model.document() == before);
+    QVERIFY(!model.isModified());
+}
+
 void TestBrushStudioModel::saveAndLoadRoundTrip() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -580,7 +813,7 @@ void TestBrushStudioModel::anUnsaveableBrushIsRefused() {
     QVERIFY(model.setComponentTransform(id, QStringLiteral("scale"), 2.0));
     brush::BrushDocument broken = model.document();
     broken.components.back().kind = brush::ComponentKind::Image;
-    model.setDocument(std::move(broken));
+    QVERIFY(model.setDocument(std::move(broken)));
     QVERIFY(!model.save(dir.filePath(QStringLiteral("broken.kb"))));
     QVERIFY(model.error().contains(QStringLiteral("cannot be saved")));
     QVERIFY(!QFile::exists(dir.filePath(QStringLiteral("broken.kb"))));
@@ -602,7 +835,7 @@ void TestBrushStudioModel::failedOverwriteLeavesUnicodeBrushAndDraftIntact() {
     auto broken = original;
     broken.components.front().resourceId.clear();
     broken.components.front().kind = brush::ComponentKind::Image;
-    model.setDocument(broken);
+    QVERIFY(model.setDocument(broken));
     QVERIFY(!model.save(path));
     QVERIFY(model.document() == broken);
     QVERIFY(model.isModified());

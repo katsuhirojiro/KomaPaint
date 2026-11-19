@@ -12,14 +12,14 @@
 #include "../brush/BrushFormat.h"
 #include "../brush/BrushModel.h"
 
-#include <QByteArray>
 #include <QObject>
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
-#include <QVector>
 
 #include <cstddef>
+#include <list>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -45,12 +45,17 @@ class BrushStudioModel : public QObject {
     Q_PROPERTY(QString validationSummary READ validationSummary NOTIFY documentChanged)
 public:
     explicit BrushStudioModel(QObject* parent = nullptr);
+    // Per-model admission check: normal construction observes system memory.
+    // The alternate check lets tests simulate pressure without allocating it.
+    using MemoryCheck = bool (*)(void*, std::size_t) noexcept;
+    BrushStudioModel(QObject* parent, MemoryCheck check, void* context);
 
     // ---- document ---------------------------------------------------------
     const brush::BrushDocument& document() const { return m_document; }
     // Replaces the whole document as one undoable step. Used by "New",
     // "Duplicate" and by opening a .kb from the library.
-    void setDocument(brush::BrushDocument document);
+    bool setDocument(const brush::BrushDocument& document);
+    bool setDocument(brush::BrushDocument&& document);
     bool load(const QString& path);
     bool save(const QString& path);
 
@@ -116,6 +121,15 @@ public:
     void beginStep(const QString& label);
     void commitStep();
 
+    struct StorageUse {
+        std::size_t metadataBytes; // active document + undo/redo node and metadata capacities
+        std::size_t pixelBytes;    // each retained pixel buffer counted only once
+        std::size_t historyStates;
+    };
+    // Capacity accounting, not process RSS: allocator bookkeeping and Qt/UI
+    // caches are excluded. Explicit diagnostic; editing doesn't scan history.
+    StorageUse retainedStorage() const;
+
     bool isModified() const { return m_modified; }
     void setModified(bool modified);
     QString error() const { return m_error; }
@@ -130,31 +144,33 @@ signals:
     void errorChanged();
 
 private:
-    // Every mutating call funnels through here, so undo and the change signals
-    // cannot be forgotten by one of them.
+    enum class EditMode { Change, Replace, LoadSaved };
+    // A non-owning call wrapper: don't allocate to type-erase a lambda before
+    // the transaction's admission and exception guard.
     template <typename Fn>
-    void edit(const char* label, Fn&& change) {
-        // Inside a step the pre-step snapshot is the one that matters, so a
-        // gesture that makes ten edits is one undo.
-        if (!m_inStep) pushUndo(label);
-        change();
-        m_modified = true;
-        emit documentChanged();
-        emit componentsChanged();
-        emit exposureChanged();
-        emit historyChanged();
+    bool edit(const char* label, Fn&& change, EditMode mode = EditMode::Change,
+              const brush::BrushDocument* incomingCopy = nullptr) {
+        using Change = std::remove_reference_t<Fn>;
+        return editTransaction(label, &change, [](void* arg) {
+            auto& fn = *static_cast<Change*>(arg);
+            if constexpr (std::is_same_v<std::invoke_result_t<Change&>, bool>) return fn();
+            else { fn(); return true; }
+        }, mode, incomingCopy);
     }
     template <typename T>
     bool changeSetting(const char* label, T& field, T value) {
-        if (field != value) edit(label, [&] { field = std::move(value); });
+        if (field != value) return edit(label, [&] { field = std::move(value); });
         clearError();
         return true;
     }
+    bool editTransaction(const char* label, void* context, bool (*apply)(void*), EditMode mode,
+                         const brush::BrushDocument* incomingCopy);
+    bool replaceDocument(brush::BrushDocument&& document, EditMode mode);
     brush::BrushComponent* editableComponent(const QString& id);
-    void pushUndo(const char* label);
     bool fail(const QString& message);
     void clearError();
-    void syncSelection();
+    bool historyMemoryError();
+    void markSaved() noexcept;
 
     brush::BrushDocument m_document;
     QString m_error;
@@ -162,18 +178,25 @@ private:
     bool m_modified = false;
 
     struct Step {
+        Step(const brush::BrushDocument& doc, int selection, bool dirty)
+            : document(doc), selectedIndex(selection), modified(dirty) {}
         brush::BrushDocument document;
-        int selectedIndex = -1;
-        QString label;
-        std::size_t bytes = 0;
+        int selectedIndex;
+        bool modified;
     };
-    std::vector<Step> m_undo;
-    std::vector<Step> m_redo;
-    std::size_t m_historyBytes = 0;
-    // Snapshots hold whole documents, images included, so the history is
-    // bounded by memory rather than by an arbitrary step count. Oldest first.
-    static constexpr std::size_t HistoryBudget = 96u * 1024u * 1024u;
+    // Stored metadata is cheap to copy; pixel blocks are shared. Lists let
+    // replay transfer existing nodes without allocating under pressure.
+    using History = std::list<Step>;
+    static constexpr std::size_t StepBytes = sizeof(Step) + 2 * sizeof(void*);
+    void swapCurrent(Step& step) noexcept;
+    void replay(History& source, History& destination);
+    History m_undo;
+    History m_redo;
+    MemoryCheck m_memoryCheck;
+    void* m_memoryContext;
     bool m_inStep = false;
+    bool m_stepHasEdit = false;
+    QString m_stepLabel;
 };
 
 } // namespace komapaint

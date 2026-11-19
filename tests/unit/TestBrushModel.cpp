@@ -40,7 +40,7 @@ BrushResource makeResource(const std::string& id, int w, int h) {
     r.kind = ResourceKind::Grayscale8;
     r.width = w;
     r.height = h;
-    r.pixels.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0x80);
+    r.setPixels(std::vector<std::uint8_t>(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0x80));
     return r;
 }
 
@@ -364,7 +364,7 @@ void testResourceAccounting() {
     CHECK(doc.addResource(makeResource("p1", 4, 4)));
     // Wrong byte count is refused at insertion rather than corrupting a file.
     BrushResource bad = makeResource("p2", 4, 4);
-    bad.pixels.resize(3);
+    bad.setPixels({1, 2, 3});
     CHECK(!doc.addResource(bad));
 
     doc.addComponent(makeComponent("c1", "p1"));

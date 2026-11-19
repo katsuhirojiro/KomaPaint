@@ -63,6 +63,17 @@ Window {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
         }
+        Text {
+            objectName: "brushStudioError"
+            Layout.fillWidth: true
+            visible: text.length > 0
+            text: draft.error
+            color: KP.error
+            font.family: KP.fontUi
+            font.pixelSize: KP.fontM
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+        }
         KpButton {
             Layout.alignment: Qt.AlignHCenter
             label: qsTr("Close")

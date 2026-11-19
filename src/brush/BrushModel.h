@@ -14,6 +14,7 @@
 #include "brush/BrushParameters.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -122,9 +123,14 @@ struct BrushResource {
     ResourceKind kind = ResourceKind::Grayscale8;
     int width = 0;
     int height = 0;
-    std::vector<std::uint8_t> pixels;
-    bool operator==(const BrushResource&) const = default;
+    // A document copy shares immutable pixel data. A tip edit builds new
+    // bytes and replaces the buffer; earlier documents keep their old pixels.
+    const std::vector<std::uint8_t>& pixels() const noexcept;
+    void setPixels(std::vector<std::uint8_t> bytes);
+    bool operator==(const BrushResource&) const;
     std::size_t expectedBytes() const;
+private:
+    std::shared_ptr<const std::vector<std::uint8_t>> m_pixels;
 };
 
 struct ValidationIssue {

@@ -350,8 +350,36 @@ coordinates, overflow rejection, memory-pressure rollback, and redo after a
 failed stroke. Seventeen relevant Linux CTest suites passed (56.65 s); both
 engine suites also passed UBSan with float-cast-overflow checks.
 
+## Phase B1.5.5 — resource-aware Studio undo
+
+Studio no longer prunes history at 96 MiB. Undo and redo retain metadata
+checkpoints but share immutable pixel buffers across states. Replacing a
+resource creates new pixels without changing an older state; the `.kb`
+representation is unchanged. Capacity diagnostics count both directions and
+count shared pixel buffers once. They report retained payload, not process RSS
+or allocator overhead. This is session history, not a persistent disk journal.
+The existing canvas journal was considered, but it does not yet store Studio
+revisions and would require serializing brush data for each checkpoint.
+
+Before editing, Studio checks available memory for the next metadata copy and
+creates the checkpoint before mutating. A denied or failed edit reports an
+error and leaves the draft, selection, dirty status, and both branches intact.
+Only a successful divergent edit clears redo. Undo and redo move existing
+nodes and swap state, so replay does not need another allocation for history.
+Grouped edits make one step, and replay restores the last successful save/load
+state as clean. Exposure metadata changes and reordering now use this same
+transaction, including rejecting invalid control, range, and order inputs.
+
+**Validation:** four focused regressions cover one shared 100 MiB pixel buffer
+through 512 undo/redo steps (under 2 MiB of metadata), replacement and release
+of a resource, pressure rejection without losing redo, allocation-free replay,
+grouped steps, dirty state, and exposure transactions. All 49 Linux CTest
+suites passed (136.44 s; 51 Studio model QtTest passes including setup and
+cleanup) on Debian 12 / Qt 6.8.3. The packaged-resource self-check passed all
+8 launch/GUI checks with zero QML warnings.
+
 ## Next
 
-B1.5.5 resource-aware Studio undo. Only then: B2 (approved layout), B3 (tip
-editor), B4 (brush library integration), and B5 (isolated production-engine
-preview).
+B2 (approved layout), B3 (tip editor), B4 (brush library integration), and B5
+(isolated production-engine preview) are not started. Hardware tablet and
+artist workflow testing are still outstanding.

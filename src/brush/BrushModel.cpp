@@ -71,15 +71,29 @@ std::string formatNumber(double value) {
 
 // ---- Basic value types ------------------------------------------------------
 
+const std::vector<std::uint8_t>& BrushResource::pixels() const noexcept {
+    static const std::vector<std::uint8_t> empty;
+    return m_pixels ? *m_pixels : empty;
+}
+
+void BrushResource::setPixels(std::vector<std::uint8_t> bytes) {
+    m_pixels = bytes.empty() ? nullptr
+        : std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
+}
+
+bool BrushResource::operator==(const BrushResource& other) const {
+    return id == other.id && name == other.name && kind == other.kind
+        && width == other.width && height == other.height
+        && (m_pixels == other.m_pixels || pixels() == other.pixels());
+}
+
 std::size_t BrushResource::expectedBytes() const {
     if (width <= 0 || height <= 0) return 0;
-    const std::size_t px = static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
-    switch (kind) {
-    case ResourceKind::Rgba8:
-        return px * 4;
-    default:
-        return px;
-    }
+    const auto pixelBytes = kind == ResourceKind::Rgba8 ? 4u : 1u;
+    const auto w = static_cast<std::size_t>(width);
+    const auto h = static_cast<std::size_t>(height);
+    if (w > std::numeric_limits<std::size_t>::max() / pixelBytes / h) return 0;
+    return w * h * pixelBytes;
 }
 
 // ---- ValidationResult -------------------------------------------------------
@@ -522,8 +536,8 @@ const BrushResource* BrushDocument::resource(std::string_view resourceId) const 
 
 bool BrushDocument::addResource(BrushResource r) {
     if (r.id.empty()) r.id = allocateId("p");
-    if (r.width <= 0 || r.height <= 0) return false;
-    if (r.pixels.size() != r.expectedBytes()) return false;
+    const auto bytes = r.expectedBytes();
+    if (!bytes || r.pixels().size() != bytes) return false;
     if (BrushResource* existing = resource(r.id)) {
         *existing = std::move(r);
         return true;
@@ -542,7 +556,7 @@ int BrushDocument::resourceUsage(std::string_view resourceId) const {
 
 std::size_t BrushDocument::resourceBytes() const {
     std::size_t total = 0;
-    for (const auto& r : resources) total += r.pixels.size();
+    for (const auto& r : resources) total += r.pixels().size();
     return total;
 }
 
@@ -796,11 +810,11 @@ ValidationResult BrushDocument::validate() const {
 
     // Resources.
     for (const auto& r : resources) {
-        if (r.width <= 0 || r.height <= 0) {
-            result.addError("resource-size", "Resource '" + r.id + "' has no dimensions.");
-        } else if (r.pixels.size() != r.expectedBytes()) {
+        if (!r.expectedBytes()) {
+            result.addError("resource-size", "Resource '" + r.id + "' has invalid dimensions.");
+        } else if (r.pixels().size() != r.expectedBytes()) {
             result.addError("resource-bytes", "Resource '" + r.id + "' holds " +
-                                                  formatNumber(double(r.pixels.size())) +
+                                                  formatNumber(double(r.pixels().size())) +
                                                   " bytes, expected " +
                                                   formatNumber(double(r.expectedBytes())) + ".");
         }

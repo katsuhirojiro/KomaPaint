@@ -232,7 +232,7 @@ void encodeResources(const BrushDocument& doc, Writer* w) {
         w->text(toString(r.kind));
         w->u32(static_cast<std::uint32_t>(r.width));
         w->u32(static_cast<std::uint32_t>(r.height));
-        w->blob(r.pixels);
+        w->blob(r.pixels());
     }
 }
 
@@ -529,10 +529,12 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
                 }
                 resource.width = static_cast<int>(r.u32());
                 resource.height = static_cast<int>(r.u32());
-                if (!r.blob(&resource.pixels)) {
+                std::vector<std::uint8_t> pixels;
+                if (!r.blob(&pixels)) {
                     report->error = reason("bad-resource", "RSRC pixel block is truncated");
                     return false;
                 }
+                resource.setPixels(std::move(pixels));
                 doc.resources.push_back(std::move(resource));
                 if (!r.ok()) { report->error = reason("bad-resource", "RSRC entry is truncated"); return false; }
             }

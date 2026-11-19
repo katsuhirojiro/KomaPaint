@@ -74,7 +74,7 @@ BrushDocument makeDocument() {
     leaf.kind = ResourceKind::Grayscale8;
     leaf.width = 4;
     leaf.height = 4;
-    leaf.pixels.assign(16, 0x90);
+    leaf.setPixels(std::vector<std::uint8_t>(16, 0x90));
     doc.addResource(leaf);
 
     BrushResource grain;
@@ -83,7 +83,7 @@ BrushDocument makeDocument() {
     grain.kind = ResourceKind::Rgba8;
     grain.width = 2;
     grain.height = 2;
-    grain.pixels.assign(16, 0x40);
+    grain.setPixels(std::vector<std::uint8_t>(16, 0x40));
     doc.addResource(grain);
 
     ComponentGroup leaves;
@@ -187,7 +187,7 @@ void testRoundTrip() {
     CHECK(restored.exposed.size() == 1);
     CHECK(restored.resources.size() == 2);
     CHECK(restored.resources[1].kind == ResourceKind::Rgba8);
-    CHECK(restored.resources[1].pixels.size() == 16);
+    CHECK(restored.resources[1].pixels().size() == 16);
     CHECK(restored.engine == Engine::Realistic);
     CHECK(restored.seed == 0xDEADBEEF);
     CHECK(restored.dynamics[0].curve.points().size() == 3);
@@ -438,7 +438,7 @@ void testNoArbitraryComponentLimit() {
     leaf.id = "p1";
     leaf.width = 2;
     leaf.height = 2;
-    leaf.pixels.assign(4, 0x70);
+    leaf.setPixels(std::vector<std::uint8_t>(4, 0x70));
     doc.addResource(leaf);
 
     ComponentGroup group;
