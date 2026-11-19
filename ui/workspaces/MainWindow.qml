@@ -46,6 +46,21 @@ ApplicationWindow {
     function requestNewDocument() {
         newProjectDialog.open()
     }
+    function openBrushStudio() {
+        if (brushStudioLoader.item) brushStudioLoader.item.present()
+        else brushStudioLoader.active = true
+    }
+    // Keep one Studio and its own model alive across closes. Loading by URL
+    // delays their creation until the artist first uses the Edit menu action.
+    Loader {
+        id: brushStudioLoader
+        active: false
+        source: "BrushStudioWindow.qml"
+        onLoaded: {
+            item.transientParent = root
+            item.present()
+        }
+    }
     // Converts a plain local path (Unix, Windows drive, UNC) into a file:// URL
     // suitable for FileDialog. Qt.resolvedUrl would treat "C:/..." as scheme "c".
     function fileUrlForPath(path) {
@@ -147,6 +162,12 @@ ApplicationWindow {
             // second close() from inside this handler is ignored by Qt, which
             // used to make File > Exit do nothing the first time.)
             event.accepted = prepareApplicationClose()
+        }
+        // A canceled artwork close leaves Studio alone. On accepted exit,
+        // close the native window and let the Loader release it and its draft.
+        if (event.accepted && brushStudioLoader.item) {
+            brushStudioLoader.item.close()
+            brushStudioLoader.active = false
         }
     }
 
@@ -527,6 +548,7 @@ ApplicationWindow {
                 }
             }
             KpMenu {
+                objectName: "editMenu"
                 title: qsTr("&Edit")
                 KpMenuItem {
                     text: qsTr("&Undo") + root.menuShortcutSuffix("edit.undo")
@@ -560,6 +582,12 @@ ApplicationWindow {
                 }
                 KpMenuSeparator {
                 }
+                KpMenuItem {
+                    objectName: "brushStudioMenuItem"
+                    text: qsTr("Brush Studio")
+                    onTriggered: root.openBrushStudio()
+                }
+                KpMenuSeparator { }
                 KpMenuItem {
                     objectName: "keyboardShortcutsMenuItem"
                     text: qsTr("Keyboard Shortcuts...")

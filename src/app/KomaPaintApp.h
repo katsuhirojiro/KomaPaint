@@ -34,13 +34,14 @@ public:
 
     int run();
 
+    // Shared by the desktop shell and tests that load the same QML scenes.
+    static void registerTypes();
+
 private:
-    void registerTypes();
     void loadStyles();
     void loadUi();
     void runPackagedVerification();
 
-    QQmlApplicationEngine m_engine;
     ApplicationConfig     m_config;
     Settings              m_settings;
     NewProjectSettings    m_newProject;
@@ -50,6 +51,8 @@ private:
     QQuickWindow*         m_window = nullptr;
     QString               m_fileToOpen;
     QStringList           m_qmlWarnings;
+    // Destroy the QML windows before the C++ objects and warning sink they use.
+    QQmlApplicationEngine m_engine;
 };
 
 }  // namespace komapaint

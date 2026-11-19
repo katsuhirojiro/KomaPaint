@@ -1,2 +1,3 @@
 module workspaces
 MainWindow 1.0 MainWindow.qml
+BrushStudioWindow 1.0 BrushStudioWindow.qml

@@ -1,4 +1,5 @@
 #include "KomaPaintApp.h"
+#include "BrushStudioModel.h"
 #include "CanvasViewport.h"
 #include "MixerSurfaceItem.h"
 #include "PaintMixerController.h"
@@ -72,6 +73,7 @@ void KomaPaintApp::registerTypes()
     qRegisterMetaType<komapaint::input::TabletInputSettings*>();
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
     qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
+    qmlRegisterType<BrushStudioModel>("KomaPaint", 1, 0, "BrushStudioModel");
 }
 
 void KomaPaintApp::loadStyles() {}
@@ -248,6 +250,7 @@ void KomaPaintApp::runPackagedVerification()
     // Verify bundled resources & tool icons inside the packaged binary.
     for (const char* res : {
              ":/workspaces/MainWindow.qml",
+             ":/workspaces/BrushStudioWindow.qml",
              ":/brushes/presets.json",
              ":/icons/tools/brush.png",
              ":/icons/tools/eraser.png",

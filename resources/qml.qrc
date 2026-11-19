@@ -1,6 +1,7 @@
 <RCC>
     <qresource prefix="/">
         <file alias="workspaces/MainWindow.qml">../ui/workspaces/MainWindow.qml</file>
+        <file alias="workspaces/BrushStudioWindow.qml">../ui/workspaces/BrushStudioWindow.qml</file>
         <file alias="components/MainToolbar.qml">../ui/components/MainToolbar.qml</file>
         <file alias="components/ToolPalette.qml">../ui/components/ToolPalette.qml</file>
         <file alias="components/CanvasWorkspace.qml">../ui/components/CanvasWorkspace.qml</file>

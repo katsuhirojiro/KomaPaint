@@ -13,6 +13,7 @@
 #include <QGuiApplication>
 #include <QColor>
 #include <QImage>
+#include <QPointer>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -30,9 +31,10 @@
 
 #include "app/BrushLibraryStore.h"
 #include "app/BrushSettings.h"
+#include "app/BrushStudioModel.h"
 #include "app/CanvasViewport.h"
 #include "app/DockModel.h"
-#include "app/MixerSurfaceItem.h"
+#include "app/KomaPaintApp.h"
 #include "app/PaintMixerController.h"
 #include "app/PanelManager.h"
 #include "app/SubToolLibrary.h"
@@ -43,6 +45,7 @@
 #include "core/ApplicationConfig.h"
 #include "core/NewProjectSettings.h"
 #include "core/Settings.h"
+#include "history/UndoStack.h"
 #include "layers/Layer.h"
 #include "layers/LayerModel.h"
 
@@ -260,7 +263,8 @@ void collectWarnings(QtMsgType type, const QMessageLogContext& context, const QS
         QStringLiteral("ToolPalette.qml"), QStringLiteral("KpIcon.qml"), QStringLiteral("IconButton.qml"),
         QStringLiteral("PropertySlider.qml"), QStringLiteral("SegmentedChoice.qml"), QStringLiteral("SubToolPanel.qml"),
         QStringLiteral("ToolPropertyPanel.qml"), QStringLiteral("BrushSizePanel.qml"), QStringLiteral("LayersPanel.qml"),
-        QStringLiteral("NewProjectDialog.qml"), QStringLiteral("CanvasWorkspace.qml"), QStringLiteral("MainToolbar.qml"),
+        QStringLiteral("BrushStudioWindow.qml"), QStringLiteral("NewProjectDialog.qml"),
+        QStringLiteral("CanvasWorkspace.qml"), QStringLiteral("MainToolbar.qml"),
         QStringLiteral("PreferencesDialog.qml"), QStringLiteral("KomaSettingsDialog.qml"), QStringLiteral("KomaTheme.qml"),
         QStringLiteral("ColorPanel.qml"), QStringLiteral("PaintMixerView.qml"),
         QStringLiteral("qrc:/icons/")};
@@ -282,6 +286,7 @@ private slots:
     void iconFilesAreRegisteredSizedAndCentred();
     void subToolLibraryLoadsRemembersAndResets();
     void paletteShowsEveryToolAndSelectsOnlyWorkingOnes();
+    void brushStudioWindowIsIndependentAndReusable();
     void brushSizeGridSetsTheRealSize();
     void toolPropertyControlsDriveTheBrush();
     void strokesFollowHardnessAndTheEraserErases();
@@ -313,8 +318,7 @@ private:
 void TestBrushUi::initTestCase()
 {
     QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
-    qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
-    qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
+    KomaPaintApp::registerTypes();
     g_previousHandler = qInstallMessageHandler(collectWarnings);
     const QByteArray font = qgetenv("KOMAPAINT_TEST_FONT");
     if (!font.isEmpty()) {
@@ -367,6 +371,100 @@ void TestBrushUi::screenshot(Running& app, const QString& name)
     QDir().mkpath(dir);
     QTest::qWait(60);
     app.window->grabWindow().save(QDir(dir).filePath(name + QStringLiteral(".png")));
+}
+
+void TestBrushUi::brushStudioWindowIsIndependentAndReusable()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiStudioWindow")));
+    const auto studioWindows = [] {
+        QList<QWindow*> result;
+        for (auto* window : QGuiApplication::allWindows()) {
+            if (window->objectName() == QStringLiteral("brushStudioWindow")) result.append(window);
+        }
+        return result;
+    };
+    QVERIFY(studioWindows().isEmpty());
+
+    // Put actual artwork and undo history in the editor before opening Studio.
+    app.workspace.setActiveTool(QStringLiteral("brush"));
+    const auto at = app.canvas->documentToViewport(100, 100);
+    QVERIFY(app.canvas->beginStroke(at.x(), at.y(), 1.0, app.workspace.brush(), Qt::black));
+    app.canvas->endStroke(at.x(), at.y(), 1.0);
+    const auto paintedPixel = pixel(app, 100, 100);
+    QVERIFY(paintedPixel != 0);
+    app.workspace.setActiveTool(QStringLiteral("eraser"));
+    QCOMPARE(app.workspace.activeTool(), QStringLiteral("eraser"));
+    auto* document = app.workspace.document();
+    auto* history = app.workspace.history();
+    QVERIFY(document->isModified() && history->canUndo());
+    const auto tabs = app.workspace.projectTabs();
+    const auto activeTab = app.workspace.activeTab();
+    const auto brushId = app.workspace.subTools()->currentBrushId();
+    const auto brushSize = app.workspace.brush()->size();
+    QSignalSpy documentChanged(&app.workspace, &WorkspaceState::documentChanged);
+    QSignalSpy toolChanged(&app.workspace, &WorkspaceState::activeToolChanged);
+    QSignalSpy historyChanged(history, &UndoStack::stackChanged);
+
+    auto* editMenu = app.root->findChild<QObject*>(QStringLiteral("editMenu"));
+    auto* openStudio = app.root->findChild<QQuickItem*>(QStringLiteral("brushStudioMenuItem"));
+    QVERIFY(editMenu && openStudio);
+    QVERIFY(QMetaObject::invokeMethod(editMenu, "open"));
+    QTRY_VERIFY(editMenu->property("opened").toBool() && openStudio->isVisible());
+    click(app, openStudio);
+    QTRY_COMPARE(studioWindows().size(), 1);
+    QPointer<QQuickWindow> studio(qobject_cast<QQuickWindow*>(studioWindows().first()));
+    QVERIFY(studio && studio->isVisible() && app.window->isVisible());
+    QCOMPARE(studio->type(), Qt::Window);
+    QCOMPARE(studio->modality(), Qt::NonModal);
+    QVERIFY(!studio->parent()); // transient owner, not an embedded QWindow
+    QCOMPARE(studio->transientParent(), static_cast<QWindow*>(app.window));
+
+    QPointer<BrushStudioModel> draft(studio->findChild<BrushStudioModel*>(QStringLiteral("brushStudioModel")));
+    auto* draftName = studio->findChild<QQuickItem*>(QStringLiteral("brushStudioDraftName"));
+    QVERIFY(draft && draftName);
+    QVERIFY(draftName->property("text").toString().contains(draft->name()));
+    draft->setName(QStringLiteral("Studio-only draft"));
+    QTRY_VERIFY(draftName->property("text").toString().contains(draft->name()));
+
+    QVERIFY(QMetaObject::invokeMethod(openStudio, "triggered"));
+    QCOMPARE(studioWindows(), QList<QWindow*>{studio.data()});
+    QVERIFY(studio->close());
+    QTRY_VERIFY(studio && !studio->isVisible());
+    QVERIFY(app.window->isVisible());
+    QVERIFY(QMetaObject::invokeMethod(openStudio, "triggered"));
+    QTRY_VERIFY(studio && studio->isVisible());
+    QCOMPARE(studioWindows(), QList<QWindow*>{studio.data()});
+    QVERIFY(draft);
+    QCOMPARE(draft->name(), QStringLiteral("Studio-only draft"));
+
+    QCOMPARE(app.workspace.document(), document);
+    QCOMPARE(app.workspace.projectTabs(), tabs);
+    QCOMPARE(app.workspace.activeTab(), activeTab);
+    QCOMPARE(app.workspace.subTools()->currentBrushId(), brushId);
+    QCOMPARE(app.workspace.brush()->size(), brushSize);
+    QCOMPARE(app.workspace.activeTool(), QStringLiteral("eraser"));
+    QCOMPARE(app.workspace.history(), history);
+    QCOMPARE(pixel(app, 100, 100), paintedPixel);
+    QCOMPARE(documentChanged.count(), 0);
+    QCOMPARE(toolChanged.count(), 0);
+    QCOMPARE(historyChanged.count(), 0);
+
+    // Artwork's save confirmation still runs, and rejecting exit leaves both
+    // windows alone. An accepted main close also releases the Studio draft.
+    QVERIFY(!app.window->close());
+    QQuickItem* cancel = nullptr;
+    QTRY_VERIFY((cancel = item(app, QStringLiteral("saveChangesCancelButton"))) && cancel->isVisible());
+    click(app, cancel);
+    QTRY_VERIFY(!cancel->isVisible());
+    QVERIFY(app.window->isVisible() && studio && studio->isVisible());
+    QTemporaryDir temp;
+    QVERIFY(temp.isValid());
+    QVERIFY(app.workspace.saveToPath(temp.filePath(QStringLiteral("studio-lifecycle.koma"))));
+    QVERIFY(app.window->close());
+    QTRY_VERIFY(studio.isNull() && draft.isNull());
+    QVERIFY(studioWindows().isEmpty());
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 
 // ------------------------------------------------------------------ assets

@@ -211,7 +211,7 @@ and not *artist-tested*.
 - `BrushStudioModel` is the Qt face of a document: components, groups, every
   registry setting with group and range, the Sub-Tool exposure list, undo/redo
   over whole-document snapshots bounded by memory, and `.kb` open/save that
-  leaves the open brush untouched on failure. Ten test cases run headless.
+  leaves the open brush untouched on failure. The model tests run headless.
 
 **Two defects that the first CI run of the model found, both fixed:**
 
@@ -226,9 +226,8 @@ and not *artist-tested*.
    cannot be read back.
 
 **Known limitations at this point:**
-- There is no Brush Studio window yet. The model is not registered for QML and
-  no menu action opens it; that is the next milestone, and until it exists the
-  Studio is *unit-tested* and *CI-tested* but has no artist-facing surface.
+- This stage provided the model only. Phase B1 below adds the window and menu
+  entry; it does not yet expose editing controls.
 - The model edits one document. Collections, `.sut`/`.abr` import, and storing a
   document inside a library preset are not written yet.
 - The stroke loop still owns orientation, and `Signal::Time`/`Signal::Progress`
@@ -236,10 +235,41 @@ and not *artist-tested*.
 
 ---
 
+## Phase B1 — separate Brush Studio window
+
+**What:** `Edit → Brush Studio` opens a native, non-modal window on demand.
+`KomaPaintApp` registers `BrushStudioModel` in the existing `KomaPaint` QML
+module. The window owns a single Studio model independently of the painting
+workspace. Closing Studio keeps its draft in memory; reopening reuses
+the same window and model. An accepted main-window close releases both, while
+canceling the artwork save prompt leaves Studio open.
+
+The window is deliberately a read-only shell. No editing, save, or preview
+controls are exposed yet. The approved Tip and Texture mockups are unchanged.
+
+**Regression coverage:** `TestBrushUi::brushStudioWindowIsIndependentAndReusable`
+uses the application's QML type registration and bundled QML. It opens Studio
+from Edit and checks one-window reuse, draft lifetime, project/tool/undo
+isolation, and both canceled and accepted application close.
+
+**Validation:** *integration-tested* on Debian 12 with GCC 12 and Qt 6.8.3
+(offscreen, software rendering). The desktop target built and the lifecycle
+case passed on its own and in the full brush UI suite. All 19 selected CTest
+suites passed: brush format, model, evaluation, engines and UI; canvas and
+pointer/tablet input; docking, project workflow, session, recovery, and QML
+responsiveness. The built desktop executable also passed all eight checks in
+its launch verification mode, including the bundled Studio QML resource and
+`.koma` save/reopen. That local run was not from a Windows ZIP. Physical tablet
+and artist usability testing are still outstanding.
+
+**Build fix found while testing:** `QtPointerAdapter.cpp` used an unsigned
+literal with a different type from `std::uint64_t` on Linux. The timestamp
+gap now uses the timestamp's type, with the same value and behavior. The
+pointer and synthetic tablet tests passed.
+
 ## Next
 
-The window: register `BrushStudioModel` for QML, build the approved layout
-(toolbar, component rail, tabbed centre workspace, expandable settings, live
-preview), open it from `Edit -> Brush Studio`, and paint the preview with the
-production engines through `DocumentStroke`. Then the tip/texture editors, the
-guided behaviour blocks, and import/export.
+B1.5: resource-aware Studio undo, safe brush diameters, atomic `.kb` writes,
+and fixes for group membership and component settings. Then B2 (approved
+layout), B3 (tip editor), B4 (native saving and brush library), and B5 (isolated
+preview through the production Digital and Realistic engines).
