@@ -44,6 +44,7 @@ private slots:
     void localFileCommandsPreserveHistoryAndIdentity();
     void componentEditingChangesTheDocument();
     void componentOrderAndSelectionFollowTheDocument();
+    void componentModesDescribeRealResources();
     void groupsPickModeAndMembers();
     void regroupedComponentsStayConsistentThroughSave();
     void settingsComeFromTheRegistry();
@@ -212,6 +213,30 @@ void TestBrushStudioModel::componentOrderAndSelectionFollowTheDocument() {
     QVERIFY(model.removeComponent(b));
     QVERIFY(model.selectedIndex() >= 0);
     QVERIFY(model.selectedIndex() < int(model.document().components.size()));
+}
+
+void TestBrushStudioModel::componentModesDescribeRealResources() {
+    BrushStudioModel model;
+    QVERIFY(!model.selectedResource());
+    QVERIFY(!model.selectComponentInMode(QStringLiteral("texture")));
+    QVERIFY(!model.isModified() && !model.canUndo());
+    const QString texture = model.addComponent(int(brush::ComponentKind::Texture));
+    QVERIFY(!texture.isEmpty());
+    QCOMPARE(model.componentCount(), 2);
+    QVERIFY(model.selectedResource());
+    const auto row = model.selectedComponent();
+    QCOMPARE(row.value(QStringLiteral("texture")).toBool(), true);
+    QCOMPARE(numberField(row, "resourceWidth"), double(model.selectedResource()->width));
+    QCOMPARE(numberField(row, "resourceHeight"), double(model.selectedResource()->height));
+    QCOMPARE(stringField(row, "resourceFormat"), QStringLiteral("grayscale8"));
+    QVERIFY(model.setComponentVisible(texture, false));
+    QCOMPARE(model.hiddenComponentCount(), 1);
+    QCOMPARE(model.retainedStorage().historyStates, std::size_t(2));
+    QVERIFY(model.selectComponentInMode(QStringLiteral("tip")));
+    QCOMPARE(model.selectedId(), QStringLiteral("c1"));
+    QVERIFY(model.selectComponentInMode(QStringLiteral("texture")));
+    QCOMPARE(model.selectedId(), texture);
+    QCOMPARE(model.retainedStorage().historyStates, std::size_t(2));
 }
 
 void TestBrushStudioModel::groupsPickModeAndMembers() {
@@ -559,6 +584,7 @@ void TestBrushStudioModel::undoAndRedoRestoreExactly() {
     const brush::BrushDocument before = model.document();
 
     const QString id = model.addComponent(int(brush::ComponentKind::BristleGroup));
+    const auto originalName = model.document().components.back().name;
     QVERIFY(model.setComponentName(id, QStringLiteral("Tufts")));
     QVERIFY(model.setParameterValue(QStringLiteral("spacing"), 30.0));
     QVERIFY(model.expose(QStringLiteral("bristle-count")));
@@ -569,8 +595,7 @@ void TestBrushStudioModel::undoAndRedoRestoreExactly() {
     model.undo();   // spacing
     QCOMPARE(model.parameterValue(QStringLiteral("spacing")), 15.0);
     model.undo();   // name
-    QCOMPARE(QString::fromStdString(model.document().component(id.toStdString())->name),
-             QStringLiteral("Component ") + id);
+    QCOMPARE(model.document().component(id.toStdString())->name, originalName);
     model.undo();   // the component itself
     QCOMPARE(int(model.document().components.size()), 1);
     QVERIFY(model.document() == before);

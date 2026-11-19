@@ -161,6 +161,30 @@ bool clickNamed(Running& app, const QString& name)
     return true;
 }
 
+QQuickItem* studioControl(QQuickWindow* studio, const char* name)
+{
+    return findVisual(studio->contentItem(), QString::fromLatin1(name));
+}
+
+bool pressStudio(QQuickWindow* studio, const char* name)
+{
+    auto* target = studioControl(studio, name);
+    if (!target || !target->isVisible() || !target->isEnabled() || target->width() <= 0 || target->height() <= 0) return false;
+    scrollIntoView(target);
+    click(studio, target);
+    return true;
+}
+
+bool chooseStudioSegment(QQuickWindow* studio, const char* name, int index, int count)
+{
+    auto* selector = studioControl(studio, name);
+    if (!selector || !selector->isVisible()) return false;
+    const auto at = selector->mapToScene({selector->width() * (index + 0.5) / count, selector->height() / 2.0});
+    QTest::mouseClick(studio, Qt::LeftButton, Qt::NoModifier, at.toPoint());
+    QCoreApplication::processEvents();
+    return true;
+}
+
 bool chooseHardness(Running& app, int choice)
 {
     auto* target = item(app, QStringLiteral("brushHardnessChoice"));
@@ -300,6 +324,7 @@ private slots:
     void paletteShowsEveryToolAndSelectsOnlyWorkingOnes();
     void brushStudioWindowIsIndependentAndReusable();
     void brushStudioCommandsAndCompactLayout();
+    void brushStudioComponentsAndReadOnlyEditor();
     void brushSizeGridSetsTheRealSize();
     void toolPropertyControlsDriveTheBrush();
     void strokesFollowHardnessAndTheEraserErases();
@@ -489,21 +514,8 @@ void TestBrushUi::brushStudioCommandsAndCompactLayout()
     QTRY_VERIFY((studio = studioWindow()) && studio->isVisible());
     auto* draft = studio->findChild<BrushStudioModel*>();
     QVERIFY(draft);
-    const auto control = [&](const char* name) { return findVisual(studio->contentItem(), QString::fromLatin1(name)); };
-    const auto press = [&](const char* name) {
-        auto* target = control(name);
-        if (!target || !target->isVisible() || !target->isEnabled()) return false;
-        click(studio, target);
-        return true;
-    };
-    const auto choose = [&](const char* name, int index, int count) {
-        auto* selector = control(name);
-        if (!selector || !selector->isVisible()) return false;
-        const auto at = selector->mapToScene({selector->width() * (index + 0.5) / count, selector->height() / 2.0});
-        QTest::mouseClick(studio, Qt::LeftButton, Qt::NoModifier, at.toPoint());
-        QCoreApplication::processEvents();
-        return true;
-    };
+    const auto control = [&](const char* name) { return studioControl(studio, name); };
+    const auto press = [&](const char* name) { return pressStudio(studio, name); };
 
     studio->resize(1240, 780);
     QTRY_VERIFY(control("brushStudioDuplicate") && control("brushStudioDuplicate")->isVisible());
@@ -512,7 +524,7 @@ void TestBrushUi::brushStudioCommandsAndCompactLayout()
         QVERIFY2(control(region) && control(region)->isVisible() && control(region)->height() > 0, region);
     }
     QVERIFY(control("brushStudioCompare") && !control("brushStudioCompare")->isEnabled());
-    QVERIFY(choose("brushStudioEngineChoice", 1, 2));
+    QVERIFY(chooseStudioSegment(studio, "brushStudioEngineChoice", 1, 2));
     QCOMPARE(draft->document().engine, brush::Engine::Realistic);
     QVERIFY(!app.workspace.isRealisticEngine());
 
@@ -579,7 +591,7 @@ void TestBrushUi::brushStudioCommandsAndCompactLayout()
     QVERIFY(control("brushStudioEditor")->isVisible());
     QVERIFY(!control("brushStudioComponents")->isVisible() && !control("brushStudioSettings")->isVisible());
     QVERIFY(control("brushStudioBrushActions")->isVisible() && control("brushStudioSave")->isVisible());
-    QVERIFY(choose("brushStudioPanelChoice", 2, 3));
+    QVERIFY(chooseStudioSegment(studio, "brushStudioPanelChoice", 2, 3));
     QVERIFY(control("brushStudioSettings")->isVisible() && !control("brushStudioEditor")->isVisible());
     const auto collapsed = control("brushStudioPreview")->height();
     QVERIFY(press("brushStudioTogglePreview"));
@@ -588,6 +600,119 @@ void TestBrushUi::brushStudioCommandsAndCompactLayout()
     QVERIFY(press("brushStudioClose"));
     QTRY_VERIFY(!studio->isVisible());
     QVERIFY(app.window->isVisible());
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+}
+
+void TestBrushUi::brushStudioComponentsAndReadOnlyEditor()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiStudioComponents")));
+    QVERIFY(QMetaObject::invokeMethod(app.root.get(), "openBrushStudio"));
+    QQuickWindow* studio = nullptr;
+    QTRY_VERIFY((studio = studioWindow()) && studio->isVisible());
+    studio->resize(1440, 860);
+    auto* draft = studio->findChild<BrushStudioModel*>();
+    QVERIFY(draft);
+    const auto control = [&](const char* name) { return studioControl(studio, name); };
+    const auto press = [&](const char* name) { return pressStudio(studio, name); };
+    QTRY_VERIFY(control("brushStudioBrowseLibrary") && !control("brushStudioBrowseLibrary")->isEnabled());
+    auto* editor = control("brushStudioEditor");
+    auto* asset = control("brushStudioAsset");
+    auto* stack = control("brushStudioComponentStack");
+    QVERIFY(editor && asset && stack);
+    QCOMPARE(editor->property("mode").toString(), QStringLiteral("tip"));
+    QVERIFY(!asset->isVisible());
+    QCOMPARE(stack->property("count").toInt(), 1);
+    QTRY_VERIFY(control("brushStudioEditorModes")->width() >= 150 && control("brushStudioEditorModes")->height() > 0);
+    if (qEnvironmentVariableIsSet("KOMAPAINT_SCREENSHOT_DIR")) {
+        const QDir capture(qEnvironmentVariable("KOMAPAINT_SCREENSHOT_DIR"));
+        QDir().mkpath(capture.path());
+        studio->grabWindow().save(capture.filePath(QStringLiteral("studio-tip.png")));
+    }
+    QVERIFY(chooseStudioSegment(studio, "brushStudioEditorModes", 1, 3));
+    QCOMPARE(editor->property("mode").toString(), QStringLiteral("texture"));
+    QVERIFY(!asset->isVisible() && !draft->isModified());
+
+    QVERIFY(press("brushStudioAddComponent"));
+    QQuickItem* addTexture = nullptr;
+    QTRY_VERIFY((addTexture = control("brushStudioAdd_texture")) && addTexture->isVisible());
+    click(studio, addTexture);
+    QTRY_COMPARE(draft->componentCount(), 2);
+    const auto texture = draft->selectedId();
+    QCOMPARE(draft->document().components.back().kind, brush::ComponentKind::Texture);
+    QCOMPARE(editor->property("mode").toString(), QStringLiteral("texture"));
+    QVERIFY(asset->isVisible() && asset->property("tiled").toBool());
+    QVERIFY(press("brushStudioZoomIn"));
+    QCOMPARE(asset->property("magnification").toDouble(), 1.25);
+    QVERIFY(press("brushStudioFit"));
+    QCOMPARE(asset->property("magnification").toDouble(), 1.0);
+
+    // Same selected resource, changed immutable pixels: the read-only display
+    // must show the new pixels in both the centre tile and its neighbours.
+    auto textureDraft = draft->document();
+    auto* resource = textureDraft.resource(textureDraft.components.back().resourceId);
+    QVERIFY(resource);
+    resource->kind = brush::ResourceKind::Rgba8;
+    std::vector<std::uint8_t> rgba(resource->expectedBytes());
+    for (std::size_t index = 0; index < rgba.size(); index += 4) {
+        rgba[index] = 48;
+        rgba[index + 1] = 91;
+        rgba[index + 2] = 173;
+        rgba[index + 3] = 255;
+    }
+    resource->setPixels(std::move(rgba));
+    QVERIFY(draft->setDocument(std::move(textureDraft)));
+    QVERIFY(chooseStudioSegment(studio, "brushStudioEditorModes", 1, 3));
+    QTRY_VERIFY(asset->isVisible() && asset->height() > 80);
+    QCOMPARE(draft->selectedId(), texture);
+    const QImage image = studio->grabWindow();
+    QVERIFY(!image.isNull());
+    const auto sample = [&](qreal dx) {
+        const QPointF scene = asset->mapToScene(QPointF(asset->width() / 2 + dx, asset->height() / 2));
+        return image.pixelColor(QPointF(scene.x() * image.width() / studio->width(),
+                                       scene.y() * image.height() / studio->height()).toPoint());
+    };
+    QCOMPARE(sample(0), QColor(48, 91, 173));
+    QCOMPARE(sample(std::min(asset->width(), asset->height()) * 0.32), QColor(48, 91, 173));
+
+    QVERIFY(press(qPrintable(QStringLiteral("brushStudioVisibility_") + texture)));
+    QCOMPARE(draft->hiddenComponentCount(), 1);
+    QVERIFY(!draft->document().components.back().visible);
+    QVERIFY(press("brushStudioUndo"));
+    QCOMPARE(draft->hiddenComponentCount(), 0);
+    QVERIFY(press("brushStudioRedo"));
+    QCOMPARE(draft->hiddenComponentCount(), 1);
+    QVERIFY(press("brushStudioComponentUp"));
+    QCOMPARE(draft->selectedIndex(), 0);
+    QCOMPARE(QString::fromStdString(draft->document().components.front().id), texture);
+    QVERIFY(press("brushStudioTab_c1"));
+    QCOMPARE(draft->selectedId(), QStringLiteral("c1"));
+    QCOMPARE(editor->property("mode").toString(), QStringLiteral("tip"));
+    QVERIFY(chooseStudioSegment(studio, "brushStudioEditorModes", 2, 3));
+    QCOMPARE(editor->property("mode").toString(), QStringLiteral("nodes"));
+    QVERIFY(!asset->isVisible());
+    QVERIFY(press(qPrintable(QStringLiteral("brushStudioRow_") + texture)));
+    QCOMPARE(draft->selectedId(), texture);
+    QCOMPARE(editor->property("mode").toString(), QStringLiteral("texture"));
+
+    const QString capture = qEnvironmentVariable("KOMAPAINT_SCREENSHOT_DIR");
+    if (!capture.isEmpty()) {
+        QDir().mkpath(capture);
+        studio->grabWindow().save(QDir(capture).filePath(QStringLiteral("studio-texture.png")));
+    }
+    QVERIFY(press("brushStudioComponentSearch"));
+    QTest::keyClick(studio, Qt::Key_T);
+    QTest::keyClick(studio, Qt::Key_E);
+    QTest::keyClick(studio, Qt::Key_X);
+    QTRY_COMPARE(stack->property("count").toInt(), 1);
+    QVERIFY(!control("brushStudioComponentDown")->isEnabled());
+    QVERIFY(press("brushStudioRemoveComponent"));
+    QCOMPARE(draft->componentCount(), 1);
+    QCOMPARE(draft->selectedId(), QStringLiteral("c1"));
+    QVERIFY(press("brushStudioUndo"));
+    QCOMPARE(draft->componentCount(), 2);
+    QCOMPARE(draft->selectedId(), texture);
+    QVERIFY(app.workspace.history() && !app.workspace.history()->canUndo());
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 

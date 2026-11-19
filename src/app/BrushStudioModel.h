@@ -34,6 +34,9 @@ class BrushStudioModel : public QObject {
     Q_PROPERTY(QString selectedId READ selectedId NOTIFY selectionChanged)
     Q_PROPERTY(int selectedIndex READ selectedIndex WRITE setSelectedIndex NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList components READ components NOTIFY componentsChanged)
+    Q_PROPERTY(QVariantMap selectedComponent READ selectedComponent NOTIFY componentsChanged)
+    Q_PROPERTY(int componentCount READ componentCount NOTIFY componentsChanged)
+    Q_PROPERTY(int hiddenComponentCount READ hiddenComponentCount NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList groups READ groups NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList parameters READ parameters NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList exposedProperties READ exposedProperties NOTIFY exposureChanged)
@@ -74,6 +77,11 @@ public:
 
     // ---- components -------------------------------------------------------
     QVariantList components() const;
+    QVariantMap selectedComponent() const;
+    const brush::BrushResource* selectedResource() const;
+    int componentCount() const { return static_cast<int>(m_document.components.size()); }
+    int hiddenComponentCount() const;
+    Q_INVOKABLE bool selectComponentInMode(const QString& mode);
     QVariantList groups() const;
     QVariantList componentKinds() const;
     QVariantList selectionModes() const;
@@ -173,6 +181,8 @@ private:
                          const brush::BrushDocument* incomingCopy);
     bool replaceDocument(brush::BrushDocument&& document, EditMode mode, const char* label = "Open brush");
     bool writeBrush(const QString& path);
+    QVariantMap componentRow(int index) const;
+    const brush::BrushComponent* selectedComponentData() const;
     brush::BrushComponent* editableComponent(const QString& id);
     bool fail(const QString& message);
     void clearError();

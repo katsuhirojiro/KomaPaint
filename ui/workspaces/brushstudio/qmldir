@@ -1,3 +1,6 @@
 StudioToolbar 1.0 StudioToolbar.qml
 StudioPreview 1.0 StudioPreview.qml
 StudioHeader 1.0 StudioHeader.qml
+StudioComponentMenu 1.0 StudioComponentMenu.qml
+StudioComponentRail 1.0 StudioComponentRail.qml
+StudioEditor 1.0 StudioEditor.qml

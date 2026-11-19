@@ -3,6 +3,8 @@ add_library(komapaint_app STATIC
     BrushLibraryStore.cpp
     BrushLibraryStore.h
     BrushSettings.h
+    BrushStudioAssetView.cpp
+    BrushStudioAssetView.h
     BrushStudioHistory.cpp
     BrushStudioModel.cpp
     BrushStudioModel.h

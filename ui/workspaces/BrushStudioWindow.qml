@@ -146,23 +146,21 @@ Window {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: KP.hairlineWidth
-            PanelScaffold {
+            StudioComponentRail {
                 objectName: "brushStudioComponents"
                 visible: !studio.compact || studio.compactPanel === 0
                 Layout.fillWidth: studio.compact
                 Layout.preferredWidth: studio.compact ? -1 : Math.min(260, Math.round(studio.width * 0.16))
                 Layout.fillHeight: true
-                title: qsTr("Components")
-                notice: qsTr("%n component(s) in this draft. Component editing and the brush library are unavailable here.", "", brushDraft.components.length)
+                draft: brushDraft
             }
-            PanelScaffold {
+            StudioEditor {
+                id: editor
                 objectName: "brushStudioEditor"
                 visible: !studio.compact || studio.compactPanel === 1
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                color: KP.canvasBg
-                title: qsTr("Editor")
-                notice: qsTr("Tip, Texture and Nodes are workspace tabs. Pixel and node editing are unavailable.")
+                draft: brushDraft
             }
             PanelScaffold {
                 objectName: "brushStudioSettings"
@@ -218,6 +216,13 @@ Window {
                     text: studio.compact && studio.fileNotice.length > 0 ? studio.fileNotice : qsTr("Sub-Tool  /  %1  /  %2").arg(brushDraft.engine === "realistic" ? qsTr("Realistic") : qsTr("Digital")).arg(brushDraft.name)
                     textFormat: Text.PlainText
                     elide: Text.ElideRight
+                    color: KP.textSubtle
+                    font.family: KP.fontUi
+                    font.pixelSize: KP.fontXS
+                }
+                Text {
+                    visible: studio.width >= 1060
+                    text: (brushDraft.componentCount === 1 ? qsTr("1 component") : qsTr("%1 components").arg(brushDraft.componentCount)) + " · " + qsTr("%1 hidden").arg(brushDraft.hiddenComponentCount)
                     color: KP.textSubtle
                     font.family: KP.fontUi
                     font.pixelSize: KP.fontXS

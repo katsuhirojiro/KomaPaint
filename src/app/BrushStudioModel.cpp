@@ -96,6 +96,27 @@ int kindIndex(ComponentKind kind) {
     return 0;
 }
 
+QString componentKindLabel(ComponentKind kind) {
+    switch (kind) {
+    case ComponentKind::Tip:             return BrushStudioModel::tr("Tip mask");
+    case ComponentKind::Image:           return BrushStudioModel::tr("Image");
+    case ComponentKind::Texture:         return BrushStudioModel::tr("Texture");
+    case ComponentKind::AlphaMask:       return BrushStudioModel::tr("Alpha mask");
+    case ComponentKind::GrayscaleMask:  return BrushStudioModel::tr("Grayscale mask");
+    case ComponentKind::ColourImage:     return BrushStudioModel::tr("Colour image");
+    case ComponentKind::ProceduralShape: return BrushStudioModel::tr("Procedural tip");
+    case ComponentKind::Particle:        return BrushStudioModel::tr("Particle");
+    case ComponentKind::BristleGroup:    return BrushStudioModel::tr("Bristle group");
+    case ComponentKind::Pattern:         return BrushStudioModel::tr("Pattern");
+    case ComponentKind::Sequence:        return BrushStudioModel::tr("Sequence");
+    }
+    return {};
+}
+
+bool isTexture(ComponentKind kind) {
+    return kind == ComponentKind::Texture || kind == ComponentKind::Pattern;
+}
+
 std::string newDraftId() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
 }
@@ -239,37 +260,75 @@ void BrushStudioModel::setDescription(const QString& value) {
 
 // ---- components -------------------------------------------------------------
 
+QVariantMap BrushStudioModel::componentRow(int index) const {
+    if (index < 0 || index >= componentCount()) return {};
+    const auto& component = m_document.components[static_cast<std::size_t>(index)];
+    QVariantMap map;
+    map.insert(QStringLiteral("index"), index);
+    map.insert(QStringLiteral("id"), QString::fromStdString(component.id));
+    map.insert(QStringLiteral("name"), QString::fromStdString(component.name));
+    map.insert(QStringLiteral("kind"), kindIndex(component.kind));
+    map.insert(QStringLiteral("kindName"), QString::fromUtf8(brush::toString(component.kind)));
+    map.insert(QStringLiteral("kindLabel"), componentKindLabel(component.kind));
+    map.insert(QStringLiteral("texture"), isTexture(component.kind));
+    const auto* resource = m_document.resource(component.resourceId);
+    map.insert(QStringLiteral("resourceWidth"), resource ? resource->width : 0);
+    map.insert(QStringLiteral("resourceHeight"), resource ? resource->height : 0);
+    map.insert(QStringLiteral("resourceFormat"), resource ? QString::fromUtf8(brush::toString(resource->kind)) : QString{});
+    map.insert(QStringLiteral("visible"), component.visible);
+    map.insert(QStringLiteral("opacity"), component.opacity);
+    map.insert(QStringLiteral("blend"), int(component.blend));
+    map.insert(QStringLiteral("blendName"), blendName(component.blend));
+    map.insert(QStringLiteral("erases"), component.erases);
+    map.insert(QStringLiteral("weight"), component.weight);
+    map.insert(QStringLiteral("groupId"), QString::fromStdString(component.groupId));
+    map.insert(QStringLiteral("resourceId"), QString::fromStdString(component.resourceId));
+    map.insert(QStringLiteral("maskId"), QString::fromStdString(component.maskComponentId));
+    map.insert(QStringLiteral("offsetX"), component.transform.offsetX);
+    map.insert(QStringLiteral("offsetY"), component.transform.offsetY);
+    map.insert(QStringLiteral("rotation"), component.transform.rotationDegrees);
+    map.insert(QStringLiteral("scale"), component.transform.scale);
+    map.insert(QStringLiteral("aspect"), component.transform.aspect);
+    map.insert(QStringLiteral("flipX"), component.transform.flipX);
+    map.insert(QStringLiteral("flipY"), component.transform.flipY);
+    map.insert(QStringLiteral("selected"), index == m_selectedIndex);
+    return map;
+}
+
 QVariantList BrushStudioModel::components() const {
     QVariantList list;
-    list.reserve(int(m_document.components.size()));
-    for (std::size_t i = 0; i < m_document.components.size(); ++i) {
-        const BrushComponent& component = m_document.components[i];
-        QVariantMap map;
-        map.insert(QStringLiteral("index"), int(i));
-        map.insert(QStringLiteral("id"), QString::fromStdString(component.id));
-        map.insert(QStringLiteral("name"), QString::fromStdString(component.name));
-        map.insert(QStringLiteral("kind"), kindIndex(component.kind));
-        map.insert(QStringLiteral("kindName"), QString::fromUtf8(brush::toString(component.kind)));
-        map.insert(QStringLiteral("visible"), component.visible);
-        map.insert(QStringLiteral("opacity"), component.opacity);
-        map.insert(QStringLiteral("blend"), int(component.blend));
-        map.insert(QStringLiteral("blendName"), blendName(component.blend));
-        map.insert(QStringLiteral("erases"), component.erases);
-        map.insert(QStringLiteral("weight"), component.weight);
-        map.insert(QStringLiteral("groupId"), QString::fromStdString(component.groupId));
-        map.insert(QStringLiteral("resourceId"), QString::fromStdString(component.resourceId));
-        map.insert(QStringLiteral("maskId"), QString::fromStdString(component.maskComponentId));
-        map.insert(QStringLiteral("offsetX"), component.transform.offsetX);
-        map.insert(QStringLiteral("offsetY"), component.transform.offsetY);
-        map.insert(QStringLiteral("rotation"), component.transform.rotationDegrees);
-        map.insert(QStringLiteral("scale"), component.transform.scale);
-        map.insert(QStringLiteral("aspect"), component.transform.aspect);
-        map.insert(QStringLiteral("flipX"), component.transform.flipX);
-        map.insert(QStringLiteral("flipY"), component.transform.flipY);
-        map.insert(QStringLiteral("selected"), int(i) == m_selectedIndex);
-        list.append(map);
-    }
+    list.reserve(componentCount());
+    for (int index = 0; index < componentCount(); ++index) list.append(componentRow(index));
     return list;
+}
+
+QVariantMap BrushStudioModel::selectedComponent() const { return componentRow(m_selectedIndex); }
+
+const BrushComponent* BrushStudioModel::selectedComponentData() const {
+    return m_selectedIndex >= 0 && m_selectedIndex < componentCount()
+        ? &m_document.components[static_cast<std::size_t>(m_selectedIndex)] : nullptr;
+}
+
+const brush::BrushResource* BrushStudioModel::selectedResource() const {
+    const auto* selected = selectedComponentData();
+    return selected ? m_document.resource(selected->resourceId) : nullptr;
+}
+
+int BrushStudioModel::hiddenComponentCount() const {
+    return static_cast<int>(std::ranges::count_if(m_document.components, [](const auto& item) { return !item.visible; }));
+}
+
+bool BrushStudioModel::selectComponentInMode(const QString& mode) {
+    if (mode != QStringLiteral("tip") && mode != QStringLiteral("texture")) return false;
+    const bool texture = mode == QStringLiteral("texture");
+    if (const auto* selected = selectedComponentData(); selected && isTexture(selected->kind) == texture) return true;
+    for (int index = 0; index < componentCount(); ++index) {
+        if (isTexture(m_document.components[static_cast<std::size_t>(index)].kind) == texture) {
+            setSelectedIndex(index);
+            return true;
+        }
+    }
+    return false;
 }
 
 QVariantList BrushStudioModel::groups() const {
@@ -295,6 +354,7 @@ QVariantList BrushStudioModel::componentKinds() const {
         QVariantMap map;
         map.insert(QStringLiteral("value"), kindIndex(kind));
         map.insert(QStringLiteral("name"), QString::fromUtf8(brush::toString(kind)));
+        map.insert(QStringLiteral("label"), componentKindLabel(kind));
         list.append(map);
     }
     return list;
@@ -379,8 +439,7 @@ QString BrushStudioModel::addComponent(int kind) {
         BrushComponent component;
         component.id = m_document.allocateId("c");
         component.kind = componentKind;
-        component.name = componentKind == ComponentKind::ProceduralShape
-            ? "Tip " + component.id : "Component " + component.id;
+        component.name = componentKindLabel(componentKind).toStdString();
         if (componentKind == ComponentKind::ProceduralShape) {
             component.parameters.set("tip-shape", 0.0);
         }

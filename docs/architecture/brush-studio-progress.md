@@ -415,9 +415,35 @@ self-check now opens the lazy window and round-trips a `.kb`; all nine checks
 passed with zero QML warnings. The offscreen plugin itself does not support
 raising native windows; this is not a QML warning.
 
+## Phase B2.2 — component stack and read-only editor
+
+The left rail filters the real draft components without rearranging them.
+Add, duplicate, show/hide, remove, and move up/down call the document model
+and are undoable. The stack retains document order (not a fabricated drag or
+compositing operation). The Library rail explicitly says it is unavailable.
+Component tabs share selection with the browser, and choosing Tip or Texture
+selects a matching component when available. Document-wide and component
+settings are still independent of editor navigation.
+
+The center reads existing immutable pixel resources, not a rendered stroke.
+It shows a fitted resource in Tip mode or repeats the stored tile in Texture
+mode, with Fit and sample zoom controls. The view retains one shared pixel
+buffer and downsamples only the display cache (640 px maximum on its long
+edge). It does not alter the resource or claim pixel-accurate editing,
+seam verification, or production brush behavior. Procedural tips without
+stored pixels, pixel tools, and Nodes have explicit availability messages.
+
+**Validation (Debian 12 / Qt 6.8.3):** full desktop build. All seven other
+brush suites passed on the brush run (including 57.95 s for `test_brush_ui`);
+the Studio model suite passed on rerun after the undo test was updated to
+assert the actual original component name rather than the old placeholder.
+The new GUI regression exercised both modes, component changes, history,
+filtering and zoom, and sampled the actual RGBA tile and its neighbor from
+the rendered window. The nine packaged-resource checks passed. Wide Tip and
+Texture captures were inspected; they showed no fake strokes or node data.
+
 ## Next
 
-B2.2 (component rail and editor modes) and B2.3 (registry-driven settings) are
-pending. B3 (tip editor), B4 (brush library integration), and B5 (isolated
-production-engine preview) are not started. Hardware tablet and artist
-workflow testing are still outstanding.
+B2.3 (registry-driven settings) is pending. B3 (tip editor), B4 (brush library
+integration), and B5 (isolated production-engine preview) are not started.
+Hardware tablet and artist workflow testing are still outstanding.

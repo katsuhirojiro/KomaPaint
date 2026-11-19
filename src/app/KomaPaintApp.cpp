@@ -1,4 +1,5 @@
 #include "KomaPaintApp.h"
+#include "BrushStudioAssetView.h"
 #include "BrushStudioModel.h"
 #include "CanvasViewport.h"
 #include "MixerSurfaceItem.h"
@@ -73,6 +74,7 @@ void KomaPaintApp::registerTypes()
     qRegisterMetaType<komapaint::input::TabletInputSettings*>();
     qmlRegisterType<CanvasViewport>("KomaPaint", 1, 0, "CanvasViewport");
     qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
+    qmlRegisterType<BrushStudioAssetView>("KomaPaint", 1, 0, "BrushStudioAssetView");
     qmlRegisterType<BrushStudioModel>("KomaPaint", 1, 0, "BrushStudioModel");
 }
 
