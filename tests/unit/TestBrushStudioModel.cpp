@@ -415,6 +415,12 @@ void TestBrushStudioModel::settingSectionsAndReadbackKeepScopesSeparate() {
     model.setSelectedIndex(-1);
     QVERIFY(!state(QStringLiteral("component-opacity")).value(QStringLiteral("available")).toBool());
     QVERIFY(state(size).value(QStringLiteral("available")).toBool());
+    const auto metadata = model.exposureState();
+    const auto keysRole = QStringLiteral("keys");
+    const auto entriesRole = QStringLiteral("entries");
+    QVERIFY(model.setExposure(size, {{QStringLiteral("label"), QStringLiteral("Width")}}));
+    QCOMPARE(model.exposureState().value(keysRole), metadata.value(keysRole));
+    QCOMPARE(stringField(model.exposureState().value(entriesRole).toMap().value(size).toMap(), "label"), QStringLiteral("Width"));
     QVERIFY(model.unexpose(size));
     QCOMPARE(numberField(state(size), "value"), double(brush::MaxBrushDiameter));
     const auto candidates = model.exposureCandidates();

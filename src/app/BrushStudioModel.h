@@ -43,6 +43,7 @@ class BrushStudioModel : public QObject {
     Q_PROPERTY(QVariantMap settingState READ settingState NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList exposureCandidates READ exposureCandidates NOTIFY exposureChanged)
     Q_PROPERTY(QVariantList exposedProperties READ exposedProperties NOTIFY exposureChanged)
+    Q_PROPERTY(QVariantMap exposureState READ exposureState NOTIFY exposureChanged)
     Q_PROPERTY(QVariantList componentKinds READ componentKinds CONSTANT)
     Q_PROPERTY(QVariantList componentBlends READ componentBlends CONSTANT)
     Q_PROPERTY(QVariantList selectionModes READ selectionModes CONSTANT)
@@ -127,6 +128,7 @@ public:
     // ---- Sub-Tool exposure (Part 10) --------------------------------------
     QVariantList exposedProperties() const;
     QVariantList exposureCandidates() const;
+    QVariantMap exposureState() const;
     Q_INVOKABLE bool isExposed(const QString& key) const;
     Q_INVOKABLE bool expose(const QString& key);
     Q_INVOKABLE bool unexpose(const QString& key);

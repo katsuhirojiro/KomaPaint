@@ -170,9 +170,10 @@ QQuickItem* studioControl(QQuickWindow* studio, const char* name)
 
 bool pressStudio(QQuickWindow* studio, const char* name)
 {
-    auto* target = studioControl(studio, name);
+    QPointer<QQuickItem> target(studioControl(studio, name));
     if (!target || !target->isVisible() || !target->isEnabled() || target->width() <= 0 || target->height() <= 0) return false;
     scrollIntoView(target);
+    if (!target) return false;
     click(studio, target);
     return true;
 }
@@ -819,13 +820,20 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
     QTest::keyClick(studio, Qt::Key_Return);
     QTRY_COMPARE(draft->exposedProperties().size(), count + 1);
     QVERIFY(draft->isExposed(firstCandidate));
+    QTRY_VERIFY(control("brushStudioExposureLabel_size") && control("brushStudioExposureLabel_size")->isVisible());
+    QPointer<QQuickItem> labelField(control("brushStudioExposureLabel_size"));
+    QPointer<QQuickItem> removeButton(control("brushStudioUnexpose_size"));
+    QVERIFY(labelField && removeButton);
     QVERIFY(enter("brushStudioExposureLabel_size", QStringLiteral("Preferred Width")));
     const auto rows = draft->exposedProperties();
     const auto row = std::ranges::find_if(rows, [&](const auto& item) { return item.toMap().value(QStringLiteral("key")).toString() == size; });
     QVERIFY(row != rows.end());
     QCOMPARE(row->toMap().value(QStringLiteral("label")).toString(), QStringLiteral("Preferred Width"));
+    QTRY_VERIFY(labelField && labelField->property("text").toString() == QStringLiteral("Preferred Width"));
+    QCOMPARE(control("brushStudioExposureLabel_size"), labelField.data());
+    QCOMPARE(control("brushStudioUnexpose_size"), removeButton.data());
     QVERIFY(press("brushStudioUnexpose_size"));
-    QVERIFY(!draft->isExposed(size));
+    QTRY_VERIFY(!draft->isExposed(size));
     QCOMPARE(draft->parameterValue(size), double(brush::MaxBrushDiameter));
     QCOMPARE(app.workspace.brush()->size(), originalSize);
     QVERIFY(!app.workspace.history()->canUndo());

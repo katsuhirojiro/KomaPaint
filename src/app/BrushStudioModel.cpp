@@ -847,6 +847,19 @@ QVariantList BrushStudioModel::exposedProperties() const {
     return list;
 }
 
+QVariantMap BrushStudioModel::exposureState() const {
+    QStringList keys;
+    QVariantMap entries;
+    for (const auto& property : exposedProperties()) {
+        const auto key = property.toMap().value(QStringLiteral("key")).toString();
+        keys.append(key);
+        entries.insert(key, property);
+    }
+    // Relabeling an entry only changes its readback, not the delegate model
+    // or the positions of its buttons in the scrolling exposure page.
+    return {{QStringLiteral("keys"), keys}, {QStringLiteral("entries"), entries}};
+}
+
 QVariantList BrushStudioModel::exposureCandidates() const {
     QVariantList list;
     for (const auto& info : brush::parameterRegistry()) {

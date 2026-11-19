@@ -478,7 +478,17 @@ slider drag, undo/redo, scoped edits, exposure without changing brush values,
 and usable settings at the 540 × 400 minimum. The packaged-resource self-check
 passed all nine checks. Wide Tip/Texture and compact settings captures were
 reviewed; clipping the software-rendered scroll viewports keeps glyphs inside
-their own panels.
+their own panels. The four focused cases also passed in the light theme;
+three command/editor/inspector cases passed at 150% scaling.
+
+Windows [44578596518](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44578596518)
+built `3e2d825` and passed the component regression, but failed the Remove
+click immediately after an exposure label edit. The follow-up separates
+ordered exposure keys from their metadata so editing a label does not
+recreate the row or move its buttons. The regression now checks that both
+controls remain mounted and that Remove still works. Rebuilt and reran all
+49 Linux CTest suites (79.00 s), four focused UI cases, and all nine packaged
+self-checks; all passed.
 
 ## Next
 

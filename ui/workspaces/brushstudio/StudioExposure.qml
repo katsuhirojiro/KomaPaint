@@ -8,6 +8,7 @@ import "../../themes"
 Flickable {
     id: exposure
     required property BrushStudioModel draft
+    readonly property var metadata: draft.exposureState
     // A viewport layer keeps software Shape nodes inside the scroll clip.
     layer.enabled: GraphicsInfo.api === GraphicsInfo.Software
     clip: true
@@ -46,10 +47,11 @@ Flickable {
             onActivated: function(index) { exposure.draft.expose(valueAt(index)); currentIndex = -1 }
         }
         Repeater {
-            model: exposure.draft.exposedProperties
+            model: exposure.metadata.keys
             delegate: RowLayout {
                 id: exposedRow
-                required property var modelData
+                required property string modelData
+                readonly property var entry: exposure.metadata.entries[modelData] || {}
                 Layout.fillWidth: true
                 spacing: KP.gapS
                 ColumnLayout {
@@ -57,20 +59,20 @@ Flickable {
                     spacing: KP.gapXS
                     KpTextField {
                         id: displayName
-                        objectName: "brushStudioExposureLabel_" + exposedRow.modelData.key
+                        objectName: "brushStudioExposureLabel_" + exposedRow.modelData
                         Layout.fillWidth: true
-                        placeholder: exposedRow.modelData.label
-                        text: exposedRow.modelData.customLabel ? exposedRow.modelData.label : ""
-                        Accessible.name: qsTr("Display label for %1").arg(exposedRow.modelData.key)
+                        placeholder: exposedRow.entry.label || ""
+                        text: exposedRow.entry.customLabel ? exposedRow.entry.label : ""
+                        Accessible.name: qsTr("Display label for %1").arg(exposedRow.modelData)
                         onSubmitted: function(typed) {
-                            if (typed !== (exposedRow.modelData.customLabel ? exposedRow.modelData.label : ""))
-                                exposure.draft.setExposure(exposedRow.modelData.key, { label: typed })
-                            displayName.text = Qt.binding(function() { return exposedRow.modelData.customLabel ? exposedRow.modelData.label : "" })
+                            if (exposedRow.entry.key && typed !== (exposedRow.entry.customLabel ? exposedRow.entry.label : ""))
+                                exposure.draft.setExposure(exposedRow.modelData, { label: typed })
+                            displayName.text = Qt.binding(function() { return exposedRow.entry.customLabel ? exposedRow.entry.label : "" })
                         }
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: qsTr("%1 · %2").arg(exposedRow.modelData.section).arg(exposedRow.modelData.control)
+                        text: exposedRow.entry.key ? qsTr("%1 · %2").arg(exposedRow.entry.section).arg(exposedRow.entry.control) : ""
                         textFormat: Text.PlainText
                         elide: Text.ElideRight
                         color: KP.textSubtle
@@ -79,11 +81,11 @@ Flickable {
                     }
                 }
                 KpButton {
-                    objectName: "brushStudioUnexpose_" + exposedRow.modelData.key
+                    objectName: "brushStudioUnexpose_" + exposedRow.modelData
                     small: true
                     glyph: "minus"
-                    tip: qsTr("Remove %1 from creator exposure").arg(exposedRow.modelData.label)
-                    onClicked: exposure.draft.unexpose(exposedRow.modelData.key)
+                    tip: qsTr("Remove %1 from creator exposure").arg(exposedRow.entry.label || exposedRow.modelData)
+                    onClicked: exposure.draft.unexpose(exposedRow.modelData)
                 }
             }
         }
