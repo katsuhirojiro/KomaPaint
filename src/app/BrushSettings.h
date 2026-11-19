@@ -83,11 +83,8 @@ public:
         return QStringLiteral("round");
     }
     using QObject::QObject;
-    // Limits of the brush engine (see BrushRasterizer::dab and BrushStroke).
-    // A technical sanity bound, not a creative limit: 8192 px is larger than a
-    // practical brush on an 8K canvas. The old 256 px ceiling was an arbitrary
-    // restriction and prevented wide washes and background blocking.
-    static constexpr int MinSize = 1, MaxSize = 8192, MinSpacing = 5, MaxSpacing = 50;
+    static constexpr int MinSize = brush::MinBrushDiameter, MaxSize = brush::MaxBrushDiameter;
+    static constexpr int MinSpacing = 5, MaxSpacing = 50;
     int size() const { return m_size; }
     int opacity() const { return m_opacity; }
     int flow() const { return m_flow; }

@@ -1,5 +1,6 @@
 #include "TileGeometry.h"
 #include <algorithm>
+#include <cmath>
 
 namespace komapaint {
 
@@ -22,6 +23,17 @@ std::optional<TileRect> TileGeometry::clip(TileRect rect) const
                      std::min(m_width, rect.right), std::min(m_height, rect.bottom)};
     if (clipped.left >= clipped.right || clipped.top >= clipped.bottom) return std::nullopt;
     return clipped;
+}
+
+std::optional<TileRect> TileGeometry::rasterBounds(double left, double top, double right, double bottom) const
+{
+    if (!m_valid || !(left < right) || !(top < bottom)) return std::nullopt;
+    const TileRect bounds{clampPixelEdge(std::floor(left), 0, m_width),
+                          clampPixelEdge(std::floor(top), 0, m_height),
+                          clampPixelEdge(std::ceil(right), 0, m_width),
+                          clampPixelEdge(std::ceil(bottom), 0, m_height)};
+    if (bounds.left >= bounds.right || bounds.top >= bounds.bottom) return std::nullopt;
+    return bounds;
 }
 
 std::optional<TileRange> TileGeometry::tilesForRect(TileRect rect) const

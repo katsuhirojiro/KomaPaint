@@ -278,11 +278,13 @@ void TestBrushStudioModel::settingsComeFromTheRegistry() {
     QCOMPARE(stringField(model.parameterInfo(QStringLiteral("size")), "section"),
              QStringLiteral("Size"));
     QVERIFY(model.parameterInfo(QStringLiteral("no-such-setting")).isEmpty());
+    QVERIFY(model.setParameterValue(QStringLiteral("size"), brush::MaxBrushDiameter));
+    QCOMPARE(model.parameterValue(QStringLiteral("size")), double(brush::MaxBrushDiameter));
 }
 
 void TestBrushStudioModel::settingsRejectNonsense() {
     BrushStudioModel model;
-    QVERIFY(!model.setParameterValue(QStringLiteral("size"), 100000.0));
+    QVERIFY(!model.setParameterValue(QStringLiteral("size"), double(brush::MaxBrushDiameter) + 1.0));
     QVERIFY(model.error().contains(QStringLiteral("size")) || model.error().contains(QStringLiteral("Size")));
     QVERIFY(!model.setParameterValue(QStringLiteral("no-such-setting"), 1.0));
     QVERIFY(!model.error().isEmpty());

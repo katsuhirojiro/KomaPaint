@@ -769,6 +769,19 @@ void TestBrushUi::brushSizeGridSetsTheRealSize()
         shownBefore = shown.toDouble();
     }
 
+    // Type a large value and then all ten digits of the technical endpoint.
+    for (const int expected : {12345, BrushSettings::MaxSize}) {
+        QVERIFY(clickNamed(app, QStringLiteral("brushSizeField")));
+        QTest::keyClick(app.window, Qt::Key_A, Qt::ControlModifier);
+        for (const auto digit : QString::number(expected)) {
+            QTest::keyClick(app.window, static_cast<Qt::Key>(Qt::Key_0 + digit.digitValue()));
+        }
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_COMPARE(brush->size(), expected);
+        QCOMPARE(item(app, QStringLiteral("brushSizeSlider"))->property("value").toInt(), expected);
+    }
+    QVERIFY(clickNamed(app, QStringLiteral("brushSize100")));
+
     // With a tool that does not paint, the grid does nothing.
     QVERIFY(clickNamed(app, QStringLiteral("tool_hand")));
     QVERIFY(clickNamed(app, QStringLiteral("brushSize40")));
@@ -797,15 +810,14 @@ void TestBrushUi::toolPropertyControlsDriveTheBrush()
     // Return to the top of the property panel for the precision controls.
     item(app, QStringLiteral("toolPropertyScroll"))->setProperty("contentY", 0);
     QCoreApplication::processEvents();
-    // Brush size: both ends of the bar are the engine's limits.
+    // Brush size: the rail reaches both ends of the size property.
     QVERIFY(setSlider(app, QStringLiteral("brushSizeSlider"), 1.0));
     QCOMPARE(brush->size(), int(BrushSettings::MaxSize));
     QVERIFY(setSlider(app, QStringLiteral("brushSizeSlider"), 0.0));
     QCOMPARE(brush->size(), int(BrushSettings::MinSize));
     QVERIFY(setSlider(app, QStringLiteral("brushSizeSlider"), 0.5));
-    // The rail is logarithmic across the engine's full range, so the middle is
-    // the geometric mean of 1 and MaxSize (~90 px), not a quarter of the way in.
-    QVERIFY(brush->size() > 40 && brush->size() < 200);               // the bar gives small sizes more room
+    // The curve keeps the midpoint useful for small sizes despite the range.
+    QVERIFY(brush->size() > 40 && brush->size() < 200);
 
     // Digital is the default Brush Engine, so physical material controls stay hidden.
     // Brush Engine selector itself belongs in Koma Settings, NOT in Tool Properties.
@@ -1983,6 +1995,7 @@ void TestBrushUi::brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects()
 
     QString customDigitalTabId;
     QString customDigitalBrushId;
+    QString extraWideBrushId;
     QString movedBrushId;
     QString copiedBrushId;
     QString realisticCustomTabId;
@@ -2139,6 +2152,12 @@ void TestBrushUi::brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects()
         // Return to Digital before closing; confirm Realistic artwork stays intact.
         app.workspace.setBrushEngine(QStringLiteral("digital"));
         QVERIFY(app.workspace.layers()->layerAt(0)->materialTiles().allocatedTiles() > 0);
+        extraWideBrushId = lib->duplicateBrushById(customDigitalBrushId);
+        QVERIFY(!extraWideBrushId.isEmpty());
+        QCOMPARE(lib->currentBrushId(), extraWideBrushId);
+        brush->setSize(BrushSettings::MaxSize);
+        lib->selectById(customDigitalBrushId);
+        QCOMPARE(brush->size(), 27);
         QVERIFY(QFile::exists(libraryPath));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
         app.root.reset();
@@ -2166,6 +2185,8 @@ void TestBrushUi::brushLibraryTabsAndPresetsPersistAcrossRestartsAndProjects()
         QCOMPARE(brush->size(), 27);
         QCOMPARE(brush->tipStyle(), QStringLiteral("graphite"));
         QCOMPARE(brush->pressureSize(), 64);
+        lib->selectById(extraWideBrushId);
+        QCOMPARE(brush->size(), BrushSettings::MaxSize);
 
         lib->selectTabById(QStringLiteral("digital-sketching"));
         lib->selectById(movedBrushId);

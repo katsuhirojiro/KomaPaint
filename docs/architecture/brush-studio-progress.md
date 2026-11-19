@@ -285,7 +285,8 @@ validation rejects duplicate membership.
 before the fix. It now passes regrouping, undo/redo, reordering, nested stamp
 selection, removal, and a native `.kb` round trip. Eight full brush CTest
 suites passed on Debian 12 / Qt 6.8.3, including the core membership tests
-(171 checks) and the Studio model and UI suites.
+(171 checks) and the Studio model and UI suites. Windows [44565724726](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44565724726)
+passed build, tests, and the extracted ZIP launch for `ad3455f`.
 
 ## Phase B1.5.2 — truthful component settings
 
@@ -304,7 +305,8 @@ checking the evaluator's draw requests. Invalid edits leave document,
 selection, dirty status, and history unchanged. All eight brush CTest suites
 passed on Debian 12 / Qt 6.8.3 (179 core checks; 46 QtTest passes in the Studio
 model suite, including setup and cleanup). This does not wire unfinished
-compositing or texture effects into either engine.
+compositing or texture effects into either engine. Windows [44566697081](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44566697081)
+passed build, tests, and the extracted ZIP launch for `6dfb60d`.
 
 ## Phase B1.5.3 — atomic native brush saves
 
@@ -322,10 +324,34 @@ readback and replace failure over a valid Unicode-named brush. Each leaves
 its original bytes loadable and removes the temp file. Also covered actual
 rename failure to a directory, missing parent, invalid brush, and successful
 replacement. Studio tests verify unchanged dirty draft/file on failed save.
-All eight brush CTest suites passed on Debian 12 / Qt 6.8.3.
+All eight brush CTest suites passed on Debian 12 / Qt 6.8.3. Windows
+[44567746345](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44567746345)
+passed build, tests, and the extracted ZIP launch for `75112fe`.
+
+## Phase B1.5.4 — brush diameters
+
+The live control, preset parser, and `.kb` registry now share the signed-int
+representation boundary (2,147,483,647 px on supported builds), not the old
+8,192 px ceiling. Realistic no longer refuses sizes above 4,096 px. Precision
+entry accepts the full range; curved logarithmic rails preserve precision at
+small sizes, and shortcuts continue above the quick-size ladder.
+
+Raster bounds are clipped before integer conversion. Realistic scratch is
+sized to the clipped dab, checked for arithmetic overflow, and charged to
+available memory while held. An unaffordable stroke reports the failure and
+the canvas history rolls back its changes. Existing canvas/file tile-storage
+constraints are separate and unchanged (including the `.koma` loader's
+sparse-tile amplification guard).
+
+**Validation:** Digital and Realistic rendered past the old radius on
+12,000 px strips and at the representation endpoint on small canvases. Also
+covered native and preset round trips, exact keyboard entry, off-canvas
+coordinates, overflow rejection, memory-pressure rollback, and redo after a
+failed stroke. Seventeen relevant Linux CTest suites passed (56.65 s); both
+engine suites also passed UBSan with float-cast-overflow checks.
 
 ## Next
 
-B1.5.4 safe brush diameters; B1.5.5 resource-aware Studio undo. Only then:
-B2 (approved layout), B3 (tip editor), B4 (brush library integration), and B5
-(isolated production-engine preview).
+B1.5.5 resource-aware Studio undo. Only then: B2 (approved layout), B3 (tip
+editor), B4 (brush library integration), and B5 (isolated production-engine
+preview).

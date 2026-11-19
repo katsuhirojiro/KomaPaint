@@ -1,4 +1,5 @@
 #include "BrushEngine.h"
+#include "brush/BrushTypes.h"
 #include "core/FastRounding.h"
 #include <algorithm>
 #include <cmath>
@@ -188,17 +189,12 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const double pFlowWeight = clamp01(b.pressureFlow);
     const double pressureFlowScale = (1.0 - pFlowWeight) + pFlowWeight * pShaped;
 
-    const double left = std::max(0.0, std::floor(p.x - radius - 1));
-    const double top = std::max(0.0, std::floor(p.y - radius - 1));
-    const double right = std::min(static_cast<double>(g.width()), std::ceil(p.x + radius + 1));
-    const double bottom = std::min(static_cast<double>(g.height()), std::ceil(p.y + radius + 1));
-    if (left >= right || top >= bottom) return R::Unchanged;
-
-    const auto docLeft = static_cast<std::int64_t>(left);
-    const auto docTop = static_cast<std::int64_t>(top);
-    const auto docRight = static_cast<std::int64_t>(right);
-    const auto docBottom = static_cast<std::int64_t>(bottom);
-    const auto tileRange = g.tilesForRect({docLeft, docTop, docRight, docBottom});
+    if (!std::isfinite((radius + 0.5) * (radius + 0.5))) return R::InvalidPixel;
+    const auto docBounds = g.rasterBounds(p.x - radius - 1, p.y - radius - 1,
+                                          p.x + radius + 1, p.y + radius + 1);
+    if (!docBounds) return R::Unchanged;
+    const auto [docLeft, docTop, docRight, docBottom] = *docBounds;
+    const auto tileRange = g.tilesForRect(*docBounds);
     if (!tileRange) return R::Unchanged;
 
     double totalAngle = b.angleRadians + (b.followDirection ? strokeAngle : 0.0);
@@ -208,6 +204,7 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     if (p.hasRotation && b.stylusRotation && std::isfinite(p.rotationRadians)) {
         totalAngle += p.rotationRadians;
     }
+    if (!std::isfinite(totalAngle)) return R::InvalidPixel;
     const bool hasRotation = totalAngle != 0.0;
     const double cosA = hasRotation ? std::cos(-totalAngle) : 1.0;
     const double sinA = hasRotation ? std::sin(-totalAngle) : 0.0;
@@ -333,8 +330,8 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
                     // inside the loop authoritative.
                     const double lo = p.x - halfSpan - 0.5;
                     const double hi = p.x + halfSpan - 0.5;
-                    rowBegin = std::max(x0, static_cast<std::int64_t>(std::ceil(lo)) - 1);
-                    rowEnd = std::min(x1, static_cast<std::int64_t>(std::floor(hi)) + 2);
+                    rowBegin = clampPixelEdge(std::ceil(lo) - 1.0, x0, x1);
+                    rowEnd = clampPixelEdge(std::floor(hi) + 2.0, x0, x1);
                 }
                 for (std::int64_t x = rowBegin; x < rowEnd; ++x) {
                     double coverage = computeCoverage(static_cast<double>(x) + 0.5 - p.x, dy, x, y);
@@ -393,7 +390,8 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
 BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush)
     : m_store(store), m_brush(brush) {
     if (std::isfinite(brush.size) && std::isfinite(brush.spacing)
-        && brush.size >= 1 && brush.spacing >= 0.05 && brush.spacing <= 0.5) {
+        && brush.size >= brush::MinBrushDiameter && brush.size <= brush::MaxBrushDiameter
+        && brush.spacing >= 0.05 && brush.spacing <= 0.5) {
         m_spacing = std::max(0.25, brush.size * brush.spacing);
     } else {
         m_failed = true;
@@ -405,7 +403,8 @@ BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush, StampSin
                          void* context)
     : m_store(store), m_brush(brush), m_sink(sink), m_sinkContext(context) {
     if (std::isfinite(brush.size) && std::isfinite(brush.spacing)
-        && brush.size >= 1 && brush.spacing >= 0.05 && brush.spacing <= 0.5) {
+        && brush.size >= brush::MinBrushDiameter && brush.size <= brush::MaxBrushDiameter
+        && brush.spacing >= 0.05 && brush.spacing <= 0.5) {
         m_spacing = std::max(0.25, brush.size * brush.spacing);
     } else {
         m_failed = true;
@@ -423,10 +422,10 @@ void BrushStroke::updateCarry(InputSample p)
     double sumA = 0.0, sumR = 0.0, sumG = 0.0, sumB = 0.0;
     int count = 0;
     for (int i = 0; i < 5; ++i) {
-        const auto sx = static_cast<std::int64_t>(std::llround(p.x + ox[i]));
-        const auto sy = static_cast<std::int64_t>(std::llround(p.y + oy[i]));
-        if (sx < 0 || sy < 0 || sx >= g.width() || sy >= g.height()) continue;
-        const auto px = m_store.pixel({sx, sy}).value();
+        const double sx = std::round(p.x + ox[i]);
+        const double sy = std::round(p.y + oy[i]);
+        if (!(sx >= 0 && sy >= 0 && sx < double(g.width()) && sy < double(g.height()))) continue;
+        const auto px = m_store.pixel({static_cast<std::int64_t>(sx), static_cast<std::int64_t>(sy)}).value();
         sumA += static_cast<double>((px >> 24) & 255U);
         sumR += static_cast<double>((px >> 16) & 255U);
         sumG += static_cast<double>((px >> 8) & 255U);
@@ -497,13 +496,16 @@ bool BrushStroke::extend(InputSample p) {
     }
 
     double start = 0, end = 1;
-    const double radius = m_brush.size / 2 + 1;
+    const double tiltReach = (p.hasTilt || m_previous.hasTilt)
+        ? 1.0 + clamp01(m_brush.tiltSize) * 1.5 : 1.0;
+    const double radius = m_brush.size * tiltReach / 2 + 1;
     const auto& g = m_store.geometry();
     if (clipAxis(m_previous.x, dx, -radius, static_cast<double>(g.width()) + radius, start, end) &&
         clipAxis(m_previous.y, dy, -radius, static_cast<double>(g.height()) + radius, start, end)) {
         double at = m_remaining;
         if (at < start * distance) at += std::ceil((start * distance - at) / m_spacing) * m_spacing;
-        for (; at <= end * distance && at <= distance; at += m_spacing) {
+        const double last = std::min(end * distance, distance);
+        for (; at <= last;) {
             const double t = at / distance;
             InputSample interp;
             interp.x = m_previous.x + dx * t;
@@ -516,6 +518,14 @@ bool BrushStroke::extend(InputSample p) {
             interp.hasTilt = m_previous.hasTilt || p.hasTilt;
             interp.hasRotation = m_previous.hasRotation || p.hasRotation;
             if (!stamp(interp)) return false;
+            if (at == last) break;
+            const double next = at + m_spacing;
+            if (!(next > at)) {
+                m_failed = true;
+                m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
+                return false;
+            }
+            at = next;
         }
     }
     const double remainder = std::fmod(distance - m_remaining, m_spacing);

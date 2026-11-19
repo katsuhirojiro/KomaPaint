@@ -31,6 +31,14 @@ struct TileRange {
     bool operator==(const TileRange&) const = default;
 };
 
+// Limit a floating-point pixel edge to an integer interval without casting
+// an out-of-range coordinate. The inclusive endpoints are already integral.
+inline std::int64_t clampPixelEdge(double value, std::int64_t lo, std::int64_t hi) noexcept {
+    if (!(value > static_cast<double>(lo))) return lo;
+    if (value >= static_cast<double>(hi)) return hi;
+    return static_cast<std::int64_t>(value);
+}
+
 class TileGeometry {
 public:
     static constexpr int DefaultTileSize = 256;
@@ -43,6 +51,9 @@ public:
     std::int64_t height() const { return m_height; }
     std::optional<TileAddress> address(TilePoint pixel) const;
     std::optional<TileRect> clip(TileRect rect) const;
+    // Round a fractional footprint outwards, clipping in floating point
+    // before any conversion to integer pixels.
+    std::optional<TileRect> rasterBounds(double left, double top, double right, double bottom) const;
     std::optional<TileRange> tilesForRect(TileRect rect) const;
     // Returns the tile's document-space bounds clipped to the document.
     std::optional<TileRect> tileBounds(TilePoint tile) const;

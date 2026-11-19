@@ -171,8 +171,7 @@ ApplicationWindow {
         }
     }
 
-    // The brush size ladder: the Brush Size grid, the [ and ] shortcuts and the
-    // Tool Property slider all walk this one list.
+    // The brush size ladder is a quick set of choices, not a size limit.
     readonly property var brushSizeSteps: [1, 2, 3, 4, 5, 6, 7,
                                            8, 10, 12, 15, 17, 20, 25,
                                            30, 40, 50, 60, 70, 80, 100,
@@ -241,8 +240,17 @@ ApplicationWindow {
     function stepBrushSize(direction) {
         if (!Workspace.subTools.paintTool) return
         const sizes = root.brushSizeSteps, now = Workspace.brush.size
-        if (direction > 0) { for (let i = 0; i < sizes.length; ++i) if (sizes[i] > now) { Workspace.brush.size = sizes[i]; return } }
-        else { for (let i = sizes.length - 1; i >= 0; --i) if (sizes[i] < now) { Workspace.brush.size = sizes[i]; return } }
+        const last = sizes[sizes.length - 1]
+        if (now > last || (now === last && direction > 0)) {
+            // Continue beyond the ladder at a proportional step, without
+            // jumping a large typed diameter back to the smallest presets.
+            const step = Math.max(1, Math.round(now / 8))
+            Workspace.brush.size = Math.max(last, Math.min(Workspace.brush.maximumSize, now + direction * step))
+        } else if (direction > 0) {
+            for (let i = 0; i < sizes.length; ++i) if (sizes[i] > now) { Workspace.brush.size = sizes[i]; return }
+        } else {
+            for (let i = sizes.length - 1; i >= 0; --i) if (sizes[i] < now) { Workspace.brush.size = sizes[i]; return }
+        }
     }
     Shortcut { sequence: root.shortcutSeq("brush.sizeDown"); enabled: root.shortcutsEnabled; onActivated: root.stepBrushSize(-1) }
     Shortcut { sequence: root.shortcutSeq("brush.sizeUp"); enabled: root.shortcutsEnabled; onActivated: root.stepBrushSize(1) }

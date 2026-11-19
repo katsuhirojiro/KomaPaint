@@ -10,7 +10,7 @@ namespace {
 // stable, hand-authored order instead of sorting names alphabetically.
 constexpr ParameterInfo kParameters[] = {
     // ---- size -------------------------------------------------------------
-    {"size", "Size", ParameterScope::Brush, ParameterUnit::Pixels, 1, 8192, 16,
+    {"size", "Size", ParameterScope::Brush, ParameterUnit::Pixels, MinBrushDiameter, MaxBrushDiameter, 16,
      "Diameter of the mark in document pixels at full pressure."},
     {"min-size-ratio", "Minimum", ParameterScope::Brush, ParameterUnit::Percent, 5, 100, 15,
      "Smallest diameter as a fraction of Size, reached at minimum pressure."},

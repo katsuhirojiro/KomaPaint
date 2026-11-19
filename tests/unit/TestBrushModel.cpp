@@ -304,7 +304,7 @@ void testUnknownAndOutOfRangeParametersAreRejected() {
     CHECK(hasIssue(result, "unknown-parameter"));
 
     doc.components[0].parameters.clear();
-    doc.parameters.set("size", 99999.0);
+    doc.parameters.set("size", double(MaxBrushDiameter) + 1.0);
     result = doc.validate();
     CHECK(!result.ok());
     CHECK(hasIssue(result, "parameter-out-of-range"));

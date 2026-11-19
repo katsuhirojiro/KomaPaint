@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -319,6 +320,7 @@ public:
     MaterialDab(const MaterialEngine& engine, const MediumProfile& medium,
                 const SurfaceProfile& surface)
         : m_engine(engine), m_medium(medium), m_surface(surface) {}
+    ~MaterialDab();
     SparseTileStore::WriteResult apply(SparseTileStore& surfacePixels,
                                        const BrushDefinition& brush,
                                        BrushReservoir& reservoir,
@@ -339,7 +341,12 @@ private:
     const MaterialEngine& m_engine;
     const MediumProfile& m_medium;
     const SurfaceProfile& m_surface;
-    std::vector<ScratchPixel> m_dabScratch;
+    SparseTileStore::WriteResult prepareScratch(std::uint64_t width, std::uint64_t height,
+                                               const std::shared_ptr<DocumentMemoryBudget>& budget);
+    void releaseScratch() noexcept;
+    std::unique_ptr<ScratchPixel[]> m_dabScratch;
+    std::shared_ptr<DocumentMemoryBudget> m_scratchBudget;
+    std::size_t m_scratchCount = 0;
 };
 
 struct MaterialSample {

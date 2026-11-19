@@ -10,7 +10,7 @@ import "../themes"
 //   1. the readout at the top — a live disc of the actual tip, a stepper and a
 //      field, for "40 px, exactly";
 //   2. the rail underneath — drag to sweep the whole range the engine allows
-//      (1–8192 px) on a logarithmic scale, which is what the eye and hand want;
+//      with a curved logarithmic scale for precision at drawing sizes;
 //   3. the ladder — the fixed sizes an artist returns to, one click each, shown
 //      as discs at their real relative size.
 //
@@ -25,8 +25,8 @@ Rectangle {
     readonly property bool painting: Workspace.subTools.paintTool
     readonly property int columns: 7
     // A convenience list of the sizes an artist returns to, not a limit: the
-    // readout and the rail reach the engine's full 1–8192 px range. This is the
-    // same ladder the [ and ] shortcuts walk; the host window passes it in.
+    // readout and the rail cover the full numeric range. This is the same
+    // ladder the [ and ] shortcuts walk; the host window passes it in.
     property var sizes: [1, 2, 3, 4, 5, 6, 7,
                          8, 10, 12, 15, 17, 20, 25,
                          30, 40, 50, 60, 70, 80, 100,
@@ -51,11 +51,14 @@ Rectangle {
         if (size <= exact) return size
         return exact + (largestShow - exact) * Math.log(size / exact) / Math.log(panel.largest / exact)
     }
-    // The rail is logarithmic: half of the travel is 16 px, not 128 px.
-    function railPosition(size) { return Math.log(Math.max(1, size)) / Math.log(panel.largest) }
+    // Same logarithmic response as Tool Property: the middle is about 90 px.
+    readonly property real railCurve: 2.25
+    function railPosition(size) {
+        return Math.pow(Math.log(Math.max(1, size)) / Math.log(largest), 1 / railCurve)
+    }
     function sizeAt(position) {
-        const clamped = Math.max(0, Math.min(1, position))
-        return Math.max(1, Math.min(panel.largest, Math.round(Math.pow(panel.largest, clamped))))
+        const t = Math.pow(Math.max(0, Math.min(1, position)), railCurve)
+        return Math.max(1, Math.min(largest, Math.round(Math.pow(largest, t))))
     }
 
     ColumnLayout {
@@ -90,7 +93,7 @@ Rectangle {
 
                         Rectangle {
                             anchors.centerIn: parent
-                            readonly property real shown: Math.max(2, Math.min(24, 2 + Math.pow(panel.brush.size / panel.largest, 0.5) * 22))
+                            readonly property real shown: 2 + panel.railPosition(panel.brush.size) * 22
                             width: shown
                             height: shown
                             radius: width / 2
@@ -115,7 +118,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: 2
                     Text {
-                        text: qsTr("BRUSH SIZE") + "   " + panel.brush.minimumSize + "–" + panel.largest
+                        text: qsTr("BRUSH SIZE")
                         color: KP.textSectionLabel
                         font.pixelSize: KP.fontMicro
                         font.letterSpacing: KP.trackingMicro
@@ -132,7 +135,7 @@ Rectangle {
                         }
                         KpNumberField {
                             objectName: "brushSizeField"
-                            width: 54
+                            width: 104
                             height: 22
                             value: panel.brush.size
                             from: panel.brush.minimumSize

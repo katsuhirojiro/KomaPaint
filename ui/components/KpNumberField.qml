@@ -80,9 +80,13 @@ Item {
                 root.commit(root.value - (event.modifiers & Qt.ShiftModifier ? Math.max(1, Math.round(root.step / 10)) : root.step))
                 event.accepted = true
             }
-            Keys.onReturnPressed: { focus = false; event.accepted = true }
-            Keys.onEnterPressed: { focus = false; event.accepted = true }
-            Keys.onEscapePressed: { text = Qt.binding(function() { return root.value }); focus = false; event.accepted = true }
+            Keys.onReturnPressed: function(event) { focus = false; event.accepted = true }
+            Keys.onEnterPressed: function(event) { focus = false; event.accepted = true }
+            Keys.onEscapePressed: function(event) {
+                text = Qt.binding(function() { return root.value })
+                focus = false
+                event.accepted = true
+            }
         }
 
         Text {

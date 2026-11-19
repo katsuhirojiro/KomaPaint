@@ -4,12 +4,19 @@
 // Everything here is deliberately Qt-free: the model is data, and data should
 // not need a GUI toolkit to be tested. The QML/QtObject binding is a later
 // adapter (see docs/architecture/brush-studio-audit.md, stage 11).
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 namespace komapaint::brush {
+
+// Base diameters share the exact range of the live brush's signed integer
+// property, QML numeric entry, and legacy preset records. This is a numeric
+// boundary, not a canvas- or memory-size limit; rendering clips to the canvas.
+inline constexpr int MinBrushDiameter = 1;
+inline constexpr int MaxBrushDiameter = std::numeric_limits<int>::max();
 
 // Which production engine paints the brush. The model is shared; the settings
 // a brush can express are not (Part 8: engine-aware, never engine-inferior).

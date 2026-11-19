@@ -1,4 +1,5 @@
 #include "material/MaterialEngine.h"
+#include "brush/BrushTypes.h"
 #include "material/MaterialTileStore.h"
 
 #include <algorithm>
@@ -183,6 +184,56 @@ void materialStrokeSpacesDabsAndStaysInsideSparseCanvas()
     CHECK(!invalidStroke.begin({NAN, 2.0, {1.0, 0.0, 0.0, 0.0}}));
     CHECK(invalidStroke.failed());
     CHECK(invalidStroke.failureReason() == SparseTileStore::WriteResult::InvalidPixel);
+}
+
+void veryWideMaterialDabsCheckClippedScratch()
+{
+    using R = SparseTileStore::WriteResult;
+    PigmentLibrary pigments;
+    MaterialEngine engine(pigments);
+    const auto presets = defaultBrushDefinitions();
+    const auto preset = std::find_if(presets.begin(), presets.end(),
+        [](const auto& b) { return b.id == "gouache-round"; });
+    CHECK(preset != presets.end());
+    if (preset == presets.end()) return;
+    auto brush = *preset;
+    brush.size = 12000;
+    brush.hardness = 1;
+    brush.contactPressureScale = 0;
+    CHECK(brush.valid());
+    BrushReservoir reservoir(brush.effectiveReservoirCapacity());
+    CHECK(reservoir.reload(brush));
+    const auto budget = std::make_shared<DocumentMemoryBudget>();
+    MaterialTileStore strip(12000, 3, 32, budget);
+    {
+        MaterialDab dab(engine, gouacheProfile(), coldPressedPaper());
+        CHECK(dab.apply(strip, brush, reservoir, -1e100, 1, {1}) == R::Unchanged);
+        CHECK(budget->stagingBytes() == 0);
+        CHECK(budget->setLimit(1));
+        CHECK(dab.apply(strip, brush, reservoir, 6100, 1, {1}) == R::DocumentMemoryLimit);
+        CHECK(strip.allocatedTiles() == 0);
+        CHECK(budget->usedBytes() == 0);
+        CHECK(budget->setLimit(std::numeric_limits<std::size_t>::max()));
+        CHECK(dab.apply(strip, brush, reservoir, 6100, 1, {1}) == R::Changed);
+        const auto* far = strip.findCell({500, 1});
+        CHECK(far && !far->empty());
+        CHECK(budget->stagingBytes() > 0);
+    }
+    CHECK(budget->stagingBytes() == 0);
+
+    auto largest = brush;
+    largest.size = brush::MaxBrushDiameter;
+    CHECK(largest.valid());
+    MaterialDab dab(engine, gouacheProfile(), coldPressedPaper());
+    BrushReservoir largeReservoir(largest.effectiveReservoirCapacity());
+    CHECK(largeReservoir.reload(largest));
+    SparseTileStore tiny(11, 7, 8);
+    CHECK(dab.apply(tiny, largest, largeReservoir, 5, 3, {1}) == R::Changed);
+    MaterialTileStore huge(brush::MaxBrushDiameter, brush::MaxBrushDiameter);
+    CHECK(dab.apply(huge, largest, largeReservoir, 1e9, 1e9, {1}) == R::AllocationFailed);
+    CHECK(huge.allocatedTiles() == 0);
+    largest.size = double(brush::MaxBrushDiameter) + 1.0;
+    CHECK(!largest.valid());
 }
 
 void authoritativeSparseMaterialTilesSurviveStrokesAndRendering()
@@ -1348,6 +1399,7 @@ int main()
     reservoirConservesMaterialAndModelsLoadPickupReloadAndCleaning();
     brushPressureSpeedAndSurfaceDabsAffectRealSparsePixels();
     materialStrokeSpacesDabsAndStaysInsideSparseCanvas();
+    veryWideMaterialDabsCheckClippedScratch();
     authoritativeSparseMaterialTilesSurviveStrokesAndRendering();
     wetMaterialDriesSettlesSpreadsAndBecomesInactiveLazily();
     activeTileIndexTracksWetWritesDryingAndHistoryRestore();

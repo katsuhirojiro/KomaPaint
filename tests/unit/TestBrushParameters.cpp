@@ -106,7 +106,7 @@ void testRangesAreCoherent() {
             CHECK(info.minimum >= -720.0 && info.maximum <= 720.0);
             break;
         case ParameterUnit::Pixels:
-            CHECK(info.minimum >= 0.0 && info.maximum <= 8192.0);
+            CHECK(info.minimum >= 0.0 && info.maximum <= MaxBrushDiameter);
             break;
         }
     }
@@ -120,7 +120,9 @@ void testLookupBehaviour() {
         CHECK(std::string(parameterSection(size->name)) == "Size");
         CHECK(parameterInRange(*size, 16.0));
         CHECK(!parameterInRange(*size, 0.0));
-        CHECK(!parameterInRange(*size, 100000.0));
+        CHECK(parameterInRange(*size, 12000.0));
+        CHECK(parameterInRange(*size, MaxBrushDiameter));
+        CHECK(!parameterInRange(*size, double(MaxBrushDiameter) + 1.0));
         CHECK(!parameterInRange(*size, std::nan("")));
     }
     CHECK(parameterSection("no-such-setting") == nullptr);

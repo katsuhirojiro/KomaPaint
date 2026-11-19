@@ -165,11 +165,15 @@ Rectangle {
             + ((canvas.cursorHasTilt && Workspace.brush.tiltAngle && tiltMag > 0.02)
                ? (Math.atan2(canvas.cursorTiltY, canvas.cursorTiltX) * 180.0 / Math.PI) : 0.0)
             + (Workspace.brush.stylusRotation ? canvas.cursorRotationDeg : 0.0)
-        visible: Workspace.subTools.paintTool && canvas.cursorVisible
-        x: canvas.cursorPos.x - diameter / 2
-        y: canvas.cursorPos.y - outlineHeight / 2
-        width: diameter
-        height: outlineHeight
+        // When the whole viewport fits inside the tip, no edge is visible.
+        // Don't hand a billion-pixel rounded rectangle to the scene graph.
+        readonly property real farthestCorner: Math.hypot(Math.max(Math.abs(canvas.cursorPos.x), Math.abs(canvas.width - canvas.cursorPos.x)),
+                                                          Math.max(Math.abs(canvas.cursorPos.y), Math.abs(canvas.height - canvas.cursorPos.y)))
+        visible: Workspace.subTools.paintTool && canvas.cursorVisible && outlineHeight / 2 <= farthestCorner + 2
+        x: canvas.cursorPos.x - width / 2
+        y: canvas.cursorPos.y - height / 2
+        width: visible ? diameter : 0
+        height: visible ? outlineHeight : 0
         rotation: angleDeg
         Rectangle {
             anchors.fill: parent

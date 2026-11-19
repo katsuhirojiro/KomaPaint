@@ -1,4 +1,6 @@
 #include "drawing/BrushEngine.h"
+#include "brush/BrushTypes.h"
+#include <limits>
 #include <cstdlib>
 #include <iostream>
 using namespace komapaint;
@@ -192,6 +194,39 @@ int main() {
         CHECK(!hugeStroke.failed());
         CHECK(hugeStroke.end({300, 300, 1.0}));
         CHECK((wide.pixel({5, 300}).value() >> 24) > 0U); // clipped to the canvas, still painted
+    }
+
+    {
+        // Check a point beyond the old cap's radius without allocating a square
+        // canvas or a diameter-sized buffer.
+        SparseTileStore strip(12000, 5, 32);
+        BrushDefinition big;
+        big.size = 12000;
+        big.hardness = 1.0;
+        big.color = 0xff2468ac;
+        BrushStroke wideStripStroke(strip, big);
+        CHECK(wideStripStroke.begin({6100, 2, 1.0}));
+        CHECK(wideStripStroke.end({6100, 2, 1.0}));
+        CHECK(strip.pixel({500, 2}).value() == big.color);
+        CHECK(strip.pixel({0, 2}).value() == 0U);
+
+        SparseTileStore small(9, 7, 8);
+        big.size = brush::MaxBrushDiameter;
+        big.tiltSize = 1.0;
+        big.blendStrength = 0.5;
+        BrushStroke largest(small, big);
+        CHECK(largest.begin({1e100, 2, 1.0})); // out of canvas, before rounding pickup coordinates
+        CHECK(small.allocatedTiles() == 0);
+        CHECK(largest.end({4, 2, 1.0, 90, 0, 0, 0, true}));
+        CHECK(small.pixel({8, 6}).value() != 0U);
+        big.size = double(brush::MaxBrushDiameter) + 1.0;
+        BrushStroke unrepresentable(small, big);
+        CHECK(unrepresentable.failed());
+        // A component transform may produce an effective size beyond the base
+        // diameter range. Only unrepresentable math is rejected here.
+        CHECK(BrushRasterizer::dab(small, big, {4, 2, 1.0}) != W::InvalidPixel);
+        big.size = std::numeric_limits<double>::max();
+        CHECK(BrushRasterizer::dab(small, big, {4, 2, 1.0}) == W::InvalidPixel);
     }
 
     std::cout << "Brush engine tests passed\n";

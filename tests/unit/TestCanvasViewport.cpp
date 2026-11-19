@@ -46,6 +46,8 @@ private slots:
     void brushEngineBoundaryAndNonDestructiveSwitching();
     void watercolourCleanWaterAndPaintLiftingInViewport();
     void strokeFailureDiagnostics();
+    void largestBrushStrokesAndPressure_data();
+    void largestBrushStrokesAndPressure();
     void compositeCacheAccounting();
     void qmlMouseStroke();
     void actualWindowShortcuts();
@@ -366,6 +368,65 @@ void TestCanvasViewport::strokeFailureDiagnostics()
     view.refreshNow();
     QCOMPARE(view.frameSnapshot().pixelColor(qRound(first.x()), qRound(first.y())),
              originalFrame.pixelColor(qRound(first.x()), qRound(first.y())));
+}
+
+void TestCanvasViewport::largestBrushStrokesAndPressure_data()
+{
+    QTest::addColumn<bool>("realistic");
+    QTest::newRow("digital") << false;
+    QTest::newRow("realistic") << true;
+}
+
+void TestCanvasViewport::largestBrushStrokesAndPressure()
+{
+    QFETCH(bool, realistic);
+    CanvasDocument doc;
+    doc.setSize(QSize(64, 48));
+    UndoStack history;
+    CanvasViewport view;
+    view.setWidth(200); view.setHeight(150);
+    view.setHistory(&history); view.setDocument(&doc); view.refreshNow();
+    auto* layer = doc.layers()->layerAt(0);
+    const TilePoint far{63, 47};
+    const auto painted = [&] {
+        if (!realistic) return layer->tiles().pixel(far).value() != 0U;
+        const auto* cell = layer->materialTiles().findCell(far);
+        return cell && !cell->empty();
+    };
+    BrushSettings brush;
+    brush.setBrushEngine(realistic ? QStringLiteral("realistic") : QStringLiteral("digital"));
+    brush.setSize(BrushSettings::MaxSize);
+    QSignalSpy errors(&view, &CanvasViewport::strokeError);
+    const QPointF center = view.documentToViewport(32, 24);
+    QVERIFY(view.beginStroke(center.x(), center.y(), 1, &brush, Qt::red));
+    view.endStroke(center.x(), center.y(), 1);
+    QCOMPARE(errors.size(), 0);
+    QVERIFY(painted());
+    QVERIFY(history.canUndo());
+    history.undo();
+    QVERIFY(!painted());
+    QVERIFY(history.canRedo());
+
+    // Reserve enough to open a history transaction but not to hold the
+    // material scratch or the next Digital tile plus its history. It must not
+    // create paint, discard a redo, or change the saved dirty flag.
+    doc.setModified(false);
+    auto budget = doc.layers()->documentBudget();
+    const auto previousLimit = budget->limit();
+    QVERIFY(budget->setLimit(budget->usedBytes() + 4096));
+    QVERIFY(!view.beginStroke(center.x(), center.y(), 1, &brush, Qt::green));
+    QCOMPARE(errors.size(), 1);
+    const auto error = errors.takeFirst().at(0).toString();
+    QVERIFY2(error.contains(QStringLiteral("available memory")), qPrintable(error));
+    QVERIFY(error.contains(QStringLiteral("rolled back")));
+    QVERIFY(!painted());
+    QVERIFY(!doc.isModified());
+    QVERIFY(history.canRedo());
+    QVERIFY(!history.strokeActive());
+    QCOMPARE(budget->stagingBytes(), std::size_t(0));
+    QVERIFY(budget->setLimit(previousLimit));
+    history.redo();
+    QVERIFY(painted());
 }
 
 void TestCanvasViewport::compositeCacheAccounting()

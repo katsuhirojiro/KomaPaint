@@ -1,5 +1,6 @@
 #include "MaterialEngine.h"
 #include "MaterialTileStore.h"
+#include "brush/BrushTypes.h"
 #include "core/FastRounding.h"
 
 #include <algorithm>
@@ -859,8 +860,8 @@ bool BrushDefinition::valid() const noexcept
     const auto curveValid = [&unit](const SensorCurve& curve) {
         return std::all_of(curve.points.begin(), curve.points.end(), unit);
     };
-    return !id.empty() && !name.empty() && std::isfinite(size) && size >= 1 && size <= 4096
-        && std::isfinite(nominalSize) && nominalSize >= 1 && nominalSize <= 4096
+    return !id.empty() && !name.empty() && size >= brush::MinBrushDiameter && size <= brush::MaxBrushDiameter
+        && nominalSize >= brush::MinBrushDiameter && nominalSize <= brush::MaxBrushDiameter
         && unit(spacingRatio) && spacingRatio > 0 && unit(hardness) && std::isfinite(aspect) && aspect > 0 && aspect <= 8
         && std::isfinite(rotationRadians) && unit(bristleSpread) && unit(textureStrength)
         && finiteNonnegative(reservoirCapacity)
@@ -1963,19 +1964,61 @@ MaterialSimulationStats MaterialEngine::advanceWetMaterial(MaterialTileStore& st
     return stats;
 }
 
+MaterialDab::~MaterialDab() { releaseScratch(); }
+
+void MaterialDab::releaseScratch() noexcept
+{
+    m_dabScratch.reset();
+    if (m_scratchBudget) {
+        m_scratchBudget->release(DocumentMemoryBudget::Category::RestoreStaging,
+                                 m_scratchCount * sizeof(ScratchPixel));
+        m_scratchBudget.reset();
+    }
+    m_scratchCount = 0;
+}
+
+SparseTileStore::WriteResult MaterialDab::prepareScratch(
+    std::uint64_t width, std::uint64_t height, const std::shared_ptr<DocumentMemoryBudget>& budget)
+{
+    using Result = SparseTileStore::WriteResult;
+    // Width and height come from the canvas intersection, not the diameter.
+    // Reject an unrepresentable product before allocating or altering pixels.
+    if (!height || !width || width > std::numeric_limits<std::size_t>::max() / sizeof(ScratchPixel) / height)
+        return Result::AllocationFailed;
+    const auto count = static_cast<std::size_t>(width * height);
+    if (budget == m_scratchBudget && count <= m_scratchCount) return Result::Unchanged;
+
+    releaseScratch(); // Scratch contents are overwritten; don't hold both buffers at peak.
+    const auto bytes = count * sizeof(ScratchPixel);
+    if (budget ? !budget->reserve(DocumentMemoryBudget::Category::RestoreStaging, bytes)
+               : !systemMemoryAvailable(bytes)) return Result::DocumentMemoryLimit;
+    try {
+        m_dabScratch = std::make_unique<ScratchPixel[]>(count);
+    } catch (const std::bad_alloc&) {
+        if (budget) budget->release(DocumentMemoryBudget::Category::RestoreStaging, bytes);
+        return Result::AllocationFailed;
+    }
+    m_scratchCount = count;
+    m_scratchBudget = budget;
+    return Result::Unchanged;
+}
+
 SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
                                                 const BrushDefinition& brush,
                                                 BrushReservoir& reservoir,
                                                 double centerX, double centerY,
-                                                const BrushInput& input)
+                                                const BrushInput& input) try
 {
     using Result = SparseTileStore::WriteResult;
     if (!brush.valid() || !std::isfinite(centerX) || !std::isfinite(centerY)
         || !std::isfinite(input.pressure) || input.pressure < 0 || input.pressure > 1
-        || !store.isValid()) return Result::InvalidPixel;
+        || !std::isfinite(input.speed) || input.speed < 0 || input.speed > 1
+        || !std::isfinite(input.tilt) || input.tilt < 0 || input.tilt > 1
+        || !std::isfinite(input.rotationRadians) || !store.isValid()) return Result::InvalidPixel;
     reservoir.reloadIfNeeded(brush);
     const auto& geometry = store.geometry();
     const double angle = brush.rotationRadians + input.rotationRadians;
+    if (!std::isfinite(angle)) return Result::InvalidPixel;
     const double ca = std::cos(angle), sa = std::sin(angle);
     const double carriedMass = reservoir.batch().totalMass();
     const double waterFraction = carriedMass > 0 ? reservoir.batch().water / carriedMass : 0.0;
@@ -1995,20 +2038,21 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
     const double rx = rxBase * (1.0 + clamp01(brush.tiltFlattening) * tiltFactor * 0.6);
     const double ry = rxBase / brush.aspect;
     const double bound = std::max(rx, ry) + 1.0;
-    const auto left = static_cast<std::int64_t>(std::max(0.0, std::floor(centerX - bound)));
-    const auto top = static_cast<std::int64_t>(std::max(0.0, std::floor(centerY - bound)));
-    const auto right = static_cast<std::int64_t>(std::min(double(geometry.width()), std::ceil(centerX + bound)));
-    const auto bottom = static_cast<std::int64_t>(std::min(double(geometry.height()), std::ceil(centerY + bound)));
-    if (left >= right || top >= bottom) return Result::Unchanged;
+    if (!std::isfinite(bound)) return Result::InvalidPixel;
+    const auto footprint = geometry.rasterBounds(centerX - bound, centerY - bound,
+                                                  centerX + bound, centerY + bound);
+    if (!footprint) return Result::Unchanged;
+    const auto [left, top, right, bottom] = *footprint;
 
+    const auto scratch = prepareScratch(right - left, bottom - top, store.documentBudget());
+    if (scratch != Result::Unchanged) return scratch;
     const std::size_t boxW = static_cast<std::size_t>(right - left);
     const std::size_t boxH = static_cast<std::size_t>(bottom - top);
-    m_dabScratch.resize(boxW * boxH);
 
     double contactWeight = 0.0;
     for (std::size_t ryIdx = 0; ryIdx < boxH; ++ryIdx) {
         const auto y = top + static_cast<std::int64_t>(ryIdx);
-        ScratchPixel* row = m_dabScratch.data() + ryIdx * boxW;
+        ScratchPixel* row = m_dabScratch.get() + ryIdx * boxW;
         for (std::size_t rxIdx = 0; rxIdx < boxW; ++rxIdx) {
             const auto x = left + static_cast<std::int64_t>(rxIdx);
             const auto res = dabContactAt(brush, x, y, centerX, centerY, ca, sa, rx, ry,
@@ -2034,6 +2078,7 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
     if (transferred.totalMass() <= 0) return Result::Unchanged;
 
     store.beginBatch();
+    struct BatchEnd { SparseTileStore& store; ~BatchEnd() { store.endBatch(); } } batchEnd{store};
     bool changed = false;
     const auto compOptics = m_engine.prepareCompositionOptics(transferred.pigments);
     const double particleGranulation = m_engine.opticalResultPrepared(
@@ -2048,7 +2093,7 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
 
     for (std::size_t ryIdx = 0; ryIdx < boxH; ++ryIdx) {
         const auto y = top + static_cast<std::int64_t>(ryIdx);
-        const ScratchPixel* row = m_dabScratch.data() + ryIdx * boxW;
+        const ScratchPixel* row = m_dabScratch.get() + ryIdx * boxW;
         for (std::size_t rxIdx = 0; rxIdx < boxW; ++rxIdx) {
             const double contact = row[rxIdx].contact;
             if (contact <= 0) continue;
@@ -2069,12 +2114,12 @@ SparseTileStore::WriteResult MaterialDab::apply(SparseTileStore& store,
             const auto next = m_engine.compositeOptical(old, optical, m_surface, contact * edge, tooth);
             const auto result = store.setPixel({x, y}, next);
             if (result == Result::Changed) changed = true;
-            else if (result != Result::Unchanged) { store.endBatch(); return result; }
+            else if (result != Result::Unchanged) return result;
         }
     }
-    store.endBatch();
     return changed ? Result::Changed : Result::Unchanged;
-}
+} catch (const std::bad_alloc&) { return SparseTileStore::WriteResult::AllocationFailed; }
+  catch (const std::length_error&) { return SparseTileStore::WriteResult::AllocationFailed; }
 
 SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
                                                 const BrushDefinition& brush,
@@ -2091,12 +2136,13 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
     reservoir.reloadIfNeeded(brush);
     const auto& geometry = store.geometry();
     const double angle = brush.rotationRadians + input.rotationRadians;
+    if (!std::isfinite(angle)) return Result::InvalidPixel;
     const double ca = std::cos(angle), sa = std::sin(angle);
     const double carriedMass = reservoir.batch().totalMass();
     const double waterFraction = carriedMass > 0 ? reservoir.batch().water / carriedMass : 0.0;
     const TilePoint centerTilePoint{
-        std::clamp<std::int64_t>(std::llround(centerX), 0, std::max<std::int64_t>(0, geometry.width() - 1)),
-        std::clamp<std::int64_t>(std::llround(centerY), 0, std::max<std::int64_t>(0, geometry.height() - 1))};
+        clampPixelEdge(std::round(centerX), 0, geometry.width() - 1),
+        clampPixelEdge(std::round(centerY), 0, geometry.height() - 1)};
     const auto* centerPrior = store.findCell(centerTilePoint);
     const double priorCenterWet = (centerPrior && !centerPrior->empty())
         ? double(centerPrior->wetness) * (1.0 - double(centerPrior->drying))
@@ -2120,23 +2166,24 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
     const double rx = rxBase * (1.0 + clamp01(brush.tiltFlattening) * tiltFactor * 0.6);
     const double ry = rxBase / brush.aspect;
     const double bound = std::max(rx, ry) + 1.0;
-    const auto left = static_cast<std::int64_t>(std::max(0.0, std::floor(centerX - bound)));
-    const auto top = static_cast<std::int64_t>(std::max(0.0, std::floor(centerY - bound)));
-    const auto right = static_cast<std::int64_t>(std::min(double(geometry.width()), std::ceil(centerX + bound)));
-    const auto bottom = static_cast<std::int64_t>(std::min(double(geometry.height()), std::ceil(centerY + bound)));
-    if (left >= right || top >= bottom) return Result::Unchanged;
+    if (!std::isfinite(bound)) return Result::InvalidPixel;
+    const auto footprint = geometry.rasterBounds(centerX - bound, centerY - bound,
+                                                  centerX + bound, centerY + bound);
+    if (!footprint) return Result::Unchanged;
+    const auto [left, top, right, bottom] = *footprint;
 
-    const auto tileRange = geometry.tilesForRect({left, top, right, bottom});
+    const auto tileRange = geometry.tilesForRect(*footprint);
     if (!tileRange) return Result::Unchanged;
 
+    const auto scratch = prepareScratch(right - left, bottom - top, store.documentBudget());
+    if (scratch != Result::Unchanged) return scratch;
     const std::size_t boxW = static_cast<std::size_t>(right - left);
     const std::size_t boxH = static_cast<std::size_t>(bottom - top);
-    m_dabScratch.resize(boxW * boxH);
 
     double contactWeight = 0.0;
     for (std::size_t ryIdx = 0; ryIdx < boxH; ++ryIdx) {
         const auto y = top + static_cast<std::int64_t>(ryIdx);
-        ScratchPixel* row = m_dabScratch.data() + ryIdx * boxW;
+        ScratchPixel* row = m_dabScratch.get() + ryIdx * boxW;
         for (std::size_t rxIdx = 0; rxIdx < boxW; ++rxIdx) {
             const auto x = left + static_cast<std::int64_t>(rxIdx);
             const auto res = dabContactAt(brush, x, y, centerX, centerY, ca, sa, rx, ry,
@@ -2361,7 +2408,7 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
                     const std::int64_t x1 = std::min(right, bounds->right);
                     const std::int64_t y1 = std::min(bottom, bounds->bottom);
                     for (std::int64_t y = y0; y < y1; ++y) {
-                        const ScratchPixel* row = m_dabScratch.data() + static_cast<std::size_t>(y - top) * boxW;
+                        const ScratchPixel* row = m_dabScratch.get() + static_cast<std::size_t>(y - top) * boxW;
                         for (std::int64_t x = x0; x < x1; ++x) {
                             const double contact = row[static_cast<std::size_t>(x - left)].contact;
                             if (contact <= 0.0) continue;
@@ -2496,7 +2543,7 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
     double totalWeight = 0.0;
     for (std::size_t ryIdx = 0; ryIdx < boxH; ++ryIdx) {
         const auto y = top + static_cast<std::int64_t>(ryIdx);
-        ScratchPixel* row = m_dabScratch.data() + ryIdx * boxW;
+        ScratchPixel* row = m_dabScratch.get() + ryIdx * boxW;
         for (std::size_t rxIdx = 0; rxIdx < boxW; ++rxIdx) {
             const double contact = row[rxIdx].contact;
             if (contact <= 0.0) continue;
@@ -2617,7 +2664,7 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
             const std::size_t pn = pickupPatch.size();
 
             for (std::int64_t y = y0; y < y1 && failure == Result::Unchanged; ++y) {
-                const ScratchPixel* row = m_dabScratch.data() + static_cast<std::size_t>(y - top) * boxW;
+                const ScratchPixel* row = m_dabScratch.get() + static_cast<std::size_t>(y - top) * boxW;
                 const std::size_t localY = static_cast<std::size_t>(y - bounds->top);
                 for (std::int64_t x = x0; x < x1; ++x) {
                     const ScratchPixel& sp = row[static_cast<std::size_t>(x - left)];
@@ -2802,7 +2849,7 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
         // gradient into adjacent wet cells without creating pigment or erasing.
         for (std::size_t ryIdx = 0; ryIdx + 1 < boxH; ++ryIdx) {
             const auto y = top + static_cast<std::int64_t>(ryIdx);
-            const ScratchPixel* row = m_dabScratch.data() + ryIdx * boxW;
+            const ScratchPixel* row = m_dabScratch.get() + ryIdx * boxW;
             for (std::size_t rxIdx = 0; rxIdx + 1 < boxW; ++rxIdx) {
                 const double contact = row[rxIdx].contact;
                 if (contact <= 0.0) continue;
@@ -2888,11 +2935,11 @@ SparseTileStore::WriteResult MaterialStroke::eraseMaterialDab(MaterialSample sam
     const double rx = m_brush.size * 0.5;
     const double ry = rx / m_brush.aspect;
     const double bound = std::max(rx, ry) + 1.0;
-    const auto left = static_cast<std::int64_t>(std::max(0.0, std::floor(sample.x - bound)));
-    const auto top = static_cast<std::int64_t>(std::max(0.0, std::floor(sample.y - bound)));
-    const auto right = static_cast<std::int64_t>(std::min(double(geometry.width()), std::ceil(sample.x + bound)));
-    const auto bottom = static_cast<std::int64_t>(std::min(double(geometry.height()), std::ceil(sample.y + bound)));
-    if (left >= right || top >= bottom) return Result::Unchanged;
+    if (!std::isfinite(angle) || !std::isfinite(bound)) return Result::InvalidPixel;
+    const auto bounds = geometry.rasterBounds(sample.x - bound, sample.y - bound,
+                                               sample.x + bound, sample.y + bound);
+    if (!bounds) return Result::Unchanged;
+    const auto [left, top, right, bottom] = *bounds;
 
     store.beginBatch();
     struct BatchEnd { MaterialTileStore& store; ~BatchEnd() { store.endBatch(); } } batchEnd{store};
@@ -3014,7 +3061,13 @@ bool MaterialStroke::extend(MaterialSample sample)
         MaterialSample dabSample = interpolate(m_previous, sample, t);
         if (m_brush.followDirection) dabSample.input.rotationRadians += tangentAngle;
         if (!stamp(dabSample)) return false;
-        distance += m_spacing;
+        const double next = distance + m_spacing;
+        if (!(next > distance)) {
+            m_failed = true;
+            m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
+            return false;
+        }
+        distance = next;
     }
     m_remaining = distance - length;
     m_previous = sample;

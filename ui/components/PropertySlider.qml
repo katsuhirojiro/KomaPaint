@@ -25,11 +25,10 @@ Item {
     property int to: 100
     property int value: 0
     property real curve: 1
-    // When true the rail is logarithmic across [from, to] instead of following
-    // `curve`: half the travel is the geometric mean of the ends. That is what a
-    // wide numeric range needs - a brush rail that reaches 8192 px would
-    // otherwise spend four fifths of its travel above 1000 px.
+    // Use a logarithmic scale for large ranges, with `curve` still giving
+    // small values more of the travel. This changes sensitivity, not limits.
     property bool logarithmic: false
+    property real fieldWidth: 62
     property int step: 1
     // Double-click returns here. Leave negative for "no reset".
     property int resetValue: -1
@@ -45,12 +44,12 @@ Item {
     function clamp(v) { return Math.max(from, Math.min(to, Math.round(v))) }
     function positionFor(v) {
         if (to === from) return 0
-        if (logarithmic && from > 0) return Math.log(clamp(v) / from) / Math.log(to / from)
+        if (logarithmic && from > 0) return Math.pow(Math.log(clamp(v) / from) / Math.log(to / from), 1 / curve)
         return Math.pow((clamp(v) - from) / (to - from), 1 / curve)
     }
     function valueFor(position) {
         const t = Math.max(0, Math.min(1, position))
-        if (logarithmic && from > 0) return clamp(from * Math.pow(to / from, t))
+        if (logarithmic && from > 0) return clamp(from * Math.pow(to / from, Math.pow(t, curve)))
         return clamp(from + Math.pow(t, curve) * (to - from))
     }
     function commit(v) { const next = clamp(v); if (next !== value) edited(next) }
@@ -74,7 +73,7 @@ Item {
         id: field
         anchors.right: parent.right
         anchors.top: parent.top
-        width: 62
+        width: root.fieldWidth
         height: KP.controlHeightSmall + 2
         value: root.value
         from: root.from

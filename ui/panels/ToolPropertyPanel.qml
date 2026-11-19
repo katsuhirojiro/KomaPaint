@@ -307,9 +307,11 @@ Rectangle {
                                 unit: "px"
                                 from: panel.brush.minimumSize
                                 to: panel.brush.maximumSize
-                                // Logarithmic: half the rail is about 90 px, and the
-                                // top of the rail reaches the engine's whole range.
+                                // Keep the small-diameter range useful even though
+                                // the right end reaches the numeric boundary.
                                 logarithmic: true
+                                curve: 2.25
+                                fieldWidth: 104
                                 value: panel.brush.size
                                 onEdited: function(v) { panel.brush.size = v }
                             }

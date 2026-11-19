@@ -195,6 +195,20 @@ void testRoundTrip() {
     CHECK(restored.component("c3")->transform.rotationDegrees == 30.0);
 }
 
+void testLargeBrushDiametersRoundTrip() {
+    auto brush = makeDocument();
+    for (const double size : {12000.5, double(MaxBrushDiameter)}) {
+        CHECK(brush.setParameter("size", size));
+        const auto bytes = encodeBrush(brush);
+        BrushDocument restored;
+        DecodeResult report;
+        CHECK(decodeBrush(bytes.data(), bytes.size(), &restored, &report));
+        CHECK(restored.parameters.value("size") == size);
+    }
+    brush.parameters.set("size", double(MaxBrushDiameter) + 1.0);
+    CHECK(!brush.validate().ok());
+}
+
 void testDeterministicBytes() {
     const BrushDocument doc = makeDocument();
     const auto first = encodeBrush(doc);
@@ -506,6 +520,7 @@ void testEmptyDocumentIsStorable() {
 
 int main() {
     testRoundTrip();
+    testLargeBrushDiametersRoundTrip();
     testDeterministicBytes();
     testRejectsForeignData();
     testRejectsTruncatedFile();
