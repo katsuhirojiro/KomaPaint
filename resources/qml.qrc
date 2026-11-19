@@ -2,6 +2,10 @@
     <qresource prefix="/">
         <file alias="workspaces/MainWindow.qml">../ui/workspaces/MainWindow.qml</file>
         <file alias="workspaces/BrushStudioWindow.qml">../ui/workspaces/BrushStudioWindow.qml</file>
+        <file alias="workspaces/brushstudio/qmldir">../ui/workspaces/brushstudio/qmldir</file>
+        <file alias="workspaces/brushstudio/StudioToolbar.qml">../ui/workspaces/brushstudio/StudioToolbar.qml</file>
+        <file alias="workspaces/brushstudio/StudioPreview.qml">../ui/workspaces/brushstudio/StudioPreview.qml</file>
+        <file alias="workspaces/brushstudio/StudioHeader.qml">../ui/workspaces/brushstudio/StudioHeader.qml</file>
         <file alias="components/MainToolbar.qml">../ui/components/MainToolbar.qml</file>
         <file alias="components/ToolPalette.qml">../ui/components/ToolPalette.qml</file>
         <file alias="components/CanvasWorkspace.qml">../ui/components/CanvasWorkspace.qml</file>

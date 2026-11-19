@@ -1,27 +1,40 @@
 import QtQuick
+import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
 import KomaPaint 1.0
 import "../components"
 import "../themes"
+import "brushstudio"
 
-// A native window, not an item in the docking workspace. Its draft belongs to
-// this window and never reads or replaces the active project's brush settings.
+// The native window owns a draft. It deliberately has no Workspace,
+// SubToolLibrary or CanvasViewport binding.
 Window {
     id: studio
     objectName: "brushStudioWindow"
     title: qsTr("KomaPaint — Brush Studio")
     flags: Qt.Window
     modality: Qt.NonModal
-    width: 960
-    height: 600
-    minimumWidth: 360
-    minimumHeight: 240
+    minimumWidth: 540
+    minimumHeight: 400
+    width: Math.max(minimumWidth, Math.min(1540, Screen.desktopAvailableWidth - 36))
+    height: Math.max(minimumHeight, Math.min(1000, Screen.desktopAvailableHeight - 72))
     color: KP.windowBg
 
+    readonly property bool compact: width < 880
+    readonly property bool editingText: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
+    property int compactPanel: 1
+    // -1 follows the available space. A deliberate expand/collapse is remembered
+    // for this window, but even expanded the shelf shrinks on short displays.
+    property int previewPreference: -1
+    readonly property bool previewExpanded: previewPreference < 0 ? height >= 660 : previewPreference === 1
+    property string fileNotice: ""
+
     BrushStudioModel {
-        id: draft
+        id: brushDraft
         objectName: "brushStudioModel"
+        onDocumentChanged: studio.fileNotice = ""
     }
 
     function present() {
@@ -31,54 +44,199 @@ Window {
         requestActivate()
     }
 
-    ColumnLayout {
-        anchors.centerIn: parent
-        width: Math.min(parent.width - 2 * KP.gapXL, implicitWidth)
-        spacing: KP.gapM
+    function togglePreview() { previewPreference = previewExpanded ? 0 : 1 }
 
-        Text {
-            Layout.alignment: Qt.AlignHCenter
-            text: qsTr("Brush Studio")
-            color: KP.text
-            font.family: KP.fontDisplay
-            font.pixelSize: KP.fontDisplay1
-            font.weight: Font.DemiBold
+    // When a file shortcut is invoked mid-entry, take focus out of the field
+    // first so it submits the same way as a click on the command bar.
+    function finishTextEntry() { if (editingText) contentItem.forceActiveFocus() }
+
+    Shortcut { sequences: [StandardKey.New]; onActivated: { studio.finishTextEntry(); brushDraft.newDraft() } }
+    Shortcut { sequences: [StandardKey.Open]; onActivated: { studio.finishTextEntry(); openBrush.open() } }
+    Shortcut { sequences: [StandardKey.Save]; onActivated: { studio.finishTextEntry(); saveBrush.open() } }
+    Shortcut { sequences: [StandardKey.Undo]; enabled: brushDraft.canUndo && !studio.editingText; onActivated: brushDraft.undo() }
+    Shortcut { sequences: [StandardKey.Redo]; enabled: brushDraft.canRedo && !studio.editingText; onActivated: brushDraft.redo() }
+
+    FileDialog {
+        id: openBrush
+        parentWindow: studio
+        modality: Qt.WindowModal
+        objectName: "brushStudioOpenDialog"
+        title: qsTr("Import a KomaPaint brush")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("KomaPaint brushes (*.kb)")]
+        onAccepted: if (brushDraft.openDraft(selectedFile)) studio.fileNotice = qsTr("Brush opened from file")
+    }
+    FileDialog {
+        id: saveBrush
+        parentWindow: studio
+        modality: Qt.WindowModal
+        objectName: "brushStudioSaveDialog"
+        title: qsTr("Save brush to a file")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "kb"
+        nameFilters: [qsTr("KomaPaint brushes (*.kb)")]
+        onAccepted: if (brushDraft.saveDraft(selectedFile)) studio.fileNotice = qsTr("Brush file saved")
+    }
+    FileDialog {
+        id: exportBrush
+        parentWindow: studio
+        modality: Qt.WindowModal
+        objectName: "brushStudioExportDialog"
+        title: qsTr("Export a copy of this brush")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "kb"
+        nameFilters: [qsTr("KomaPaint brushes (*.kb)")]
+        onAccepted: if (brushDraft.exportDraft(selectedFile)) studio.fileNotice = qsTr("Brush copy exported")
+    }
+
+    component PanelScaffold: Rectangle {
+        id: panel
+        property string title: ""
+        property string notice: ""
+        color: KP.paneBg
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: KP.gapM
+            StudioHeader { Layout.fillWidth: true; title: panel.title }
+            Text {
+                Layout.fillWidth: true
+                Layout.leftMargin: KP.panelInset
+                Layout.rightMargin: KP.panelInset
+                text: panel.notice
+                color: KP.textSubtle
+                font.family: KP.fontUi
+                font.pixelSize: KP.fontM
+                wrapMode: Text.WordWrap
+            }
+            Item { Layout.fillHeight: true }
         }
-        Text {
-            objectName: "brushStudioDraftName"
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 0
+        StudioToolbar {
             Layout.fillWidth: true
-            text: qsTr("Draft: %1").arg(draft.name)
-            color: KP.text
-            font.family: KP.fontUi
-            font.pixelSize: KP.fontM
-            horizontalAlignment: Text.AlignHCenter
-            elide: Text.ElideRight
+            draft: brushDraft
+            previewExpanded: studio.previewExpanded
+            onImportRequested: openBrush.open()
+            onExportRequested: exportBrush.open()
+            onSaveRequested: saveBrush.open()
+            onCloseRequested: studio.close()
+            onPreviewToggled: studio.togglePreview()
         }
-        Text {
+        Rectangle {
+            objectName: "brushStudioCompactNavigation"
+            visible: studio.compact
             Layout.fillWidth: true
-            text: qsTr("Brush editing is not available in this build.")
-            color: KP.textMuted
-            font.family: KP.fontUi
-            font.pixelSize: KP.fontM
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
+            implicitHeight: KP.tabStripHeight
+            color: KP.paneHeaderBg
+            SegmentedChoice {
+                id: compactNavigation
+                objectName: "brushStudioPanelChoice"
+                anchors.fill: parent
+                anchors.margins: KP.gapS
+                options: [qsTr("Components"), qsTr("Editor"), qsTr("Settings")]
+                currentIndex: studio.compactPanel
+                onChosen: function(index) { studio.compactPanel = index }
+            }
+        }
+        RowLayout {
+            objectName: "brushStudioBody"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: KP.hairlineWidth
+            PanelScaffold {
+                objectName: "brushStudioComponents"
+                visible: !studio.compact || studio.compactPanel === 0
+                Layout.fillWidth: studio.compact
+                Layout.preferredWidth: studio.compact ? -1 : Math.min(260, Math.round(studio.width * 0.16))
+                Layout.fillHeight: true
+                title: qsTr("Components")
+                notice: qsTr("%n component(s) in this draft. Component editing and the brush library are unavailable here.", "", brushDraft.components.length)
+            }
+            PanelScaffold {
+                objectName: "brushStudioEditor"
+                visible: !studio.compact || studio.compactPanel === 1
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: KP.canvasBg
+                title: qsTr("Editor")
+                notice: qsTr("Tip, Texture and Nodes are workspace tabs. Pixel and node editing are unavailable.")
+            }
+            PanelScaffold {
+                objectName: "brushStudioSettings"
+                visible: !studio.compact || studio.compactPanel === 2
+                Layout.fillWidth: studio.compact
+                Layout.preferredWidth: studio.compact ? -1 : Math.min(340, Math.round(studio.width * 0.23))
+                Layout.fillHeight: true
+                title: qsTr("Brush Settings")
+                notice: qsTr("Settings here describe the brush draft, not your personal Tool Controls or application stroke controls.")
+            }
         }
         Text {
             objectName: "brushStudioError"
             Layout.fillWidth: true
-            visible: text.length > 0
-            text: draft.error
+            Layout.leftMargin: KP.panelInset
+            Layout.rightMargin: KP.panelInset
+            Layout.topMargin: visible ? KP.gapS : 0
+            Layout.bottomMargin: visible ? KP.gapS : 0
+            visible: brushDraft.error.length > 0
+            text: brushDraft.error
+            textFormat: Text.PlainText
             color: KP.error
             font.family: KP.fontUi
             font.pixelSize: KP.fontM
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
+            wrapMode: Text.Wrap
+            maximumLineCount: 3
+            elide: Text.ElideRight
         }
-        KpButton {
-            Layout.alignment: Qt.AlignHCenter
-            label: qsTr("Close")
-            variant: "solid"
-            onClicked: studio.close()
+        StudioPreview {
+            objectName: "brushStudioPreview"
+            Layout.fillWidth: true
+            expanded: studio.previewExpanded
+            expandedHeight: Math.min(250, Math.max(104, Math.round(studio.height * 0.23)))
+            onToggleRequested: studio.togglePreview()
+        }
+        Rectangle {
+            objectName: "brushStudioStatus"
+            Layout.fillWidth: true
+            implicitHeight: KP.statusbarHeight
+            color: KP.statusbarBg
+            Rectangle {
+                width: parent.width
+                height: KP.hairlineWidth
+                color: KP.hairline
+            }
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: KP.panelInset
+                anchors.rightMargin: KP.panelInset
+                spacing: KP.gapM
+                Text {
+                    Layout.fillWidth: true
+                    text: studio.compact && studio.fileNotice.length > 0 ? studio.fileNotice : qsTr("Sub-Tool  /  %1  /  %2").arg(brushDraft.engine === "realistic" ? qsTr("Realistic") : qsTr("Digital")).arg(brushDraft.name)
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    color: KP.textSubtle
+                    font.family: KP.fontUi
+                    font.pixelSize: KP.fontXS
+                }
+                Text {
+                    visible: !studio.compact && studio.fileNotice.length > 0 && brushDraft.error.length === 0
+                    text: studio.fileNotice
+                    color: KP.textMuted
+                    font.family: KP.fontUi
+                    font.pixelSize: KP.fontXS
+                }
+                Rectangle { width: 5; height: 5; radius: 2.5; color: brushDraft.modified ? KP.warning : KP.success }
+                Text {
+                    text: brushDraft.modified ? qsTr("Unsaved edits") : qsTr("No unsaved edits")
+                    color: KP.textSubtle
+                    font.family: KP.fontUi
+                    font.pixelSize: KP.fontXS
+                }
+            }
         }
     }
 }

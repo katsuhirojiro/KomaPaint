@@ -440,11 +440,42 @@ void KomaPaintApp::runPackagedVerification()
     }
     report << QStringLiteral("7. Save and reopen .koma round-trip verified.");
 
+    // Unlike a resource-existence check, this loads the lazy window (and all
+    // of its QML imports) from the packaged executable.
+    if (!QMetaObject::invokeMethod(m_window, "openBrushStudio")) {
+        fail(QStringLiteral("Brush Studio opener is unavailable."));
+        return;
+    }
+    QCoreApplication::processEvents();
+    QQuickWindow* studio = nullptr;
+    for (auto* window : QGuiApplication::allWindows()) {
+        if (window->objectName() == QStringLiteral("brushStudioWindow")) {
+            studio = qobject_cast<QQuickWindow*>(window);
+            break;
+        }
+    }
+    auto* draft = studio ? studio->findChild<BrushStudioModel*>() : nullptr;
+    if (!studio || !studio->isVisible() || studio->transientParent() != m_window || !draft ||
+        !studio->findChild<QObject*>(QStringLiteral("brushStudioSaveDialog")) ||
+        !findVisual(findVisual, studio->contentItem(), QStringLiteral("brushStudioPreview"))) {
+        fail(QStringLiteral("Brush Studio did not open with its independent draft and bundled controls."));
+        return;
+    }
+    const auto brushPath = QUrl::fromLocalFile(tempDir.filePath(QStringLiteral("verify_brush.kb")));
+    draft->setName(QStringLiteral("Packaged Studio brush"));
+    if (!draft->saveDraft(brushPath) || !draft->newDraft() || !draft->openDraft(brushPath) ||
+        draft->name() != QStringLiteral("Packaged Studio brush") || m_workspace.document() != reopenedDoc) {
+        fail(QStringLiteral("Studio .kb round-trip failed or changed the active artwork."));
+        return;
+    }
+    studio->close();
+    report << QStringLiteral("8. Independent Brush Studio opened from the package; .kb round-trip verified.");
+
     if (!m_qmlWarnings.isEmpty()) {
         fail(QStringLiteral("QML warnings occurred: %1").arg(m_qmlWarnings.join(QStringLiteral(" | "))));
         return;
     }
-    report << QStringLiteral("8. Zero QML warnings, missing Qt plugins, or critical errors.");
+    report << QStringLiteral("9. Zero QML warnings, missing Qt plugins, or critical errors.");
 
     const QString reportPath = qEnvironmentVariable("KOMAPAINT_VERIFY_REPORT");
     if (!reportPath.isEmpty()) {

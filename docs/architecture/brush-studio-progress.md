@@ -388,8 +388,36 @@ smoke, deployment, and extracted-package GUI checks for `9130f97`. The
 [Windows human-test ZIP](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44571089385/artifacts/14554279238)
 is ready for tablet and artist testing.
 
+## Phase B2.1 — native layout and file commands
+
+The separate Studio window now has the menu and command bands, component and
+settings rails, center workspace, collapsible Live Preview shelf, and status
+band from the approved Tip/Texture design. At narrow widths the three central
+regions share a panel switcher; file actions move to a menu. Both themes use
+KomaPaint controls and palette tokens. The comparison and stamp/size wells
+are explicitly unavailable, not sample strokes.
+
+The brush name and Digital/Realistic choice edit the independent draft. New
+and Duplicate are undoable and create independent brush identities. Import
+and Save use local `.kb` files and the validated native codec; Export writes
+a copy without moving the draft's save point. Save is **not** Save to Library.
+The Studio has its own Undo/Redo shortcuts and uses file dialogs owned by
+its own native window. Closing Studio still hides it and retains its draft
+for the session.
+
+**Validation (Debian 12 / Qt 6.8.3):** full desktop build; eight brush CTest
+suites passed (56.68 s). `localFileCommandsPreserveHistoryAndIdentity` covers
+Unicode URLs, dirty state, failure/redo preservation, and New/Duplicate/Open
+replay. `brushStudioCommandsAndCompactLayout` exercised mouse/keyboard edits,
+file dialog accept handlers, compact panel switching, preview collapse and
+close. The existing lifecycle/isolation regression also passed. The packaged
+self-check now opens the lazy window and round-trips a `.kb`; all nine checks
+passed with zero QML warnings. The offscreen plugin itself does not support
+raising native windows; this is not a QML warning.
+
 ## Next
 
-B2 (approved layout), B3 (tip editor), B4 (brush library integration), and B5
-(isolated production-engine preview) are not started. Hardware tablet and
-artist workflow testing are still outstanding.
+B2.2 (component rail and editor modes) and B2.3 (registry-driven settings) are
+pending. B3 (tip editor), B4 (brush library integration), and B5 (isolated
+production-engine preview) are not started. Hardware tablet and artist
+workflow testing are still outstanding.

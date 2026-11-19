@@ -41,6 +41,7 @@ class TestBrushStudioModel : public QObject {
     Q_OBJECT
 private slots:
     void newBrushIsPaintable();
+    void localFileCommandsPreserveHistoryAndIdentity();
     void componentEditingChangesTheDocument();
     void componentOrderAndSelectionFollowTheDocument();
     void groupsPickModeAndMembers();
@@ -77,6 +78,58 @@ void TestBrushStudioModel::newBrushIsPaintable() {
     // A brush with one tip and one generator is valid and immediately usable.
     QVERIFY(document.validate().ok());
     QCOMPARE(model.validationSummary(), QStringLiteral("ok"));
+}
+
+void TestBrushStudioModel::localFileCommandsPreserveHistoryAndIdentity() {
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    const auto saved = QUrl::fromLocalFile(files.filePath(QStringLiteral("試し筆 #1.kb")));
+    const auto copy = QUrl::fromLocalFile(files.filePath(QStringLiteral("別の筆.kb")));
+    const auto missing = QUrl::fromLocalFile(files.filePath(QStringLiteral("missing/file.kb")));
+    const QUrl remote(QStringLiteral("https://example.invalid/brush.kb"));
+    BrushStudioModel draft;
+    draft.setName(QStringLiteral("試し筆"));
+    QVERIFY(draft.saveDraft(saved));
+    QVERIFY(!draft.isModified());
+    const auto original = draft.document();
+    QVERIFY(draft.duplicateDraft());
+    QVERIFY(draft.document().id != original.id);
+    QCOMPARE(draft.document().components, original.components);
+    QCOMPARE(draft.document().exposed, original.exposed);
+    QVERIFY(draft.isModified());
+
+    const auto duplicate = draft.document();
+    QVERIFY(draft.exportDraft(copy));
+    QVERIFY(draft.isModified());
+    BrushStudioModel onDisk;
+    QVERIFY(onDisk.openDraft(copy));
+    QVERIFY(onDisk.document() == duplicate);
+    QVERIFY(!onDisk.isModified());
+    QVERIFY(!draft.openDraft(remote));
+    QVERIFY(!draft.saveDraft(QUrl{}));
+    QVERIFY(!draft.exportDraft(missing));
+    QVERIFY(!draft.error().isEmpty());
+    QVERIFY(draft.document() == duplicate && draft.isModified());
+
+    draft.undo();
+    QVERIFY(draft.document() == original && !draft.isModified());
+    QVERIFY(draft.canRedo());
+    draft.setName(QStringLiteral("   "));
+    QVERIFY(!draft.error().isEmpty());
+    QVERIFY(draft.document() == original && draft.canRedo());
+    draft.redo();
+    QVERIFY(draft.document() == duplicate && draft.isModified());
+    QVERIFY(draft.newDraft());
+    QVERIFY(draft.document().id != duplicate.id && draft.document().id != original.id);
+    QVERIFY(draft.document().validate().ok() && draft.isModified());
+    draft.undo();
+    QVERIFY(draft.document() == duplicate);
+    QVERIFY(draft.openDraft(saved));
+    QVERIFY(draft.document() == original && !draft.isModified());
+    draft.undo();
+    QVERIFY(draft.document() == duplicate && draft.isModified());
+    draft.redo();
+    QVERIFY(draft.document() == original && !draft.isModified());
 }
 
 void TestBrushStudioModel::componentEditingChangesTheDocument() {

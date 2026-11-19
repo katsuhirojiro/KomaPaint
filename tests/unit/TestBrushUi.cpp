@@ -9,6 +9,7 @@
 #include <QtTest/QtTest>
 #include <QDir>
 #include <QFile>
+#include <QFileDialog>
 #include <QFontDatabase>
 #include <QGuiApplication>
 #include <QColor>
@@ -96,11 +97,21 @@ QPoint centre(QQuickItem* target)
     return target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint();
 }
 
-void click(Running& app, QQuickItem* target, Qt::MouseButton button = Qt::LeftButton)
+void click(QQuickWindow* window, QQuickItem* target, Qt::MouseButton button = Qt::LeftButton)
 {
-    QTest::mouseMove(app.window, centre(target));
-    QTest::mouseClick(app.window, button, Qt::NoModifier, centre(target));
+    QTest::mouseMove(window, centre(target));
+    QTest::mouseClick(window, button, Qt::NoModifier, centre(target));
     QCoreApplication::processEvents();
+}
+
+void click(Running& app, QQuickItem* target, Qt::MouseButton button = Qt::LeftButton) { click(app.window, target, button); }
+
+QQuickWindow* studioWindow()
+{
+    for (auto* window : QGuiApplication::allWindows()) {
+        if (window->objectName() == QStringLiteral("brushStudioWindow")) return qobject_cast<QQuickWindow*>(window);
+    }
+    return nullptr;
 }
 
 // Rows live inside clipped flickables: the tool palette, the sub tool list and
@@ -269,7 +280,8 @@ void collectWarnings(QtMsgType type, const QMessageLogContext& context, const QS
         QStringLiteral("ColorPanel.qml"), QStringLiteral("PaintMixerView.qml"),
         QStringLiteral("qrc:/icons/")};
     if (g_warnings && type == QtWarningMsg) {
-        bool relevant = message.contains(QStringLiteral("ReferenceError")) || message.contains(QStringLiteral("TypeError"));
+        bool relevant = message.contains(QStringLiteral("ReferenceError")) || message.contains(QStringLiteral("TypeError"))
+                        || message.contains(QStringLiteral("qrc:/workspaces/brushstudio/"));
         for (const QString& file : covered) relevant = relevant || message.contains(file);
         if (relevant) *g_warnings << message;
     }
@@ -287,6 +299,7 @@ private slots:
     void subToolLibraryLoadsRemembersAndResets();
     void paletteShowsEveryToolAndSelectsOnlyWorkingOnes();
     void brushStudioWindowIsIndependentAndReusable();
+    void brushStudioCommandsAndCompactLayout();
     void brushSizeGridSetsTheRealSize();
     void toolPropertyControlsDriveTheBrush();
     void strokesFollowHardnessAndTheEraserErases();
@@ -464,6 +477,117 @@ void TestBrushUi::brushStudioWindowIsIndependentAndReusable()
     QVERIFY(app.window->close());
     QTRY_VERIFY(studio.isNull() && draft.isNull());
     QVERIFY(studioWindows().isEmpty());
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+}
+
+void TestBrushUi::brushStudioCommandsAndCompactLayout()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiStudioCommands")));
+    QVERIFY(QMetaObject::invokeMethod(app.root.get(), "openBrushStudio"));
+    QQuickWindow* studio = nullptr;
+    QTRY_VERIFY((studio = studioWindow()) && studio->isVisible());
+    auto* draft = studio->findChild<BrushStudioModel*>();
+    QVERIFY(draft);
+    const auto control = [&](const char* name) { return findVisual(studio->contentItem(), QString::fromLatin1(name)); };
+    const auto press = [&](const char* name) {
+        auto* target = control(name);
+        if (!target || !target->isVisible() || !target->isEnabled()) return false;
+        click(studio, target);
+        return true;
+    };
+    const auto choose = [&](const char* name, int index, int count) {
+        auto* selector = control(name);
+        if (!selector || !selector->isVisible()) return false;
+        const auto at = selector->mapToScene({selector->width() * (index + 0.5) / count, selector->height() / 2.0});
+        QTest::mouseClick(studio, Qt::LeftButton, Qt::NoModifier, at.toPoint());
+        QCoreApplication::processEvents();
+        return true;
+    };
+
+    studio->resize(1240, 780);
+    QTRY_VERIFY(control("brushStudioDuplicate") && control("brushStudioDuplicate")->isVisible());
+    for (const char* region : {"brushStudioCommandBar", "brushStudioComponents", "brushStudioEditor",
+                               "brushStudioSettings", "brushStudioPreview"}) {
+        QVERIFY2(control(region) && control(region)->isVisible() && control(region)->height() > 0, region);
+    }
+    QVERIFY(control("brushStudioCompare") && !control("brushStudioCompare")->isEnabled());
+    QVERIFY(choose("brushStudioEngineChoice", 1, 2));
+    QCOMPARE(draft->document().engine, brush::Engine::Realistic);
+    QVERIFY(!app.workspace.isRealisticEngine());
+
+    QVERIFY(press("brushStudioDraftName"));
+    QTest::keyClick(studio, Qt::Key_A, Qt::ControlModifier);
+    QTest::keyClick(studio, Qt::Key_K);
+    QTest::keyClick(studio, Qt::Key_P);
+    QTest::keyClick(studio, Qt::Key_Return);
+    QCOMPARE(draft->name(), QStringLiteral("kp"));
+    const auto originalId = draft->document().id;
+    QVERIFY(press("brushStudioDuplicate"));
+    QCOMPARE(draft->name(), QStringLiteral("kp copy"));
+    QVERIFY(draft->document().id != originalId && draft->isModified());
+    QTest::keyClick(studio, Qt::Key_Z, Qt::ControlModifier);
+    QCOMPARE(draft->document().id, originalId);
+    QCOMPARE(control("brushStudioDraftName")->property("text").toString(), draft->name());
+
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    const auto file = [&](const QString& name) { return QUrl::fromLocalFile(files.filePath(name)); };
+    const auto saved = file(QStringLiteral("試験筆 #1.kb"));
+    const auto exported = file(QStringLiteral("copy.kb"));
+    const auto forceQuickDialog = [&](const char* name) {
+        auto* dialog = studio->findChild<QObject*>(QString::fromLatin1(name));
+        if (!dialog || !dialog->setProperty("options", int(QFileDialog::DontUseNativeDialog))) return static_cast<QObject*>(nullptr);
+        return dialog;
+    };
+    auto* save = forceQuickDialog("brushStudioSaveDialog");
+    auto* exportCopy = forceQuickDialog("brushStudioExportDialog");
+    auto* open = forceQuickDialog("brushStudioOpenDialog");
+    QVERIFY(save && exportCopy && open);
+    // Select an existing filename as the dialog's initial selection. Qt's
+    // platform helper owns the selection once the dialog has opened.
+    for (const auto& url : {saved, exported}) {
+        QFile placeholder(url.toLocalFile());
+        QVERIFY(placeholder.open(QIODevice::WriteOnly));
+        QVERIFY(placeholder.write("replace me") > 0);
+    }
+    QVERIFY(exportCopy->setProperty("selectedFile", exported));
+    QVERIFY(press("brushStudioExport"));
+    QTRY_VERIFY(exportCopy->property("visible").toBool());
+    QVERIFY(QMetaObject::invokeMethod(exportCopy, "accept"));
+    BrushStudioModel exportedDraft;
+    QVERIFY2(exportedDraft.openDraft(exported), qPrintable(draft->error()));
+    QVERIFY(exportedDraft.document() == draft->document() && draft->isModified());
+    QVERIFY(save->setProperty("selectedFile", saved));
+    QVERIFY(press("brushStudioSave"));
+    QTRY_VERIFY(save->property("visible").toBool());
+    QVERIFY(QMetaObject::invokeMethod(save, "accept"));
+    QTRY_VERIFY(!draft->isModified());
+
+    QVERIFY(press("brushStudioNew"));
+    QVERIFY(draft->document().id != originalId && draft->isModified());
+    QVERIFY(open->setProperty("selectedFile", saved));
+    QVERIFY(press("brushStudioImport"));
+    QTRY_VERIFY(open->property("visible").toBool());
+    QVERIFY(QMetaObject::invokeMethod(open, "accept"));
+    QTRY_COMPARE(draft->document().id, originalId);
+    QCOMPARE(draft->name(), QStringLiteral("kp"));
+    QVERIFY(!draft->isModified());
+
+    studio->resize(studio->minimumWidth(), studio->minimumHeight());
+    QTRY_VERIFY(control("brushStudioPanelChoice")->isVisible());
+    QVERIFY(control("brushStudioEditor")->isVisible());
+    QVERIFY(!control("brushStudioComponents")->isVisible() && !control("brushStudioSettings")->isVisible());
+    QVERIFY(control("brushStudioBrushActions")->isVisible() && control("brushStudioSave")->isVisible());
+    QVERIFY(choose("brushStudioPanelChoice", 2, 3));
+    QVERIFY(control("brushStudioSettings")->isVisible() && !control("brushStudioEditor")->isVisible());
+    const auto collapsed = control("brushStudioPreview")->height();
+    QVERIFY(press("brushStudioTogglePreview"));
+    QTRY_VERIFY(control("brushStudioPreview")->height() > collapsed);
+    QVERIFY(control("brushStudioSettings")->height() > 0);
+    QVERIFY(press("brushStudioClose"));
+    QTRY_VERIFY(!studio->isVisible());
+    QVERIFY(app.window->isVisible());
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 

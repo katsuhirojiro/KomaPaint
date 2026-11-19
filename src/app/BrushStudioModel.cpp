@@ -4,6 +4,7 @@
 #include "../canvas/MemoryAvailability.h"
 
 #include <QFileInfo>
+#include <QUuid>
 
 #include <algorithm>
 #include <cmath>
@@ -95,15 +96,14 @@ int kindIndex(ComponentKind kind) {
     return 0;
 }
 
-} // namespace
+std::string newDraftId() {
+    return QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+}
 
-BrushStudioModel::BrushStudioModel(QObject* parent)
-    : BrushStudioModel(parent, [](void*, std::size_t bytes) noexcept { return systemMemoryAvailable(bytes); }, nullptr) {}
-
-BrushStudioModel::BrushStudioModel(QObject* parent, MemoryCheck check, void* context)
-    : QObject(parent), m_memoryCheck(check), m_memoryContext(context) {
-    m_document.name = "Untitled brush";
-    m_document.id = "studio-brush";
+BrushDocument defaultDraft() {
+    BrushDocument document;
+    document.name = "Untitled brush";
+    document.id = newDraftId();
     // A brush you can paint with before you change anything: one procedural tip
     // and one generator, which is what the model's own migration produces.
     BrushComponent tip;
@@ -111,21 +111,29 @@ BrushStudioModel::BrushStudioModel(QObject* parent, MemoryCheck check, void* con
     tip.name = "Tip";
     tip.kind = ComponentKind::ProceduralShape;
     tip.parameters.set("tip-shape", 0.0);
-    m_document.addComponent(std::move(tip));
+    document.addComponent(std::move(tip));
     brush::BrushGenerator generator;
     generator.id = "n1";
     generator.kind = brush::GeneratorKind::Continuous;
-    m_document.addGenerator(std::move(generator));
+    document.addGenerator(std::move(generator));
     const char* defaults[] = {"size", "opacity", "flow", "spacing", "hardness"};
     int order = 0;
     for (const char* key : defaults) {
         brush::ExposedProperty property;
         property.parameter = key;
         property.order = order++;
-        m_document.expose(std::move(property));
+        document.expose(std::move(property));
     }
-    m_selectedIndex = 0;
+    return document;
 }
+
+} // namespace
+
+BrushStudioModel::BrushStudioModel(QObject* parent)
+    : BrushStudioModel(parent, [](void*, std::size_t bytes) noexcept { return systemMemoryAvailable(bytes); }, nullptr) {}
+
+BrushStudioModel::BrushStudioModel(QObject* parent, MemoryCheck check, void* context)
+    : QObject(parent), m_document(defaultDraft()), m_selectedIndex(0), m_memoryCheck(check), m_memoryContext(context) {}
 
 // ---- document ---------------------------------------------------------------
 
@@ -140,8 +148,8 @@ bool BrushStudioModel::setDocument(BrushDocument&& document) {
     return replaceDocument(std::move(document), EditMode::Replace);
 }
 
-bool BrushStudioModel::replaceDocument(BrushDocument&& document, EditMode mode) {
-    return edit("Open brush", [&] {
+bool BrushStudioModel::replaceDocument(BrushDocument&& document, EditMode mode, const char* label) {
+    return edit(label, [&] {
         m_document = std::move(document);
         m_selectedIndex = m_document.components.empty() ? -1 : 0;
     }, mode);
@@ -159,11 +167,16 @@ bool BrushStudioModel::load(const QString& path) {
     return replaceDocument(std::move(loaded), EditMode::LoadSaved);
 }
 
-bool BrushStudioModel::save(const QString& path) {
+bool BrushStudioModel::writeBrush(const QString& path) {
     std::string failure;
     if (!brush::saveBrushFile(QFileInfo(path).filesystemAbsoluteFilePath(), m_document, &failure)) {
         return fail(QString::fromStdString(failure));
     }
+    return true;
+}
+
+bool BrushStudioModel::save(const QString& path) {
+    if (!writeBrush(path)) return false;
     commitStep();
     markSaved();
     clearError();
@@ -171,9 +184,42 @@ bool BrushStudioModel::save(const QString& path) {
     return true;
 }
 
+bool BrushStudioModel::newDraft() try {
+    return replaceDocument(defaultDraft(), EditMode::Replace, "New brush");
+} catch (const std::bad_alloc&) { return historyMemoryError(); }
+
+bool BrushStudioModel::duplicateDraft() {
+    // Reuse the checkpoint made by edit(); pixel resources remain shared.
+    return edit("Duplicate brush", [this] {
+        m_document.id = newDraftId();
+        m_document.name = tr("%1 copy").arg(name()).toStdString();
+    }, EditMode::Replace);
+}
+
+bool BrushStudioModel::openDraft(const QUrl& url) {
+    if (!url.isLocalFile() || url.toLocalFile().isEmpty()) return fail(tr("Choose a local .kb brush file to open."));
+    return load(url.toLocalFile());
+}
+
+bool BrushStudioModel::saveDraft(const QUrl& url) {
+    if (!url.isLocalFile() || url.toLocalFile().isEmpty()) return fail(tr("Choose a local .kb brush file to save."));
+    return save(url.toLocalFile());
+}
+
+bool BrushStudioModel::exportDraft(const QUrl& url) {
+    if (!url.isLocalFile() || url.toLocalFile().isEmpty()) return fail(tr("Choose a local .kb destination for the copy."));
+    if (!writeBrush(url.toLocalFile())) return false;
+    clearError();
+    return true;
+}
+
 void BrushStudioModel::setName(const QString& value) {
-    if (value.isEmpty() || name() == value) return;
-    edit("Rename brush", [this, value] { m_document.name = value.toStdString(); });
+    if (value.trimmed().isEmpty()) {
+        fail(tr("A brush needs a name."));
+        return;
+    }
+    if (name() == value) return;
+    edit("Rename brush", [this, &value] { m_document.name = value.toStdString(); });
 }
 
 QString BrushStudioModel::engine() const {

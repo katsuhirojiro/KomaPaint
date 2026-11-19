@@ -14,6 +14,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -58,6 +59,11 @@ public:
     bool setDocument(brush::BrushDocument&& document);
     bool load(const QString& path);
     bool save(const QString& path);
+    Q_INVOKABLE bool newDraft();
+    Q_INVOKABLE bool duplicateDraft();
+    Q_INVOKABLE bool openDraft(const QUrl& url);
+    Q_INVOKABLE bool saveDraft(const QUrl& url);
+    Q_INVOKABLE bool exportDraft(const QUrl& url); // writes a copy without changing the save point
 
     QString name() const { return QString::fromStdString(m_document.name); }
     void setName(const QString& value);
@@ -165,7 +171,8 @@ private:
     }
     bool editTransaction(const char* label, void* context, bool (*apply)(void*), EditMode mode,
                          const brush::BrushDocument* incomingCopy);
-    bool replaceDocument(brush::BrushDocument&& document, EditMode mode);
+    bool replaceDocument(brush::BrushDocument&& document, EditMode mode, const char* label = "Open brush");
+    bool writeBrush(const QString& path);
     brush::BrushComponent* editableComponent(const QString& id);
     bool fail(const QString& message);
     void clearError();
