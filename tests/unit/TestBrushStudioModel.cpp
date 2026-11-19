@@ -15,6 +15,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <limits>
+
 #include "app/BrushStudioModel.h"
 #include "brush/BrushEvaluator.h"
 #include "brush/BrushFormat.h"
@@ -44,6 +46,9 @@ private slots:
     void regroupedComponentsStayConsistentThroughSave();
     void settingsComeFromTheRegistry();
     void settingsRejectNonsense();
+    void componentRegistrySettingsReachTheSelectedComponent();
+    void invalidComponentEditsAreTransactional_data();
+    void invalidComponentEditsAreTransactional();
     void exposureCanBeRenamedReorderedAndReset();
     void undoAndRedoRestoreExactly();
     void saveAndLoadRoundTrip();
@@ -85,7 +90,6 @@ void TestBrushStudioModel::componentEditingChangesTheDocument() {
     QVERIFY(model.setComponentName(id, QStringLiteral("Leaf")));
     QVERIFY(model.setComponentVisible(id, false));
     QVERIFY(model.setComponentOpacity(id, 0.4));
-    QVERIFY(model.setComponentOpacity(id, 5.0));   // clamped, not rejected silently
     QVERIFY(model.setComponentBlend(id, int(brush::ComponentBlend::Multiply)));
     QVERIFY(model.setComponentErases(id, true));
     QVERIFY(model.setComponentTransform(id, QStringLiteral("offsetX"), 35.0));
@@ -96,7 +100,7 @@ void TestBrushStudioModel::componentEditingChangesTheDocument() {
     QVERIFY(component);
     QCOMPARE(QString::fromStdString(component->name), QStringLiteral("Leaf"));
     QCOMPARE(component->visible, false);
-    QCOMPARE(component->opacity, 1.0);
+    QCOMPARE(component->opacity, 0.4);
     QCOMPARE(component->blend, brush::ComponentBlend::Multiply);
     QVERIFY(component->erases);
     QCOMPARE(component->transform.offsetX, 35.0);
@@ -284,6 +288,153 @@ void TestBrushStudioModel::settingsRejectNonsense() {
     // Nothing was written by a rejected edit.
     QCOMPARE(model.parameterValue(QStringLiteral("size")), 16.0);
     QVERIFY(!model.canUndo());
+}
+
+void TestBrushStudioModel::componentRegistrySettingsReachTheSelectedComponent() {
+    BrushStudioModel model;
+    const QString first = model.selectedId();
+    const auto original = model.document().components.front();
+    const QString edited = model.addComponent(int(brush::ComponentKind::ProceduralShape));
+    QVERIFY(!edited.isEmpty());
+    QCOMPARE(model.selectedId(), edited);
+    const std::pair<const char*, double> settings[] = {
+        {"component-opacity", 25.0}, {"component-scale", 150.0},
+        {"component-rotation", -45.0}, {"component-aspect", 75.0},
+        {"component-offset-x", -80.0}, {"component-offset-y", 35.0},
+        {"component-weight", 2.0}, {"tip-shape", 3.0},
+    };
+    for (const auto& [key, value] : settings) {
+        const auto name = QString::fromLatin1(key);
+        QVERIFY2(model.setParameterValue(name, value), qPrintable(model.error()));
+        QCOMPARE(model.parameterValue(name), value);
+        QCOMPARE(numberField(model.parameterInfo(name), "value"), value);
+        QVERIFY(!model.document().parameters.contains(key));
+    }
+    const auto& doc = model.document();
+    QVERIFY(*doc.component(first.toStdString()) == original);
+    const auto& c = *doc.component(edited.toStdString());
+    QCOMPARE(c.opacity, 0.25);
+    QCOMPARE(c.transform.scale, 1.5);
+    QCOMPARE(c.transform.aspect, 0.75);
+    QCOMPARE(c.transform.rotationDegrees, -45.0);
+    QCOMPARE(c.transform.offsetX, -80.0);
+    QCOMPARE(c.transform.offsetY, 35.0);
+    QCOMPARE(c.weight, 2.0);
+    QCOMPARE(c.parameters.value("tip-shape"), 3.0);
+
+    const auto requests = brush::BrushEvaluator::evaluate(doc, {});
+    QCOMPARE(requests.size(), std::size_t(2));
+    QCOMPARE(requests.back().componentId, edited.toStdString());
+    QCOMPARE(requests.back().opacity, 0.25);
+    QCOMPARE(requests.back().scale, 1.5);
+    QCOMPARE(requests.back().aspect, 0.75);
+    QCOMPARE(requests.back().rotationDegrees, -45.0);
+    QCOMPARE(requests.back().offsetX, -0.8);
+    QCOMPARE(requests.back().offsetY, 0.35);
+    QVERIFY(doc.validate().ok());
+
+    model.setSelectedIndex(0);
+    QCOMPARE(model.parameterValue(QStringLiteral("component-opacity")), 100.0);
+    const auto before = doc;
+    QSignalSpy history(&model, &BrushStudioModel::historyChanged);
+    QVERIFY(model.setComponentVisible(first, true)); // already the requested value
+    QVERIFY(model.setParameterValue(QStringLiteral("size"), 16.0));
+    QCOMPARE(history.count(), 0);
+    QVERIFY(doc == before);
+}
+
+void TestBrushStudioModel::invalidComponentEditsAreTransactional_data() {
+    QTest::addColumn<QString>("operation");
+    QTest::addColumn<QString>("key");
+    QTest::addColumn<double>("value");
+    QTest::addColumn<bool>("missing");
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    using namespace Qt::StringLiterals;
+    for (const auto* op : {"name", "visible", "opacity", "blend", "erases", "transform", "weight"}) {
+        QTest::newRow(qPrintable(u"missing-"_s + QString::fromLatin1(op)))
+            << QString::fromLatin1(op) << u"scale"_s << 0.5 << true;
+    }
+    QTest::newRow("empty-name") << u"name"_s << u"   "_s << 0.0 << false;
+    QTest::newRow("negative-opacity") << u"opacity"_s << QString{} << -0.2 << false;
+    QTest::newRow("high-opacity") << u"opacity"_s << QString{} << 5.0 << false;
+    QTest::newRow("nan-opacity") << u"opacity"_s << QString{} << nan << false;
+    QTest::newRow("unknown-blend") << u"blend"_s << QString{} << 99.0 << false;
+    QTest::newRow("negative-blend") << u"blend"_s << QString{} << -1.0 << false;
+    QTest::newRow("unknown-transform") << u"transform"_s << u"wrong"_s << 1.0 << false;
+    QTest::newRow("zero-scale") << u"transform"_s << u"scale"_s << 0.0 << false;
+    QTest::newRow("negative-aspect") << u"transform"_s << u"aspect"_s << -1.0 << false;
+    QTest::newRow("infinite-rotation") << u"transform"_s << u"rotation"_s << inf << false;
+    QTest::newRow("nan-offset-x") << u"transform"_s << u"offsetX"_s << nan << false;
+    QTest::newRow("out-of-range-offset-y") << u"transform"_s << u"offsetY"_s << 201.0 << false;
+    QTest::newRow("negative-weight") << u"weight"_s << QString{} << -2.0 << false;
+    QTest::newRow("nonfinite-weight") << u"weight"_s << QString{} << inf << false;
+    QTest::newRow("last-positive-weight") << u"weighted"_s << QString{} << 0.0 << false;
+    QTest::newRow("missing-mode-group") << u"mode"_s << QString{} << 1.0 << true;
+    QTest::newRow("missing-count-group") << u"count"_s << QString{} << 2.0 << true;
+    QTest::newRow("invalid-mode") << u"mode"_s << QString{} << 17.0 << false;
+    QTest::newRow("weighted-with-no-weight") << u"mode-zero"_s << QString{} << 2.0 << false;
+    QTest::newRow("invalid-count") << u"count"_s << QString{} << 0.0 << false;
+    QTest::newRow("fractional-tip-shape") << u"registry"_s << u"tip-shape"_s << 2.5 << false;
+    QTest::newRow("no-component-selected") << u"registry"_s << u"component-opacity"_s << 20.0 << true;
+    QTest::newRow("invalid-registry-scope-input") << u"registry"_s << u"component-scale"_s << nan << false;
+    QTest::newRow("bitmap-tip-shape") << u"bitmap"_s << u"tip-shape"_s << 1.0 << false;
+}
+
+void TestBrushStudioModel::invalidComponentEditsAreTransactional() {
+    QFETCH(QString, operation);
+    QFETCH(QString, key);
+    QFETCH(double, value);
+    QFETCH(bool, missing);
+    BrushStudioModel model;
+    QString id = model.selectedId();
+    QString group;
+    if (operation == QStringLiteral("weighted") || operation == QStringLiteral("mode") ||
+        operation == QStringLiteral("count")) {
+        group = model.createGroup(QStringLiteral("Group"));
+        QVERIFY(model.assignToGroup(id, group));
+        QVERIFY(model.setGroupMode(group, int(brush::SelectionMode::Weighted)));
+    }
+    if (operation == QStringLiteral("mode-zero")) {
+        group = model.createGroup(QStringLiteral("Group"));
+        QVERIFY(model.assignToGroup(id, group));
+        QVERIFY(model.setComponentWeight(id, 0.0));
+    }
+    if (operation == QStringLiteral("bitmap")) {
+        id = model.addComponent(int(brush::ComponentKind::Image));
+        QVERIFY(!id.isEmpty());
+    }
+    if (missing) {
+        id = group = QStringLiteral("missing");
+        if (operation == QStringLiteral("registry")) model.setSelectedIndex(-1);
+    }
+    model.setModified(false);
+    const auto before = model.document();
+    const bool couldUndo = model.canUndo();
+    const auto selection = model.selectedId();
+    QSignalSpy history(&model, &BrushStudioModel::historyChanged);
+    QSignalSpy changes(&model, &BrushStudioModel::documentChanged);
+    bool result = true;
+    if (operation == QStringLiteral("name")) result = model.setComponentName(id, key);
+    else if (operation == QStringLiteral("visible")) result = model.setComponentVisible(id, false);
+    else if (operation == QStringLiteral("opacity")) result = model.setComponentOpacity(id, value);
+    else if (operation == QStringLiteral("blend")) result = model.setComponentBlend(id, int(value));
+    else if (operation == QStringLiteral("erases")) result = model.setComponentErases(id, true);
+    else if (operation == QStringLiteral("transform")) result = model.setComponentTransform(id, key, value);
+    else if (operation == QStringLiteral("weight") || operation == QStringLiteral("weighted"))
+        result = model.setComponentWeight(id, value);
+    else if (operation == QStringLiteral("mode") || operation == QStringLiteral("mode-zero"))
+        result = model.setGroupMode(group, int(value));
+    else if (operation == QStringLiteral("count")) result = model.setGroupMembersPerStamp(group, int(value));
+    else result = model.setParameterValue(key, value);
+    QVERIFY(!result);
+    QVERIFY(!model.error().isEmpty());
+    QVERIFY(model.document() == before);
+    QCOMPARE(model.selectedId(), selection);
+    QCOMPARE(model.canUndo(), couldUndo);
+    QVERIFY(!model.isModified());
+    QCOMPARE(history.count(), 0);
+    QCOMPARE(changes.count(), 0);
 }
 
 void TestBrushStudioModel::exposureCanBeRenamedReorderedAndReset() {

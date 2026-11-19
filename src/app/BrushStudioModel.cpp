@@ -74,6 +74,31 @@ const SelectionMode kSelectionModes[] = {
     SelectionMode::Sequence, SelectionMode::Alternating, SelectionMode::Combination,
 };
 
+// There is one source of truth for each setting. Registry percentages are
+// views of the component's fractions and scale factors, not another bag of
+// values that the evaluator might never read.
+struct TransformSetting {
+    const char* key;
+    const char* parameter;
+    double brush::ComponentTransform::* field;
+    double units;
+};
+constexpr TransformSetting kTransformSettings[] = {
+    {"offsetX", "component-offset-x", &brush::ComponentTransform::offsetX, 1.0},
+    {"offsetY", "component-offset-y", &brush::ComponentTransform::offsetY, 1.0},
+    {"rotation", "component-rotation", &brush::ComponentTransform::rotationDegrees, 1.0},
+    {"scale", "component-scale", &brush::ComponentTransform::scale, 100.0},
+    {"aspect", "component-aspect", &brush::ComponentTransform::aspect, 100.0},
+};
+
+bool hasPositiveWeight(const BrushDocument& doc, const brush::ComponentGroup& group,
+                       std::string_view except = {}) {
+    return std::ranges::any_of(group.members, [&](const std::string& id) {
+        const auto* component = doc.component(id);
+        return component && id != except && component->weight > 0.0;
+    });
+}
+
 int kindIndex(ComponentKind kind) {
     for (int i = 0; i < int(std::size(kComponentKinds)); ++i) {
         if (kComponentKinds[i] == kind) return i;
@@ -384,69 +409,78 @@ bool BrushStudioModel::moveComponent(const QString& id, int newIndex) {
     return true;
 }
 
+BrushComponent* BrushStudioModel::editableComponent(const QString& id) {
+    auto* component = m_document.component(id.toStdString());
+    if (!component) fail(QStringLiteral("There is no component with that id."));
+    return component;
+}
+
 bool BrushStudioModel::setComponentName(const QString& id, const QString& value) {
-    BrushComponent* component = m_document.component(id.toStdString());
+    auto* component = editableComponent(id);
     if (!component) return false;
-    const QString current = QString::fromStdString(component->name);
-    if (current == value || value.isEmpty()) return false;
-    edit("Rename component", [component, value] { component->name = value.toStdString(); });
-    return true;
+    if (value.trimmed().isEmpty()) return fail(QStringLiteral("A component needs a name."));
+    return changeSetting("Rename component", component->name, value.toStdString());
 }
 
 bool BrushStudioModel::setComponentVisible(const QString& id, bool visible) {
-    BrushComponent* component = m_document.component(id.toStdString());
-    if (!component || component->visible == visible) return false;
-    edit("Toggle component", [component, visible] { component->visible = visible; });
-    return true;
+    auto* component = editableComponent(id);
+    return component && changeSetting("Toggle component", component->visible, visible);
 }
 
 bool BrushStudioModel::setComponentOpacity(const QString& id, double opacity) {
-    BrushComponent* component = m_document.component(id.toStdString());
+    auto* component = editableComponent(id);
     if (!component) return false;
-    const double clamped = std::clamp(opacity, 0.0, 1.0);
-    if (component->opacity == clamped) return false;
-    edit("Component opacity", [component, clamped] { component->opacity = clamped; });
-    return true;
+    if (!std::isfinite(opacity) || opacity < 0.0 || opacity > 1.0) {
+        return fail(QStringLiteral("Component opacity must be between 0 and 1."));
+    }
+    return changeSetting("Component opacity", component->opacity, opacity);
 }
 
 bool BrushStudioModel::setComponentBlend(const QString& id, int blend) {
-    BrushComponent* component = m_document.component(id.toStdString());
-    if (!component || blend < 0 || blend > int(ComponentBlend::Mask)) return false;
-    const auto value = static_cast<ComponentBlend>(blend);
-    if (component->blend == value) return false;
-    edit("Component blend", [component, value] { component->blend = value; });
-    return true;
+    auto* component = editableComponent(id);
+    if (!component) return false;
+    if (blend < 0 || blend > int(ComponentBlend::Mask)) {
+        return fail(QStringLiteral("That component blend mode is not valid."));
+    }
+    return changeSetting("Component blend", component->blend, static_cast<ComponentBlend>(blend));
 }
 
 bool BrushStudioModel::setComponentErases(const QString& id, bool erases) {
-    BrushComponent* component = m_document.component(id.toStdString());
-    if (!component || component->erases == erases) return false;
-    edit("Component eraser", [component, erases] { component->erases = erases; });
-    return true;
+    auto* component = editableComponent(id);
+    return component && changeSetting("Component eraser", component->erases, erases);
 }
 
 bool BrushStudioModel::setComponentTransform(const QString& id, const QString& key, double value) {
-    BrushComponent* component = m_document.component(id.toStdString());
+    auto* component = editableComponent(id);
     if (!component) return false;
-    brush::ComponentTransform& transform = component->transform;
-    double* field = nullptr;
-    if (key == QStringLiteral("offsetX")) field = &transform.offsetX;
-    else if (key == QStringLiteral("offsetY")) field = &transform.offsetY;
-    else if (key == QStringLiteral("rotation")) field = &transform.rotationDegrees;
-    else if (key == QStringLiteral("scale")) field = &transform.scale;
-    else if (key == QStringLiteral("aspect")) field = &transform.aspect;
-    if (!field || *field == value) return false;
-    edit("Component transform", [field, value] { *field = value; });
-    return true;
+    for (const auto& setting : kTransformSettings) {
+        if (key != QLatin1String(setting.key)) continue;
+        const auto& info = *brush::findParameter(setting.parameter);
+        const double low = info.minimum / setting.units;
+        const double high = info.maximum / setting.units;
+        if (!std::isfinite(value) || value < low || value > high) {
+            return fail(QStringLiteral("Component %1 must be between %2 and %3.")
+                        .arg(key).arg(low).arg(high));
+        }
+        return changeSetting("Component transform", component->transform.*setting.field, value);
+    }
+    return fail(QStringLiteral("There is no component transform called '%1'.").arg(key));
 }
 
 bool BrushStudioModel::setComponentWeight(const QString& id, double weight) {
-    BrushComponent* component = m_document.component(id.toStdString());
+    auto* component = editableComponent(id);
     if (!component) return false;
-    const double clamped = std::max(0.0, weight);
-    if (component->weight == clamped) return false;
-    edit("Component weight", [component, clamped] { component->weight = clamped; });
-    return true;
+    const auto& info = *brush::findParameter("component-weight");
+    if (!brush::parameterInRange(info, weight)) {
+        return fail(QStringLiteral("Component weight must be between %1 and %2.")
+                    .arg(info.minimum).arg(info.maximum));
+    }
+    if (const auto* group = m_document.group(component->groupId);
+        weight == 0.0 && group && group->mode == SelectionMode::Weighted &&
+        !hasPositiveWeight(m_document, *group, component->id)) {
+        return fail(QStringLiteral("A weighted group needs at least one member with a positive weight."));
+    }
+    return changeSetting("Component weight", component->weight, weight);
 }
 
 QString BrushStudioModel::createGroup(const QString& name) {
@@ -481,21 +515,24 @@ bool BrushStudioModel::assignToGroup(const QString& componentId, const QString& 
 }
 
 bool BrushStudioModel::setGroupMode(const QString& groupId, int mode) {
-    brush::ComponentGroup* group = m_document.group(groupId.toStdString());
-    if (!group || mode < 0 || mode > int(SelectionMode::Combination)) return false;
+    auto* group = m_document.group(groupId.toStdString());
+    if (!group) return fail(QStringLiteral("There is no group with that id."));
+    if (mode < 0 || mode > int(SelectionMode::Combination)) {
+        return fail(QStringLiteral("That group selection mode is not valid."));
+    }
     const auto value = static_cast<SelectionMode>(mode);
-    if (group->mode == value) return false;
-    edit("Group selection mode", [group, value] { group->mode = value; });
-    return true;
+    if (value == SelectionMode::Weighted && !group->members.empty() &&
+        !hasPositiveWeight(m_document, *group)) {
+        return fail(QStringLiteral("A weighted group needs at least one member with a positive weight."));
+    }
+    return changeSetting("Group selection mode", group->mode, value);
 }
 
 bool BrushStudioModel::setGroupMembersPerStamp(const QString& groupId, int count) {
-    brush::ComponentGroup* group = m_document.group(groupId.toStdString());
-    if (!group) return false;
-    const int bounded = std::max(1, count);
-    if (group->membersPerStamp == bounded) return false;
-    edit("Members per stamp", [group, bounded] { group->membersPerStamp = bounded; });
-    return true;
+    auto* group = m_document.group(groupId.toStdString());
+    if (!group) return fail(QStringLiteral("There is no group with that id."));
+    if (count < 1) return fail(QStringLiteral("Members per stamp must be at least one."));
+    return changeSetting("Members per stamp", group->membersPerStamp, count);
 }
 
 bool BrushStudioModel::removeGroup(const QString& groupId) {
@@ -529,7 +566,7 @@ QVariantList BrushStudioModel::parameters() const {
         map.insert(QStringLiteral("min"), info.minimum);
         map.insert(QStringLiteral("max"), info.maximum);
         map.insert(QStringLiteral("default"), info.defaultValue);
-        map.insert(QStringLiteral("value"), brush::BrushEvaluator::baseParameter(m_document, info.name));
+        map.insert(QStringLiteral("value"), parameterValue(QString::fromUtf8(info.name)));
         map.insert(QStringLiteral("exposed"), isExposed(QString::fromUtf8(info.name)));
         list.append(map);
     }
@@ -537,26 +574,57 @@ QVariantList BrushStudioModel::parameters() const {
 }
 
 double BrushStudioModel::parameterValue(const QString& key) const {
-    return brush::BrushEvaluator::baseParameter(m_document, key.toStdString());
+    const std::string name = key.toStdString();
+    const auto* info = brush::findParameter(name);
+    if (!info) return 0.0;
+    if (info->scope == brush::ParameterScope::Brush) {
+        return brush::BrushEvaluator::baseParameter(m_document, name);
+    }
+    if (m_selectedIndex < 0 || std::size_t(m_selectedIndex) >= m_document.components.size()) {
+        return info->defaultValue;
+    }
+    const auto& component = m_document.components[std::size_t(m_selectedIndex)];
+    if (name == "component-opacity") return component.opacity * 100.0;
+    if (name == "component-weight") return component.weight;
+    for (const auto& setting : kTransformSettings) {
+        if (name == setting.parameter) return (component.transform.*setting.field) * setting.units;
+    }
+    return component.parameters.value(name, info->defaultValue);
 }
 
 bool BrushStudioModel::setParameterValue(const QString& key, double value) {
-    const brush::ParameterInfo* info = brush::findParameter(key.toStdString());
-    if (!info) {
-        fail(QStringLiteral("There is no brush setting called '%1'.").arg(key));
-        return false;
-    }
+    const auto* info = brush::findParameter(key.toStdString());
+    if (!info) return fail(QStringLiteral("There is no brush setting called '%1'.").arg(key));
     if (!brush::parameterInRange(*info, value)) {
-        fail(QStringLiteral("'%1' must be between %2 and %3.")
-                 .arg(key)
-                 .arg(info->minimum)
-                 .arg(info->maximum));
-        return false;
+        return fail(QStringLiteral("'%1' must be between %2 and %3.")
+                    .arg(key).arg(info->minimum).arg(info->maximum));
     }
-    if (m_document.parameters.value(info->name, info->defaultValue) == value) return true;
-    edit("Change setting", [this, info, value] {
-        m_document.setParameter(info->name, value);
-    });
+    if (info->scope == brush::ParameterScope::Component) {
+        const auto id = selectedId();
+        if (id.isEmpty()) return fail(QStringLiteral("Select a component before editing '%1'.").arg(key));
+        if (key == QStringLiteral("component-opacity")) return setComponentOpacity(id, value / 100.0);
+        if (key == QStringLiteral("component-weight")) return setComponentWeight(id, value);
+        for (const auto& setting : kTransformSettings) {
+            if (key == QLatin1String(setting.parameter)) {
+                return setComponentTransform(id, QString::fromLatin1(setting.key), value / setting.units);
+            }
+        }
+        if (key == QStringLiteral("tip-shape")) {
+            auto* component = editableComponent(id);
+            if (!component) return false;
+            if (component->kind != ComponentKind::ProceduralShape || value != std::trunc(value)) {
+                return fail(QStringLiteral("Tip shape must be a built-in shape on a procedural component."));
+            }
+            if (component->parameters.value(info->name, info->defaultValue) != value) {
+                edit("Component tip shape", [&] { component->parameters.set(info->name, value); });
+            }
+        } else {
+            return fail(QStringLiteral("There is no component editor for '%1'.").arg(key));
+        }
+    } else if (m_document.parameters.value(info->name, info->defaultValue) != value) {
+        edit("Change setting", [&] { m_document.setParameter(info->name, value); });
+    }
+    clearError();
     return true;
 }
 
@@ -573,7 +641,8 @@ QVariantMap BrushStudioModel::parameterInfo(const QString& key) const {
     map.insert(QStringLiteral("min"), info->minimum);
     map.insert(QStringLiteral("max"), info->maximum);
     map.insert(QStringLiteral("default"), info->defaultValue);
-    map.insert(QStringLiteral("value"), brush::BrushEvaluator::baseParameter(m_document, info->name));
+    map.insert(QStringLiteral("scope"), int(info->scope));
+    map.insert(QStringLiteral("value"), parameterValue(key));
     return map;
 }
 
@@ -808,9 +877,10 @@ void BrushStudioModel::setModified(bool modified) {
     emit documentChanged();
 }
 
-void BrushStudioModel::fail(const QString& message) {
+bool BrushStudioModel::fail(const QString& message) {
     m_error = message;
     emit errorChanged();
+    return false;
 }
 
 void BrushStudioModel::clearError() {

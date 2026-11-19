@@ -614,11 +614,21 @@ ValidationResult BrushDocument::validate() const {
                                                     c.maskComponentId + "'.");
             }
         }
-        if (c.opacity < 0.0 || c.opacity > 1.0) {
+        const auto& t = c.transform;
+        if (!std::isfinite(t.offsetX) || !std::isfinite(t.offsetY) ||
+            !std::isfinite(t.rotationDegrees) || !(t.scale > 0.0 && std::isfinite(t.scale)) ||
+            !(t.aspect > 0.0 && std::isfinite(t.aspect))) {
+            result.addError("invalid-transform", "Component '" + c.id +
+                            "' needs a finite transform and positive scale and aspect.");
+        }
+        if (!std::isfinite(c.opacity) || c.opacity < 0.0 || c.opacity > 1.0) {
             result.addError("opacity-range", "Component '" + c.id + "' has opacity outside 0..1.");
         }
+        if (c.blend < ComponentBlend::Normal || c.blend > ComponentBlend::Mask) {
+            result.addError("invalid-blend", "Component '" + c.id + "' has an invalid blend mode.");
+        }
         if (c.weight < 0.0 || !std::isfinite(c.weight)) {
-            result.addError("weight-range", "Component '" + c.id + "' has a negative weight.");
+            result.addError("weight-range", "Component '" + c.id + "' needs a finite, nonnegative weight.");
         }
         for (const auto& [key, value] : c.parameters.entries()) {
             const ParameterInfo* info = findParameter(key);
@@ -630,6 +640,8 @@ ValidationResult BrushDocument::validate() const {
                                 "Component '" + c.id + "' sets '" + key + "' to " +
                                     formatNumber(value) + ", outside " + formatNumber(info->minimum) +
                                     ".." + formatNumber(info->maximum) + ".");
+            } else if (key == "tip-shape" && value != std::trunc(value)) {
+                result.addError("invalid-tip-shape", "Component '" + c.id + "' needs a whole-number tip shape.");
             }
         }
     }

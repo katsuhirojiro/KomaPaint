@@ -287,9 +287,27 @@ selection, removal, and a native `.kb` round trip. Eight full brush CTest
 suites passed on Debian 12 / Qt 6.8.3, including the core membership tests
 (171 checks) and the Studio model and UI suites.
 
+## Phase B1.5.2 — truthful component settings
+
+Registry edits now route to the selected component when the setting is
+component-scoped. Transform and opacity values are converted from registry
+units into the actual component fields, and read back from those same fields.
+Invalid IDs, values, modes, and tip-shape choices produce an error before
+changing the brush or its history. Reapplying an existing valid value is a
+no-op. Validation also rejects non-finite transforms and opacity, unusable
+scale/aspect, and invalid blend and tip-shape values in raw brush data.
+
+**Validation:** the new tests reproduced a successful-looking opacity edit
+that changed nothing and an invalid opacity edit that gave no error. After
+the fix, the registry tests pass for all eight component settings, including
+checking the evaluator's draw requests. Invalid edits leave document,
+selection, dirty status, and history unchanged. All eight brush CTest suites
+passed on Debian 12 / Qt 6.8.3 (179 core checks; 46 QtTest passes in the Studio
+model suite, including setup and cleanup). This does not wire unfinished
+compositing or texture effects into either engine.
+
 ## Next
 
-B1.5.2 component settings correctness; B1.5.3 atomic `.kb` saving; B1.5.4 safe
-brush diameters; B1.5.5 resource-aware Studio undo. Only then: B2 (approved
-layout), B3 (tip editor), B4 (native saving and brush library), and B5 (isolated
-preview through the production Digital and Realistic engines).
+B1.5.3 atomic `.kb` saving; B1.5.4 safe brush diameters; B1.5.5 resource-aware
+Studio undo. Only then: B2 (approved layout), B3 (tip editor), B4 (native
+saving and brush library), and B5 (isolated production-engine preview).

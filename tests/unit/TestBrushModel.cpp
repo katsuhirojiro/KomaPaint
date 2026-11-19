@@ -5,6 +5,7 @@
 #include "brush/BrushModel.h"
 
 #include <cstdio>
+#include <limits>
 #include <cstring>
 #include <string>
 
@@ -309,6 +310,35 @@ void testUnknownAndOutOfRangeParametersAreRejected() {
     CHECK(hasIssue(result, "parameter-out-of-range"));
 }
 
+void testValidationRejectsInvalidComponentSettings() {
+    BrushDocument doc("Invalid component settings");
+    doc.addResource(makeResource("p1", 4, 4));
+    auto original = makeComponent("c1", "p1");
+    CHECK(doc.addComponent(original));
+    CHECK(doc.validate().ok());
+    auto& c = doc.components.front();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    c.opacity = nan;
+    CHECK(hasIssue(doc.validate(), "opacity-range"));
+    c = original;
+    c.transform.rotationDegrees = inf;
+    CHECK(hasIssue(doc.validate(), "invalid-transform"));
+    c = original;
+    c.transform.scale = 0.0;
+    CHECK(hasIssue(doc.validate(), "invalid-transform"));
+    c = original;
+    c.transform.offsetY = nan;
+    CHECK(hasIssue(doc.validate(), "invalid-transform"));
+    c = original;
+    c.blend = static_cast<ComponentBlend>(99);
+    CHECK(hasIssue(doc.validate(), "invalid-blend"));
+    c = original;
+    c.kind = ComponentKind::ProceduralShape;
+    c.parameters.set("tip-shape", 2.5);
+    CHECK(hasIssue(doc.validate(), "invalid-tip-shape"));
+}
+
 void testWeightedGroupNeedsWeight() {
     BrushDocument doc("Weighted");
     doc.addResource(makeResource("p1", 4, 4));
@@ -573,6 +603,7 @@ int main() {
     testMaskCycleIsDetected();
     testRemovingAMaskedComponent();
     testUnknownAndOutOfRangeParametersAreRejected();
+    testValidationRejectsInvalidComponentSettings();
     testWeightedGroupNeedsWeight();
     testResourceAccounting();
     testDynamicsAndRandomizationReplaceRatherThanAccumulate();

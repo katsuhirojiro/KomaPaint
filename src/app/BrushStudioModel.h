@@ -20,6 +20,7 @@
 #include <QVector>
 
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace komapaint {
@@ -33,7 +34,7 @@ class BrushStudioModel : public QObject {
     Q_PROPERTY(int selectedIndex READ selectedIndex WRITE setSelectedIndex NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList components READ components NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList groups READ groups NOTIFY componentsChanged)
-    Q_PROPERTY(QVariantList parameters READ parameters NOTIFY documentChanged)
+    Q_PROPERTY(QVariantList parameters READ parameters NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList exposedProperties READ exposedProperties NOTIFY exposureChanged)
     Q_PROPERTY(QVariantList componentKinds READ componentKinds CONSTANT)
     Q_PROPERTY(QVariantList selectionModes READ selectionModes CONSTANT)
@@ -87,8 +88,8 @@ public:
     Q_INVOKABLE bool removeGroup(const QString& groupId);
 
     // ---- settings ---------------------------------------------------------
-    // Every registry parameter, with its group, range, unit and current value,
-    // so the window never hard-codes a setting.
+    // Every registry parameter with its group, range, unit and current value.
+    // Component-scoped settings read and write the selected component.
     QVariantList parameters() const;
     Q_INVOKABLE double parameterValue(const QString& key) const;
     Q_INVOKABLE bool setParameterValue(const QString& key, double value);
@@ -143,8 +144,15 @@ private:
         emit exposureChanged();
         emit historyChanged();
     }
+    template <typename T>
+    bool changeSetting(const char* label, T& field, T value) {
+        if (field != value) edit(label, [&] { field = std::move(value); });
+        clearError();
+        return true;
+    }
+    brush::BrushComponent* editableComponent(const QString& id);
     void pushUndo(const char* label);
-    void fail(const QString& message);
+    bool fail(const QString& message);
     void clearError();
     void syncSelection();
 
