@@ -16,6 +16,7 @@
 #include <QVariantMap>
 
 #include "app/BrushStudioModel.h"
+#include "brush/BrushEvaluator.h"
 #include "brush/BrushFormat.h"
 #include "brush/BrushModel.h"
 
@@ -40,6 +41,7 @@ private slots:
     void componentEditingChangesTheDocument();
     void componentOrderAndSelectionFollowTheDocument();
     void groupsPickModeAndMembers();
+    void regroupedComponentsStayConsistentThroughSave();
     void settingsComeFromTheRegistry();
     void settingsRejectNonsense();
     void exposureCanBeRenamedReorderedAndReset();
@@ -173,6 +175,78 @@ void TestBrushStudioModel::groupsPickModeAndMembers() {
     // The group is what the generator draws from once it is assigned one.
     QVERIFY(model.removeGroup(group));
     QCOMPARE(int(model.groups().size()), 0);
+}
+
+void TestBrushStudioModel::regroupedComponentsStayConsistentThroughSave() {
+    BrushStudioModel model;
+    const QString a = model.selectedId();
+    const QString b = model.addComponent(int(brush::ComponentKind::Image));
+    const QString c = model.addComponent(int(brush::ComponentKind::Image));
+    QVERIFY(!b.isEmpty() && !c.isEmpty());
+    auto seed = model.document();
+    brush::ComponentGroup parent;
+    parent.id = "parent";
+    QVERIFY(seed.addGroup(parent));
+    brush::ComponentGroup child;
+    child.id = "child";
+    child.parentGroupId = parent.id;
+    child.mode = brush::SelectionMode::Sequence;
+    QVERIFY(seed.addGroup(child));
+    seed.generators.front().groupId = parent.id;
+    model.setDocument(std::move(seed));
+
+    const QString root = QStringLiteral("parent");
+    const QString nested = QStringLiteral("child");
+    QVERIFY(model.assignToGroup(a, root));
+    QVERIFY(model.assignToGroup(b, nested));
+    QVERIFY(model.assignToGroup(c, nested));
+    const auto original = model.document();
+    QVERIFY(!model.assignToGroup(b, nested)); // same assignment keeps its sequence position
+    QVERIFY(model.document() == original);
+    QVERIFY(!model.assignToGroup(a, QStringLiteral("missing")));
+    QVERIFY(model.document() == original);
+
+    QVERIFY(model.assignToGroup(a, nested));
+    const auto& doc = model.document();
+    QVERIFY(doc.group("parent")->members.empty());
+    const std::vector<std::string> nestedOrder = {b.toStdString(), c.toStdString(), a.toStdString()};
+    QCOMPARE(doc.group("child")->members, nestedOrder);
+    QCOMPARE(doc.group("child")->parentGroupId, std::string("parent"));
+    QVERIFY(doc.validate().ok());
+    const auto afterMove = doc;
+    model.undo();
+    QVERIFY(doc == original);
+    model.redo();
+    QVERIFY(doc == afterMove);
+
+    // The global row order and the group's own stamp sequence are independent.
+    QVERIFY(model.moveComponent(b, 0));
+    QCOMPARE(doc.components.front().id, b.toStdString());
+    QCOMPARE(doc.group("child")->members, nestedOrder);
+    brush::StampContext context;
+    context.stampIndex = 2;
+    const auto chosen = brush::BrushEvaluator::evaluate(doc, context);
+    QCOMPARE(chosen.size(), std::size_t(1));
+    QCOMPARE(chosen.front().componentId, a.toStdString());
+
+    QVERIFY(model.assignToGroup(a, QString{}));
+    QVERIFY(doc.component(a.toStdString())->groupId.empty());
+    QVERIFY(model.removeComponent(c));
+    QVERIFY(!doc.component(c.toStdString()));
+    QCOMPARE(doc.group("child")->members, std::vector<std::string>{b.toStdString()});
+    const auto beforeRefusedRemoval = doc;
+    QVERIFY(!model.removeGroup(root)); // active generator still uses this group
+    QVERIFY(!model.error().isEmpty());
+    QVERIFY(doc == beforeRefusedRemoval);
+    QVERIFY(doc.validate().ok());
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const auto path = dir.filePath(QStringLiteral("nested-groups.kb"));
+    QVERIFY2(model.save(path), qPrintable(model.error()));
+    BrushStudioModel loaded;
+    QVERIFY2(loaded.load(path), qPrintable(loaded.error()));
+    QVERIFY(loaded.document() == doc);
 }
 
 void TestBrushStudioModel::settingsComeFromTheRegistry() {

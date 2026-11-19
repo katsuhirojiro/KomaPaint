@@ -267,9 +267,29 @@ literal with a different type from `std::uint64_t` on Linux. The timestamp
 gap now uses the timestamp's type, with the same value and behavior. The
 pointer and synthetic tablet tests passed.
 
+**Windows CI:** [Run 44562767088](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44562767088)
+passed all 49 test executables, ZIP creation, and extracted application launch
+and GUI checks for B1 commit `45843da`.
+
+## Phase B1.5.1 — consistent group membership
+
+Studio now moves a component through the document's membership operation:
+its old group entry is removed and its new group lists it once. Ungrouping,
+adding or duplicating a grouped component, and removal keep both sides in
+agreement. A group's explicit stamp sequence is independent of the global
+component row order. Regrouping preserves parent/child links. Group deletion
+refuses to leave a generator pointing at a missing group, and document
+validation rejects duplicate membership.
+
+**Validation:** the new Qt regression reproduced the stale old membership
+before the fix. It now passes regrouping, undo/redo, reordering, nested stamp
+selection, removal, and a native `.kb` round trip. Eight full brush CTest
+suites passed on Debian 12 / Qt 6.8.3, including the core membership tests
+(171 checks) and the Studio model and UI suites.
+
 ## Next
 
-B1.5: resource-aware Studio undo, safe brush diameters, atomic `.kb` writes,
-and fixes for group membership and component settings. Then B2 (approved
+B1.5.2 component settings correctness; B1.5.3 atomic `.kb` saving; B1.5.4 safe
+brush diameters; B1.5.5 resource-aware Studio undo. Only then: B2 (approved
 layout), B3 (tip editor), B4 (native saving and brush library), and B5 (isolated
 preview through the production Digital and Realistic engines).

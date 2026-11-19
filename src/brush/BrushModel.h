@@ -238,7 +238,10 @@ public:
     // ---- groups ------------------------------------------------------------
     ComponentGroup* group(std::string_view groupId);
     const ComponentGroup* group(std::string_view groupId) const;
+    // Add a group empty; attach its members through the membership API.
     bool addGroup(ComponentGroup group);
+    bool groupHasGenerator(std::string_view groupId) const;
+    // Never leave a dangling generator target. Cascade detaches child groups.
     bool removeGroup(std::string_view groupId, bool cascade = true);
     bool addToGroup(std::string_view groupId, std::string_view componentId, int index = -1);
     bool removeFromGroup(std::string_view groupId, std::string_view componentId);

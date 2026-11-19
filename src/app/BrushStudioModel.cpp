@@ -463,22 +463,20 @@ QString BrushStudioModel::createGroup(const QString& name) {
 }
 
 bool BrushStudioModel::assignToGroup(const QString& componentId, const QString& groupId) {
-    BrushComponent* component = m_document.component(componentId.toStdString());
-    if (!component) return false;
-    if (!groupId.isEmpty() && !m_document.group(groupId.toStdString())) {
+    const std::string id = componentId.toStdString();
+    const std::string destination = groupId.toStdString();
+    const BrushComponent* component = m_document.component(id);
+    if (!component) {
+        fail(QStringLiteral("There is no component with that id."));
+        return false;
+    }
+    if (!destination.empty() && !m_document.group(destination)) {
         fail(QStringLiteral("There is no group with that id."));
         return false;
     }
-    if (QString::fromStdString(component->groupId) == groupId) return false;
-    edit("Move component to group", [this, component, groupId] {
-        component->groupId = groupId.toStdString();
-        if (auto* group = m_document.group(groupId.toStdString())) {
-            if (std::find(group->members.begin(), group->members.end(), component->id) ==
-                group->members.end()) {
-                group->members.push_back(component->id);
-            }
-        }
-    });
+    if (component->groupId == destination) return false;
+    edit("Move component to group", [&] { m_document.setComponentGroup(id, destination); });
+    clearError();
     return true;
 }
 
@@ -501,8 +499,17 @@ bool BrushStudioModel::setGroupMembersPerStamp(const QString& groupId, int count
 }
 
 bool BrushStudioModel::removeGroup(const QString& groupId) {
-    if (!m_document.group(groupId.toStdString())) return false;
-    edit("Delete group", [this, groupId] { m_document.removeGroup(groupId.toStdString()); });
+    const std::string id = groupId.toStdString();
+    if (!m_document.group(id)) {
+        fail(QStringLiteral("There is no group with that id."));
+        return false;
+    }
+    if (m_document.groupHasGenerator(id)) {
+        fail(QStringLiteral("Move or remove this group's generators before deleting it."));
+        return false;
+    }
+    edit("Delete group", [&] { m_document.removeGroup(id); });
+    clearError();
     return true;
 }
 

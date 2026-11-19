@@ -191,11 +191,19 @@ int BrushDocument::componentIndex(std::string_view componentId) const {
 bool BrushDocument::addComponent(BrushComponent c, int index) {
     if (c.id.empty()) c.id = allocateId("c");
     if (idInUse(c.id)) return false;
-    if (index < 0 || index > static_cast<int>(components.size())) {
-        components.push_back(std::move(c));
-        return true;
+    ComponentGroup* target = c.groupId.empty() ? nullptr : group(c.groupId);
+    if (!c.groupId.empty() && !target) return false;
+    if (target) target->members.push_back(c.id);
+    try {
+        if (index < 0 || static_cast<std::size_t>(index) > components.size()) {
+            components.push_back(std::move(c));
+        } else {
+            components.insert(components.begin() + index, std::move(c));
+        }
+    } catch (...) {
+        if (target) target->members.pop_back();
+        throw;
     }
-    components.insert(components.begin() + index, std::move(c));
     return true;
 }
 
@@ -212,10 +220,7 @@ bool BrushDocument::removeComponent(std::string_view componentId, bool cascade) 
     if (!dependents.empty() && !cascade) return false;
 
     // Detach from every group before erasing.
-    for (auto& g : groups) {
-        g.members.erase(std::remove(g.members.begin(), g.members.end(), std::string(componentId)),
-                        g.members.end());
-    }
+    for (auto& g : groups) std::erase(g.members, components[index].id);
     components.erase(components.begin() + index);
 
     if (cascade) {
@@ -240,18 +245,18 @@ bool BrushDocument::moveComponent(std::string_view componentId, int newIndex) {
 bool BrushDocument::setComponentGroup(std::string_view componentId, std::string_view groupId) {
     BrushComponent* c = component(componentId);
     if (!c) return false;
-    if (!groupId.empty() && !group(groupId)) return false;
-
-    for (auto& g : groups) {
-        g.members.erase(std::remove(g.members.begin(), g.members.end(), std::string(componentId)),
-                        g.members.end());
+    if (groupId.empty()) {
+        for (auto& g : groups) std::erase(g.members, c->id);
+        c->groupId.clear();
+        return true;
     }
-    c->groupId = std::string(groupId);
-    if (!groupId.empty()) {
-        ComponentGroup* target = group(groupId);
-        target->members.push_back(c->id);
-    }
-    return true;
+    const ComponentGroup* target = group(groupId);
+    if (!target) return false;
+    // Reassigning to the same group must not change its paint sequence.
+    const auto at = std::find(target->members.begin(), target->members.end(), c->id);
+    const int index = c->groupId == groupId && at != target->members.end()
+        ? static_cast<int>(at - target->members.begin()) : -1;
+    return addToGroup(groupId, componentId, index);
 }
 
 bool BrushDocument::duplicateComponent(std::string_view componentId, std::string* newId) {
@@ -261,12 +266,9 @@ bool BrushDocument::duplicateComponent(std::string_view componentId, std::string
     copy.id = allocateId("c");
     copy.name = source->name + " copy";
     const int index = componentIndex(componentId);
+    std::string created = newId ? copy.id : std::string{};
     if (!addComponent(std::move(copy), index + 1)) return false;
-    const std::string created = components[static_cast<std::size_t>(index + 1)].id;
-    if (const BrushComponent* made = component(created)) {
-        if (!made->groupId.empty()) addToGroup(made->groupId, created);
-    }
-    if (newId) *newId = created;
+    if (newId) *newId = std::move(created);
     return true;
 }
 
@@ -288,27 +290,29 @@ const ComponentGroup* BrushDocument::group(std::string_view groupId) const {
 
 bool BrushDocument::addGroup(ComponentGroup g) {
     if (g.id.empty()) g.id = allocateId("g");
-    if (idInUse(g.id)) return false;
+    if (idInUse(g.id) || !g.members.empty()) return false;
     if (!g.parentGroupId.empty() && !group(g.parentGroupId)) return false;
     groups.push_back(std::move(g));
     return true;
 }
 
+bool BrushDocument::groupHasGenerator(std::string_view groupId) const {
+    return !groupId.empty() && std::ranges::any_of(generators, [groupId](const BrushGenerator& g) {
+        return g.groupId == groupId;
+    });
+}
+
 bool BrushDocument::removeGroup(std::string_view groupId, bool cascade) {
-    ComponentGroup* target = group(groupId);
-    if (!target) return false;
+    if (!group(groupId) || groupHasGenerator(groupId)) return false;
     for (const auto& other : groups) {
         if (other.id != groupId && other.parentGroupId == groupId && !cascade) return false;
     }
     const std::string key(groupId);
-    std::vector<std::string> members = target->members;
-    for (const auto& member : members) {
-        if (BrushComponent* c = component(member)) {
-            if (c->groupId == groupId) c->groupId.clear();
-        }
+    for (auto& c : components) {
+        if (c.groupId == key) c.groupId.clear();
     }
     for (auto& other : groups) {
-        if (other.parentGroupId == groupId) other.parentGroupId.clear();
+        if (other.parentGroupId == key) other.parentGroupId.clear();
     }
     groups.erase(std::remove_if(groups.begin(), groups.end(),
                                 [&key](const ComponentGroup& g) { return g.id == key; }),
@@ -320,21 +324,19 @@ bool BrushDocument::addToGroup(std::string_view groupId, std::string_view compon
     ComponentGroup* g = group(groupId);
     BrushComponent* c = component(componentId);
     if (!g || !c) return false;
-    if (!c->groupId.empty() && c->groupId != groupId) {
-        ComponentGroup* previous = group(c->groupId);
-        if (previous) {
-            previous->members.erase(
-                std::remove(previous->members.begin(), previous->members.end(), c->id),
-                previous->members.end());
-        }
+    // Prepare the new membership before touching the old one. In particular,
+    // allocation failure must not leave the component without a group.
+    std::string targetId(groupId);
+    g->members.push_back(c->id);
+    for (auto& other : groups) {
+        if (&other != g) std::erase(other.members, c->id);
     }
-    c->groupId = std::string(groupId);
-    g->members.erase(std::remove(g->members.begin(), g->members.end(), c->id), g->members.end());
-    if (index < 0 || index > static_cast<int>(g->members.size())) {
-        g->members.push_back(c->id);
-    } else {
-        g->members.insert(g->members.begin() + index, c->id);
+    auto appended = g->members.end() - 1;
+    g->members.erase(std::remove(g->members.begin(), appended, c->id), appended);
+    if (index >= 0 && static_cast<std::size_t>(index) < g->members.size() - 1) {
+        std::rotate(g->members.begin() + index, g->members.end() - 1, g->members.end());
     }
+    c->groupId = std::move(targetId);
     return true;
 }
 
@@ -342,8 +344,8 @@ bool BrushDocument::removeFromGroup(std::string_view groupId, std::string_view c
     ComponentGroup* g = group(groupId);
     BrushComponent* c = component(componentId);
     if (!g || !c) return false;
-    g->members.erase(std::remove(g->members.begin(), g->members.end(), c->id), g->members.end());
-    if (c->groupId == groupId) c->groupId.clear();
+    if (c->groupId == groupId) return setComponentGroup(componentId, {});
+    std::erase(g->members, c->id);
     return true;
 }
 
@@ -658,7 +660,12 @@ ValidationResult BrushDocument::validate() const {
         if (g.members.empty() && !(groups.size() == 1 && groups.front().id == g.id)) {
             result.addWarning("empty-group", "Group '" + g.id + "' has no members.");
         }
+        std::set<std::string_view> seenMembers;
         for (const auto& memberId : g.members) {
+            if (!seenMembers.insert(memberId).second) {
+                result.addError("duplicate-member", "Group '" + g.id + "' lists component '" +
+                                                   memberId + "' more than once.");
+            }
             const BrushComponent* c = component(memberId);
             if (!c) {
                 result.addError("unknown-member", "Group '" + g.id + "' lists missing component '" +

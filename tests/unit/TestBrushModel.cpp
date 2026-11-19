@@ -180,12 +180,63 @@ void testGroupMembershipMismatchIsAnError() {
     g.name = "G";
     doc.addGroup(g);
     BrushComponent c = makeComponent("c1", "p1");
-    c.groupId = "g";     // claims membership...
-    doc.addComponent(c);  // ...but the group does not list it
+    doc.addComponent(c);
+    // Construct an inconsistent raw document, bypassing the mutation API.
+    doc.component("c1")->groupId = "g";
 
     const ValidationResult result = doc.validate();
     CHECK(!result.ok());
     CHECK(hasIssue(result, "group-membership"));
+}
+
+void testMembershipInsertionReorderingAndRepair() {
+    BrushDocument doc("Grouped");
+    doc.addResource(makeResource("p1", 4, 4));
+    ComponentGroup parent;
+    parent.id = "parent";
+    CHECK(doc.addGroup(parent));
+    ComponentGroup child;
+    child.id = "child";
+    child.parentGroupId = parent.id;
+    CHECK(doc.addGroup(child));
+
+    auto c = makeComponent("c1", "p1");
+    c.groupId = "missing";
+    CHECK(!doc.addComponent(c));
+    CHECK(doc.components.empty());
+    c.groupId = child.id;
+    CHECK(doc.addComponent(c));
+    std::string copy;
+    CHECK(doc.duplicateComponent(c.id, &copy));
+    CHECK((doc.group(child.id)->members == std::vector<std::string>{c.id, copy}));
+    CHECK(doc.addToGroup(child.id, copy, 0));
+    CHECK((doc.group(child.id)->members == std::vector<std::string>{copy, c.id}));
+    CHECK(doc.setComponentGroup(copy, child.id));
+    CHECK((doc.group(child.id)->members == std::vector<std::string>{copy, c.id}));
+
+    // The validator also protects loaded data. Regrouping repairs all copies
+    // of this membership without changing another component's affiliation.
+    doc.group(child.id)->members.push_back(copy);
+    CHECK(hasIssue(doc.validate(), "duplicate-member"));
+    doc.group(parent.id)->members.push_back(copy);
+    CHECK(hasIssue(doc.validate(), "group-membership"));
+    CHECK(doc.setComponentGroup(copy, parent.id));
+    CHECK((doc.group(child.id)->members == std::vector<std::string>{c.id}));
+    CHECK((doc.group(parent.id)->members == std::vector<std::string>{copy}));
+    CHECK(doc.validate().ok());
+
+    ComponentGroup unilateral;
+    unilateral.id = "unilateral";
+    unilateral.members.push_back(c.id);
+    const auto before = doc;
+    CHECK(!doc.addGroup(unilateral));
+    CHECK(!doc.removeGroup(parent.id, false));
+    CHECK(doc == before);
+    CHECK(doc.removeGroup(parent.id));
+    CHECK(doc.group(child.id)->parentGroupId.empty());
+    CHECK(doc.component(copy)->groupId.empty());
+    CHECK(doc.component(c.id)->groupId == child.id);
+    CHECK(doc.validate().ok());
 }
 
 void testRemovingAComponentDetachesItFromGroups() {
@@ -517,6 +568,7 @@ int main() {
     testOrdering();
     testGroupsAndMembershipStayConsistent();
     testGroupMembershipMismatchIsAnError();
+    testMembershipInsertionReorderingAndRepair();
     testRemovingAComponentDetachesItFromGroups();
     testMaskCycleIsDetected();
     testRemovingAMaskedComponent();
