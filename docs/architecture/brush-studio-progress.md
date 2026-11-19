@@ -348,7 +348,10 @@ sparse-tile amplification guard).
 covered native and preset round trips, exact keyboard entry, off-canvas
 coordinates, overflow rejection, memory-pressure rollback, and redo after a
 failed stroke. Seventeen relevant Linux CTest suites passed (56.65 s); both
-engine suites also passed UBSan with float-cast-overflow checks.
+engine suites also passed UBSan with float-cast-overflow checks. Windows
+[44569823210](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44569823210)
+passed build, 49 test executables, benchmark smoke, and the extracted ZIP
+launch checks for `2a5b404`.
 
 ## Phase B1.5.5 — resource-aware Studio undo
 
@@ -376,7 +379,14 @@ of a resource, pressure rejection without losing redo, allocation-free replay,
 grouped steps, dirty state, and exposure transactions. All 49 Linux CTest
 suites passed (136.44 s; 51 Studio model QtTest passes including setup and
 cleanup) on Debian 12 / Qt 6.8.3. The packaged-resource self-check passed all
-8 launch/GUI checks with zero QML warnings.
+8 launch/GUI checks with zero QML warnings. The isolated large-history test
+peaked at 127,836 KiB process RSS on this runner (including Qt and the image).
+
+Windows [44571089385](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44571089385)
+passed build, all 49 test executables (51 Studio model QtTest passes), benchmark
+smoke, deployment, and extracted-package GUI checks for `9130f97`. The
+[Windows human-test ZIP](https://github.com/katsuhirojiro/KomaPaint/actions/runs/44571089385/artifacts/14554279238)
+is ready for tablet and artist testing.
 
 ## Next
 
