@@ -53,6 +53,7 @@ private slots:
     void undoAndRedoRestoreExactly();
     void saveAndLoadRoundTrip();
     void anUnsaveableBrushIsRefused();
+    void failedOverwriteLeavesUnicodeBrushAndDraftIntact();
     void aCorruptFileChangesNothing();
 };
 
@@ -581,6 +582,41 @@ void TestBrushStudioModel::anUnsaveableBrushIsRefused() {
     QVERIFY(!model.save(dir.filePath(QStringLiteral("broken.kb"))));
     QVERIFY(model.error().contains(QStringLiteral("cannot be saved")));
     QVERIFY(!QFile::exists(dir.filePath(QStringLiteral("broken.kb"))));
+}
+
+void TestBrushStudioModel::failedOverwriteLeavesUnicodeBrushAndDraftIntact() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const auto path = dir.filePath(QStringLiteral("\u7b46 \u00e9.kb"));
+    BrushStudioModel model;
+    model.setName(QStringLiteral("Original"));
+    QVERIFY2(model.save(path), qPrintable(model.error()));
+    const auto original = model.document();
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const auto originalBytes = file.readAll();
+    file.close();
+
+    auto broken = original;
+    broken.components.front().resourceId.clear();
+    broken.components.front().kind = brush::ComponentKind::Image;
+    model.setDocument(broken);
+    QVERIFY(!model.save(path));
+    QVERIFY(model.document() == broken);
+    QVERIFY(model.isModified());
+    QVERIFY(!model.error().isEmpty());
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), originalBytes);
+    file.close();
+    QCOMPARE(QDir(dir.path()).entryList(QDir::Files | QDir::Hidden).size(), 1);
+
+    BrushStudioModel restored;
+    QVERIFY2(restored.load(path), qPrintable(restored.error()));
+    QVERIFY(restored.document() == original);
+    restored.setName(QStringLiteral("Next draft"));
+    QVERIFY2(restored.save(path), qPrintable(restored.error()));
+    QVERIFY2(model.load(path), qPrintable(model.error()));
+    QCOMPARE(model.name(), QStringLiteral("Next draft"));
 }
 
 void TestBrushStudioModel::aCorruptFileChangesNothing() {

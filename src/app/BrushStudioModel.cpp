@@ -152,7 +152,7 @@ bool BrushStudioModel::load(const QString& path) {
     BrushDocument loaded;
     brush::DecodeResult result;
     std::string failure;
-    if (!brush::loadBrushFile(QFileInfo(path).absoluteFilePath().toStdString(), &loaded,
+    if (!brush::loadBrushFile(QFileInfo(path).filesystemAbsoluteFilePath(), &loaded,
                               &result, &failure)) {
         fail(QString::fromStdString(failure.empty() ? result.error : failure));
         return false;
@@ -165,19 +165,9 @@ bool BrushStudioModel::load(const QString& path) {
 }
 
 bool BrushStudioModel::save(const QString& path) {
-    // A file that cannot be read back is worse than no file: the artist loses
-    // work and finds out later. The same validation that guards loading runs
-    // here first, and its own sentence is what the window shows.
-    const brush::ValidationResult valid = m_document.validate();
-    if (!valid.ok()) {
-        fail(QString::fromStdString("This brush cannot be saved yet: " + valid.summary()));
-        return false;
-    }
     std::string failure;
-    if (!brush::saveBrushFile(QFileInfo(path).absoluteFilePath().toStdString(), m_document,
-                              &failure)) {
-        fail(QString::fromStdString(failure));
-        return false;
+    if (!brush::saveBrushFile(QFileInfo(path).filesystemAbsoluteFilePath(), m_document, &failure)) {
+        return fail(QString::fromStdString(failure));
     }
     clearError();
     m_modified = false;

@@ -306,8 +306,26 @@ passed on Debian 12 / Qt 6.8.3 (179 core checks; 46 QtTest passes in the Studio
 model suite, including setup and cleanup). This does not wire unfinished
 compositing or texture effects into either engine.
 
+## Phase B1.5.3 — atomic native brush saves
+
+The Qt-free `.kb` writer stages output in an exclusively created sibling file
+on the destination filesystem. It checks writes, flush/sync and close, verifies
+that the staged bytes match and decode to the intended brush, then replaces
+with a same-directory rename. No unlink-first or direct-write fallback is
+allowed. Studio uses native filesystem paths for Unicode filenames and only
+marks the draft clean after the commit succeeds. The replacement is atomic on
+filesystems that support rename-over-file; this is not a power-loss guarantee
+for the enclosing directory.
+
+**Validation:** 506 format checks, including injected short write, corrupt
+readback and replace failure over a valid Unicode-named brush. Each leaves
+its original bytes loadable and removes the temp file. Also covered actual
+rename failure to a directory, missing parent, invalid brush, and successful
+replacement. Studio tests verify unchanged dirty draft/file on failed save.
+All eight brush CTest suites passed on Debian 12 / Qt 6.8.3.
+
 ## Next
 
-B1.5.3 atomic `.kb` saving; B1.5.4 safe brush diameters; B1.5.5 resource-aware
-Studio undo. Only then: B2 (approved layout), B3 (tip editor), B4 (native
-saving and brush library), and B5 (isolated production-engine preview).
+B1.5.4 safe brush diameters; B1.5.5 resource-aware Studio undo. Only then:
+B2 (approved layout), B3 (tip editor), B4 (brush library integration), and B5
+(isolated production-engine preview).

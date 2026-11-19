@@ -1,10 +1,14 @@
 // The native .kb container: round-trip, determinism and every way a file can
 // be wrong. Qt-free, so it runs with nothing but a C++20 compiler.
+#include "brush/BrushFile_p.h"
 #include "brush/BrushFormat.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -324,21 +328,91 @@ void testFileRoundTrip() {
 
     const BrushDocument original = makeDocument();
     std::string error;
-    CHECK(saveBrushFile(path.string(), original, &error));
+    CHECK(saveBrushFile(path, original, &error));
 
     BrushDocument loaded;
     DecodeResult result;
     std::string loadError;
-    CHECK(loadBrushFile(path.string(), &loaded, &result, &loadError));
+    CHECK(loadBrushFile(path, &loaded, &result, &loadError));
     CHECK(loaded == original);
 
     // Loading a file that is not there reports a reason instead of crashing.
     BrushDocument missing;
-    CHECK(!loadBrushFile(absent.string(), &missing, &result, &loadError));
+    CHECK(!loadBrushFile(absent, &missing, &result, &loadError));
     CHECK(!loadError.empty());
 
     std::error_code ignored;
     fs::remove(path, ignored);
+}
+
+void testAtomicSavePreservesExistingBrushOnFailure() {
+    namespace fs = std::filesystem;
+    const auto token = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto dir = fs::temp_directory_path() / ("komapaint-atomic-brush-" + std::to_string(token));
+    std::error_code ec;
+    const bool created = fs::create_directory(dir, ec);
+    CHECK(created && !ec);
+    if (!created || ec) return;
+    struct Cleanup {
+        fs::path path;
+        ~Cleanup() { std::error_code ignored; fs::remove_all(path, ignored); }
+    } cleanup{dir};
+    const auto path = dir / fs::path(u8"\u7b46 \u00e9.kb");
+    const auto read = [&] {
+        std::ifstream file(path, std::ios::binary);
+        return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(file), {});
+    };
+    const auto entries = [&] { return std::distance(fs::directory_iterator(dir), fs::directory_iterator{}); };
+    const auto original = makeDocument();
+    auto replacement = makeDocument();
+    replacement.name = "Replacement brush";
+    std::string error;
+    CHECK(saveBrushFile(path, original, &error));
+    const auto originalBytes = read();
+    CHECK(originalBytes == encodeBrush(original));
+
+    using detail::SaveFault;
+    const std::pair<SaveFault, const char*> faultCases[] = {
+        {SaveFault::ShortWrite, "Could not finish writing"},
+        {SaveFault::BadReadback, "did not match"},
+        {SaveFault::Replace, "Could not replace"},
+    };
+    for (const auto& [fault, reason] : faultCases) {
+        CHECK(!detail::saveBrushFile(path, replacement, &error, fault));
+        CHECK(error.find(reason) != std::string::npos);
+        CHECK(read() == originalBytes);
+        BrushDocument loaded;
+        CHECK(loadBrushFile(path, &loaded, nullptr, &error));
+        CHECK(loaded == original);
+        CHECK(entries() == 1); // no staged file left after any failure
+    }
+
+    auto invalid = replacement;
+    invalid.resources.clear();
+    CHECK(!saveBrushFile(path, invalid, &error));
+    CHECK(error.find("cannot be saved") != std::string::npos);
+    CHECK(read() == originalBytes);
+    CHECK(entries() == 1);
+
+    // An actual rename error, in addition to the injected failure over a
+    // valid existing brush. A directory at the destination stays intact.
+    const auto directoryDestination = dir / "not-a-file.kb";
+    CHECK(fs::create_directory(directoryDestination));
+    CHECK(!saveBrushFile(directoryDestination, replacement, &error));
+    CHECK(error.find("Could not replace") != std::string::npos);
+    CHECK(fs::is_directory(directoryDestination));
+    CHECK(entries() == 2);
+    CHECK(!saveBrushFile(dir / "missing" / "brush.kb", replacement, &error));
+    CHECK(!error.empty());
+    CHECK(entries() == 2);
+
+    CHECK(saveBrushFile(path, replacement, &error));
+    CHECK(error.empty());
+    CHECK(read() == encodeBrush(replacement));
+    BrushDocument loaded;
+    CHECK(loadBrushFile(path, &loaded, nullptr, &error));
+    CHECK(loaded == replacement);
+    CHECK(entries() == 2);
 }
 
 void testNoArbitraryComponentLimit() {
@@ -443,6 +517,7 @@ int main() {
     testRejectsIncoherentBrush();
     testFailedDecodeLeavesTargetUntouched();
     testFileRoundTrip();
+    testAtomicSavePreservesExistingBrushOnFailure();
     testNoArbitraryComponentLimit();
     testRandomCorruptionNeverCrashes();
     testEmptyDocumentIsStorable();

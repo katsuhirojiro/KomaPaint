@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstring>
-#include <fstream>
 
 namespace komapaint::brush {
 namespace {
@@ -754,41 +753,6 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
 
     report->ok = true;
     if (out) *out = std::move(doc);
-    return true;
-}
-
-// ---- files -----------------------------------------------------------------
-
-bool saveBrushFile(const std::string& path, const BrushDocument& document, std::string* error) {
-    const std::vector<std::uint8_t> bytes = encodeBrush(document);
-    std::ofstream stream(path, std::ios::binary | std::ios::trunc);
-    if (!stream) {
-        if (error) *error = "could not open '" + path + "' for writing";
-        return false;
-    }
-    stream.write(reinterpret_cast<const char*>(bytes.data()),
-                 static_cast<std::streamsize>(bytes.size()));
-    if (!stream) {
-        if (error) *error = "could not write '" + path + "'";
-        return false;
-    }
-    return true;
-}
-
-bool loadBrushFile(const std::string& path, BrushDocument* out, DecodeResult* result,
-                   std::string* error) {
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream) {
-        if (error) *error = "could not open '" + path + "'";
-        return false;
-    }
-    std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(stream)),
-                                    std::istreambuf_iterator<char>());
-    DecodeResult local;
-    if (!decodeBrush(bytes.data(), bytes.size(), out, result ? result : &local)) {
-        if (error) *error = (result ? result->error : local.error);
-        return false;
-    }
     return true;
 }
 

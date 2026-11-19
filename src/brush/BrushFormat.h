@@ -18,6 +18,7 @@
 #include "brush/BrushModel.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -40,9 +41,11 @@ std::vector<std::uint8_t> encodeBrush(const BrushDocument& document);
 bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
                  DecodeResult* result);
 
-bool saveBrushFile(const std::string& path, const BrushDocument& document,
+// Validates and replaces the file atomically using a temporary sibling. A
+// failed save leaves any existing destination untouched.
+bool saveBrushFile(const std::filesystem::path& path, const BrushDocument& document,
                    std::string* error = nullptr);
-bool loadBrushFile(const std::string& path, BrushDocument* out, DecodeResult* result,
+bool loadBrushFile(const std::filesystem::path& path, BrushDocument* out, DecodeResult* result,
                    std::string* error = nullptr);
 
 // Exposed for tests: CRC-32 (IEEE 802.3) over an arbitrary byte range.
