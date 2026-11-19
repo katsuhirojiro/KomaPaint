@@ -24,6 +24,7 @@ std::uint64_t steadyNowNs() noexcept
 
 std::uint64_t eventTimestampNs(quint64 qtTimestampMs) noexcept
 {
+    constexpr std::uint64_t reanchorGapNs = 1'000;
     static std::mutex s_mutex;
     static bool s_hasQtAnchor = false;
     static quint64 s_qtAnchorMs = 0;
@@ -37,14 +38,14 @@ std::uint64_t eventTimestampNs(quint64 qtTimestampMs) noexcept
         if (!s_hasQtAnchor || qtTimestampMs < s_qtAnchorMs) {
             s_hasQtAnchor = true;
             s_qtAnchorMs = qtTimestampMs;
-            s_wallAnchorNs = std::max(nowNs, s_lastOutNs + 1'000ULL);
+            s_wallAnchorNs = std::max(nowNs, s_lastOutNs + reanchorGapNs);
         }
         std::uint64_t candidate =
             s_wallAnchorNs + static_cast<std::uint64_t>(qtTimestampMs - s_qtAnchorMs) * 1'000'000ULL;
         // Re-anchor if the Qt clock drifted behind real wall time (e.g. after long waits).
         if (candidate + 50'000'000ULL < nowNs) {
             s_qtAnchorMs = qtTimestampMs;
-            s_wallAnchorNs = std::max(nowNs, s_lastOutNs + 1'000ULL);
+            s_wallAnchorNs = std::max(nowNs, s_lastOutNs + reanchorGapNs);
             candidate = s_wallAnchorNs;
         }
         if (candidate < s_lastOutNs) {
