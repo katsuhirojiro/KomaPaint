@@ -35,6 +35,7 @@ class BrushStudioModel : public QObject {
     Q_PROPERTY(int selectedIndex READ selectedIndex WRITE setSelectedIndex NOTIFY selectionChanged)
     Q_PROPERTY(QVariantList components READ components NOTIFY componentsChanged)
     Q_PROPERTY(QVariantMap selectedComponent READ selectedComponent NOTIFY componentsChanged)
+    Q_PROPERTY(bool canImportTipImage READ canImportTipImage NOTIFY componentsChanged)
     Q_PROPERTY(int componentCount READ componentCount NOTIFY componentsChanged)
     Q_PROPERTY(int hiddenComponentCount READ hiddenComponentCount NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList groups READ groups NOTIFY componentsChanged)
@@ -84,6 +85,8 @@ public:
     QVariantList components() const;
     QVariantMap selectedComponent() const;
     const brush::BrushResource* selectedResource() const;
+    bool canImportTipImage() const;
+    Q_INVOKABLE bool importTipImage(const QUrl& url);
     int componentCount() const { return static_cast<int>(m_document.components.size()); }
     int hiddenComponentCount() const;
     Q_INVOKABLE bool selectComponentInMode(const QString& mode);

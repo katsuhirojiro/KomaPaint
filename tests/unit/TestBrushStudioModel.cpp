@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QLocale>
 #include <QSet>
 #include <QSignalSpy>
@@ -47,6 +48,7 @@ private slots:
     void componentEditingChangesTheDocument();
     void componentOrderAndSelectionFollowTheDocument();
     void componentModesDescribeRealResources();
+    void importsTipPixelsAsOneUndoableEdit();
     void groupsPickModeAndMembers();
     void regroupedComponentsStayConsistentThroughSave();
     void settingsComeFromTheRegistry();
@@ -240,6 +242,41 @@ void TestBrushStudioModel::componentModesDescribeRealResources() {
     QVERIFY(model.selectComponentInMode(QStringLiteral("texture")));
     QCOMPARE(model.selectedId(), texture);
     QCOMPARE(model.retainedStorage().historyStates, std::size_t(2));
+}
+
+void TestBrushStudioModel::importsTipPixelsAsOneUndoableEdit() {
+    BrushStudioModel model;
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    const QString filename = files.filePath(QStringLiteral("stamp.png"));
+    QImage image(2, 1, QImage::Format_RGBA8888);
+    image.setPixelColor(0, 0, QColor(100, 50, 12, 80));
+    image.setPixelColor(1, 0, QColor(8, 220, 130, 255));
+    QVERIFY(image.save(filename));
+    const auto url = QUrl::fromLocalFile(filename);
+    QVERIFY(!model.importTipImage(url)); // select a bitmap component, not a procedural one
+    QVERIFY(!model.addComponent(int(brush::ComponentKind::Image)).isEmpty());
+    QVERIFY(model.canImportTipImage());
+    const auto before = model.document();
+    QVERIFY2(model.importTipImage(url), qPrintable(model.error()));
+    QVERIFY(model.selectedResource());
+    QCOMPARE(model.selectedResource()->kind, brush::ResourceKind::Rgba8);
+    const std::vector<std::uint8_t> imported{100, 50, 12, 80, 8, 220, 130, 255};
+    QCOMPARE(model.selectedResource()->pixels(), imported);
+    QCOMPARE(model.document().resources.size(), std::size_t(1));
+    const auto after = model.document();
+    model.undo();
+    QVERIFY(model.document() == before && model.canRedo());
+    QVERIFY(QFile::remove(filename));
+    QVERIFY(!model.importTipImage(url));
+    QVERIFY(model.document() == before && model.canRedo());
+    model.redo();
+    QVERIFY(model.document() == after);
+    const auto saved = QUrl::fromLocalFile(files.filePath(QStringLiteral("stamp.kb")));
+    QVERIFY(model.saveDraft(saved));
+    BrushStudioModel reloaded;
+    QVERIFY(reloaded.openDraft(saved));
+    QVERIFY(reloaded.document() == after);
 }
 
 void TestBrushStudioModel::groupsPickModeAndMembers() {
@@ -1018,5 +1055,5 @@ void TestBrushStudioModel::aCorruptFileChangesNothing() {
     QVERIFY(!model.error().isEmpty());
 }
 
-QTEST_MAIN(TestBrushStudioModel)
+QTEST_GUILESS_MAIN(TestBrushStudioModel)
 #include "TestBrushStudioModel.moc"

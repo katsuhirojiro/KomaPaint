@@ -4,14 +4,17 @@
 #include "../canvas/MemoryAvailability.h"
 
 #include <QFileInfo>
+#include <QImageReader>
 #include <QLocale>
 #include <QUuid>
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iterator>
 #include <limits>
 #include <new>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -417,20 +420,25 @@ bool kindNeedsPixels(ComponentKind kind) {
     }
 }
 
-brush::BrushResource makeDotResource(const QString& name) {
+bool isColourStamp(ComponentKind kind) {
+    return kind == ComponentKind::Image || kind == ComponentKind::ColourImage;
+}
+
+brush::BrushResource makeDotResource(const QString& name, bool colour) {
     brush::BrushResource resource;
     resource.name = name.toStdString();
-    resource.kind = brush::ResourceKind::Grayscale8;
+    resource.kind = colour ? brush::ResourceKind::Rgba8 : brush::ResourceKind::Grayscale8;
     resource.width = 32;
     resource.height = 32;
-    std::vector<std::uint8_t> pixels(32u * 32u);
+    std::vector<std::uint8_t> pixels(resource.expectedBytes());
     const double centre = 15.5;
     const double radius = 15.5;
     for (int y = 0; y < 32; ++y) {
         for (int x = 0; x < 32; ++x) {
             const double distance = std::hypot(double(x) - centre, double(y) - centre);
             const double coverage = std::clamp(1.0 - distance / radius, 0.0, 1.0);
-            pixels[std::size_t(y) * 32u + std::size_t(x)] =
+            const auto index = std::size_t(y) * 32u + std::size_t(x);
+            pixels[colour ? index * 4 + 3 : index] =
                 static_cast<std::uint8_t>(std::lround(coverage * 255.0));
         }
     }
@@ -439,6 +447,65 @@ brush::BrushResource makeDotResource(const QString& name) {
 }
 
 } // namespace
+
+bool BrushStudioModel::canImportTipImage() const {
+    if (m_selectedIndex < 0 || std::size_t(m_selectedIndex) >= m_document.components.size()) return false;
+    const auto kind = m_document.components[std::size_t(m_selectedIndex)].kind;
+    return kind == ComponentKind::Tip || isColourStamp(kind);
+}
+
+bool BrushStudioModel::importTipImage(const QUrl& url) try {
+    if (!canImportTipImage()) return fail(tr("Select a Bitmap Tip or an Image component first."));
+    if (!url.isLocalFile() || url.toLocalFile().isEmpty()) return fail(tr("Choose a local image file."));
+    const QString path = url.toLocalFile();
+    const auto index = std::size_t(m_selectedIndex);
+    const bool colour = isColourStamp(m_document.components[index].kind);
+    QImageReader reader(path);
+    reader.setAutoTransform(true);
+    const auto size = reader.size();
+    if (!size.isValid() || size.isEmpty()) return fail(tr("Could not read image size: %1").arg(reader.errorString()));
+    // Allow space for the decoder, 8-bit conversion and immutable resource.
+    // The decoder can still fail explicitly on this system; never downsample.
+    const auto pixels = std::uint64_t(size.width()) * std::uint64_t(size.height());
+    if (pixels > std::numeric_limits<std::size_t>::max() / 16 ||
+        !systemMemoryAvailable(static_cast<std::size_t>(pixels) * 16))
+        return fail(tr("Not enough memory to import the full-size tip image."));
+    auto image = reader.read();
+    if (image.isNull()) return fail(tr("Could not read the tip image: %1").arg(reader.errorString()));
+    // Tip: coverage from alpha, or luminance for an opaque image.
+    // Image / Colour Image: keep the original colour and coverage.
+    const bool rgba = colour || image.hasAlphaChannel();
+    image = std::move(image).convertToFormat(rgba ? QImage::Format_RGBA8888 : QImage::Format_Grayscale8);
+    if (image.isNull()) return fail(tr("Not enough memory to convert the tip image."));
+    brush::BrushResource resource;
+    resource.name = QFileInfo(path).fileName().toStdString();
+    resource.kind = rgba ? brush::ResourceKind::Rgba8 : brush::ResourceKind::Grayscale8;
+    resource.width = image.width();
+    resource.height = image.height();
+    const auto bytes = resource.expectedBytes();
+    if (!bytes || bytes > std::numeric_limits<std::uint32_t>::max())
+        return fail(tr("The tip image does not fit the .kb v1 pixel representation."));
+    std::vector<std::uint8_t> buffer(bytes);
+    const auto stride = bytes / std::size_t(resource.height);
+    for (int row = 0; row < resource.height; ++row)
+        std::memcpy(buffer.data() + std::size_t(row) * stride, image.constScanLine(row), stride);
+    resource.setPixels(std::move(buffer));
+    return edit("Import tip image", [&] {
+        auto& component = m_document.components[index];
+        const auto oldResource = component.resourceId;
+        resource.id = m_document.allocateId("r");
+        component.resourceId = resource.id;
+        if (!m_document.addResource(std::move(resource))) return false;
+        // Do not rewrite a source shared with another component or an undo step.
+        if (!oldResource.empty() && m_document.resourceUsage(oldResource) == 0)
+            std::erase_if(m_document.resources, [&](const auto& asset) { return asset.id == oldResource; });
+        return true;
+    });
+} catch (const std::bad_alloc&) {
+    return fail(tr("Not enough memory to import the tip image."));
+} catch (const std::length_error&) {
+    return fail(tr("This tip image is too large to import on this system."));
+}
 
 QString BrushStudioModel::addComponent(int kind) {
     if (kind < 0 || kind >= int(std::size(kComponentKinds))) {
@@ -456,7 +523,7 @@ QString BrushStudioModel::addComponent(int kind) {
             component.parameters.set("tip-shape", 0.0);
         }
         if (kindNeedsPixels(componentKind)) {
-            brush::BrushResource resource = makeDotResource(QStringLiteral("Dot"));
+            brush::BrushResource resource = makeDotResource(QStringLiteral("Dot"), isColourStamp(componentKind));
             resource.id = m_document.allocateId("r");
             component.resourceId = resource.id;
             if (!m_document.addResource(std::move(resource))) return false;
