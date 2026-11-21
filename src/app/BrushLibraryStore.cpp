@@ -1,5 +1,7 @@
 #include "BrushLibraryStore.h"
 #include "BrushSettings.h"
+#include "brush/BrushFormat.h"
+#include "canvas/MemoryAvailability.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -10,7 +12,11 @@
 #include <QSaveFile>
 #include <QUuid>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
+#include <new>
+#include <stdexcept>
 
 #ifdef Q_OS_WIN
 #include <io.h>
@@ -62,6 +68,28 @@ bool readOptionalBool(const QJsonObject& object, const char* key, bool* result)
     return true;
 }
 
+bool isNativeKey(const QString& key)
+{
+    return key.size() == 64 && std::all_of(key.cbegin(), key.cend(), [](QChar c) {
+        return (c >= u'0' && c <= u'9') || (c >= u'a' && c <= u'f');
+    });
+}
+
+QString nativeKey(const QByteArray& bytes)
+{
+    return QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+}
+
+bool syncFile(QSaveFile& file)
+{
+    if (!file.flush()) return false;
+#ifdef Q_OS_WIN
+    return _commit(file.handle()) == 0;
+#else
+    return ::fsync(file.handle()) == 0;
+#endif
+}
+
 QJsonObject entryToJson(const BrushEntryData& entry)
 {
     QJsonObject obj;
@@ -69,30 +97,46 @@ QJsonObject entryToJson(const BrushEntryData& entry)
     obj.insert(QStringLiteral("name"), entry.name);
     obj.insert(QStringLiteral("category"), entry.category);
     obj.insert(QStringLiteral("builtIn"), entry.builtIn);
-    obj.insert(QStringLiteral("defaults"), BrushLibraryStore::valuesToJson(entry.defaults));
-    obj.insert(QStringLiteral("current"), BrushLibraryStore::valuesToJson(entry.current));
+    if (entry.isNative()) {
+        QJsonObject ref{{QStringLiteral("sha256"), entry.nativeAssetKey}};
+        if (!entry.nativeUpdateId.isEmpty()) ref.insert(QStringLiteral("updateId"), entry.nativeUpdateId);
+        obj.insert(QStringLiteral("nativeBrush"), ref);
+    } else {
+        obj.insert(QStringLiteral("defaults"), BrushLibraryStore::valuesToJson(entry.defaults));
+        obj.insert(QStringLiteral("current"), BrushLibraryStore::valuesToJson(entry.current));
+    }
     return obj;
 }
 
-bool entryFromJson(const QJsonObject& obj, BrushEntryData* out)
+bool entryFromJson(const QJsonObject& obj, BrushEntryData* out, bool allowNative)
 {
     if (!out) return false;
     const QString id = obj.value(QStringLiteral("id")).toString().trimmed();
     const QString name = obj.value(QStringLiteral("name")).toString().trimmed();
     const QString category = obj.value(QStringLiteral("category")).toString().trimmed();
     if (id.isEmpty() || name.isEmpty()) return false;
-    const auto defVal = obj.value(QStringLiteral("defaults"));
-    const auto curVal = obj.value(QStringLiteral("current"));
-    if (!defVal.isObject() || !curVal.isObject()) return false;
-    BrushPresetValues defaults, current;
-    if (!BrushLibraryStore::parseValues(defVal.toObject(), &defaults)) return false;
-    if (!BrushLibraryStore::parseValues(curVal.toObject(), &current)) return false;
     out->id = id;
     out->name = name;
     out->category = category.isEmpty() ? QStringLiteral("Custom") : category;
     out->builtIn = obj.value(QStringLiteral("builtIn")).toBool(false);
-    out->defaults = std::move(defaults);
-    out->current = std::move(current);
+    const auto nativeValue = obj.value(QStringLiteral("nativeBrush"));
+    if (!nativeValue.isUndefined()) {
+        if (!allowNative || !nativeValue.isObject() || out->builtIn) return false;
+        const auto ref = nativeValue.toObject();
+        out->nativeAssetKey = ref.value(QStringLiteral("sha256")).toString();
+        if (!isNativeKey(out->nativeAssetKey)) return false;
+        const auto updateId = ref.value(QStringLiteral("updateId"));
+        if (!updateId.isUndefined() && !updateId.isString()) return false;
+        out->nativeUpdateId = updateId.toString();
+        out->defaults.executableTool = QStringLiteral("brush");
+        out->current = out->defaults;
+    } else {
+        const auto defVal = obj.value(QStringLiteral("defaults"));
+        const auto curVal = obj.value(QStringLiteral("current"));
+        if (!defVal.isObject() || !curVal.isObject() ||
+            !BrushLibraryStore::parseValues(defVal.toObject(), &out->defaults) ||
+            !BrushLibraryStore::parseValues(curVal.toObject(), &out->current)) return false;
+    }
     return true;
 }
 
@@ -116,7 +160,7 @@ QJsonObject collectionToJson(const EngineCollectionData& col)
 }
 
 bool collectionFromJson(const QJsonObject& obj, int forcedTraditionalMedia,
-                        EngineCollectionData* out)
+                        EngineCollectionData* out, bool allowNative = false)
 {
     if (!out) return false;
     const auto tabsVal = obj.value(QStringLiteral("tabs"));
@@ -136,7 +180,7 @@ bool collectionFromJson(const QJsonObject& obj, int forcedTraditionalMedia,
         for (const auto& itemVal : bVal.toArray()) {
             if (!itemVal.isObject()) return false;
             BrushEntryData entry;
-            if (!entryFromJson(itemVal.toObject(), &entry)) return false;
+            if (!entryFromJson(itemVal.toObject(), &entry, allowNative)) return false;
             if (forcedTraditionalMedia >= 0) {
                 entry.defaults.traditionalMedia = (forcedTraditionalMedia != 0);
                 entry.current.traditionalMedia = (forcedTraditionalMedia != 0);
@@ -478,6 +522,63 @@ bool BrushLibraryStore::loadBundledCollections(const QJsonObject& root,
     return true;
 }
 
+QString BrushLibraryStore::nativeFilePath(const QString& libraryPath, const QString& key)
+{
+    if (libraryPath.isEmpty() || !isNativeKey(key)) return {};
+    const QFileInfo manifest(libraryPath);
+    return manifest.dir().filePath(manifest.fileName() + QStringLiteral(".assets/") + key + QStringLiteral(".kb"));
+}
+
+bool BrushLibraryStore::readNativeFile(const QString& path, const QString& expectedKey,
+                                       brush::BrushDocument* out, QByteArray* original,
+                                       QString* error) try
+{
+    QFile file(path);
+    if (path.isEmpty() || !file.open(QIODevice::ReadOnly))
+        return fail(error, QStringLiteral("Could not open the native .kb file: %1").arg(file.errorString()));
+    const auto length = file.size();
+    if (length < 0 || std::uint64_t(length) > std::numeric_limits<std::size_t>::max())
+        return fail(error, QStringLiteral("This .kb file is too large to read on this system."));
+    if (!systemMemoryAvailable(static_cast<std::size_t>(length)))
+        return fail(error, QStringLiteral("Not enough memory to read this .kb file."));
+    QByteArray bytes = file.readAll();
+    if (file.error() != QFileDevice::NoError || bytes.size() != length)
+        return fail(error, QStringLiteral("Could not read all of the native .kb file."));
+    if (!expectedKey.isEmpty() && nativeKey(bytes) != expectedKey)
+        return fail(error, QStringLiteral("The installed .kb file does not match its library checksum."));
+    brush::DecodeResult report;
+    if (!brush::decodeBrush(reinterpret_cast<const std::uint8_t*>(bytes.constData()),
+                            static_cast<std::size_t>(bytes.size()), out, &report))
+        return fail(error, QString::fromStdString(report.error));
+    if (original) *original = std::move(bytes);
+    return true;
+} catch (const std::bad_alloc&) {
+    return fail(error, QStringLiteral("Not enough memory to load this .kb file."));
+} catch (const std::length_error&) {
+    return fail(error, QStringLiteral("This .kb file is too large to read on this system."));
+}
+
+QString BrushLibraryStore::installNativeFile(const QString& libraryPath, const QByteArray& original,
+                                             QString* error)
+{
+    const QString key = nativeKey(original);
+    const QString path = nativeFilePath(libraryPath, key);
+    const QDir dir(QFileInfo(path).absolutePath());
+    if (path.isEmpty() || !dir.mkpath(QStringLiteral("."))) {
+        fail(error, QStringLiteral("Could not create the native brush library directory."));
+        return {};
+    }
+    // Commit the exact validated file before publishing its reference. A
+    // manifest failure leaves an unreferenced snapshot, never an invalid row.
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(original) != original.size() ||
+        !syncFile(file) || !file.commit()) {
+        fail(error, QStringLiteral("Could not install the .kb file in the brush library: %1").arg(file.errorString()));
+        return {};
+    }
+    return key;
+}
+
 bool BrushLibraryStore::load(const QString& filePath,
                              const BrushLibraryDocument& bundled,
                              BrushLibraryDocument* out,
@@ -500,7 +601,7 @@ bool BrushLibraryStore::load(const QString& filePath,
     const QJsonObject root = doc.object();
     const int version = root.value(QStringLiteral("format")).toString() == kFormatName
         ? root.value(QStringLiteral("version")).toInt(-1) : -1;
-    if (version != 1 && version != 2) {
+    if (version != 1 && version != 2 && version != 3) {
         return fail(error, QStringLiteral("Unsupported brush library format or version."));
     }
     const QByteArray expectedSha = root.value(QStringLiteral("sha256")).toString().toLatin1();
@@ -514,7 +615,7 @@ bool BrushLibraryStore::load(const QString& filePath,
         const QString id = idVal.toString().trimmed();
         if (!id.isEmpty()) loaded.knownBuiltInIds.append(id);
     }
-    if (!collectionFromJson(root.value(QStringLiteral("digital")).toObject(), 0, &loaded.digital)
+    if (!collectionFromJson(root.value(QStringLiteral("digital")).toObject(), 0, &loaded.digital, version == 3)
         || !collectionFromJson(root.value(QStringLiteral("realistic")).toObject(), 1, &loaded.realistic)) {
         return fail(error, QStringLiteral("Brush library contains invalid engine collections."));
     }
@@ -568,7 +669,10 @@ bool BrushLibraryStore::save(const QString& filePath,
 
     QJsonObject root;
     root.insert(QStringLiteral("format"), kFormatName);
-    root.insert(QStringLiteral("version"), 2);
+    bool hasNative = false;
+    for (const auto& tab : doc.digital.tabs)
+        for (const auto& entry : tab.brushes) hasNative = hasNative || entry.isNative();
+    root.insert(QStringLiteral("version"), hasNative ? 3 : 2);
     root.insert(QStringLiteral("knownBuiltInIds"), knownIds);
     root.insert(QStringLiteral("digital"), collectionToJson(doc.digital));
     root.insert(QStringLiteral("realistic"), collectionToJson(doc.realistic));
@@ -579,13 +683,8 @@ bool BrushLibraryStore::save(const QString& filePath,
     if (!saveFile.open(QIODevice::WriteOnly))
         return fail(error, QStringLiteral("Could not open brush library for writing."));
     const QByteArray json = QJsonDocument(root).toJson(QJsonDocument::Indented);
-    if (saveFile.write(json) != json.size() || !saveFile.flush())
+    if (saveFile.write(json) != json.size() || !syncFile(saveFile))
         return fail(error, QStringLiteral("Could not write brush library."));
-#ifdef Q_OS_WIN
-    _commit(saveFile.handle());
-#else
-    ::fsync(saveFile.handle());
-#endif
     if (!saveFile.commit())
         return fail(error, QStringLiteral("Could not finalize brush library save."));
     return true;

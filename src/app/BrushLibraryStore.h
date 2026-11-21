@@ -1,4 +1,5 @@
 #pragma once
+#include <QByteArray>
 #include <QJsonObject>
 #include <QList>
 #include <QMap>
@@ -7,6 +8,7 @@
 #include <QVariantMap>
 
 namespace komapaint {
+namespace brush { class BrushDocument; }
 
 struct BrushPresetValues {
     int size = 16;
@@ -63,6 +65,11 @@ struct BrushEntryData {
     bool builtIn = false;
     BrushPresetValues defaults;
     BrushPresetValues current;
+    // Native entries point at immutable, library-owned .kb bytes. The update
+    // identity belongs to the installed original, not to duplicate aliases.
+    QString nativeAssetKey;
+    QString nativeUpdateId;
+    bool isNative() const { return !nativeAssetKey.isEmpty(); }
 };
 
 struct BrushTabData {
@@ -87,6 +94,13 @@ struct BrushLibraryDocument {
 
 class BrushLibraryStore {
 public:
+    static bool readNativeFile(const QString& path, const QString& expectedKey,
+                               brush::BrushDocument* out, QByteArray* original,
+                               QString* error);
+    static QString installNativeFile(const QString& libraryPath, const QByteArray& original,
+                                     QString* error);
+    static QString nativeFilePath(const QString& libraryPath, const QString& key);
+
     static bool parseValues(const QJsonObject& object, BrushPresetValues* out);
     static QJsonObject valuesToJson(const BrushPresetValues& values);
 

@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QUrl>
 #include <QVariantList>
 #include <vector>
 
@@ -98,6 +99,9 @@ public:
 
     Q_INVOKABLE void select(int index);
     Q_INVOKABLE void selectById(const QString& brushId);
+    // Installs an exact local .kb snapshot in Brush → Digital, without
+    // switching tool or selection. Empty result means lastError has details.
+    Q_INVOKABLE QString registerNativeBrush(const QUrl& file);
     Q_INVOKABLE void resetCurrent();
     Q_INVOKABLE void resetBrush(const QString& brushId);
 
@@ -182,6 +186,7 @@ private:
     QString m_loadError;
     QString m_lastError;
     bool m_applying = false;
+    bool m_persistenceLoadFailed = false;
     bool m_hasDeletedTabBackup = false;
     DeletedTabBackup m_deletedTabBackup;
 };

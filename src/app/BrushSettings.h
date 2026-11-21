@@ -1,5 +1,7 @@
 #pragma once
 #include "../brush/BrushModel.h"
+#include <cmath>
+#include <memory>
 
 #include <QObject>
 #include <QString>
@@ -10,6 +12,8 @@ namespace komapaint {
 // read by CanvasViewport::beginStroke() and handed to the brush engine.
 class BrushSettings : public QObject {
     Q_OBJECT
+    Q_PROPERTY(bool nativeBrush READ hasNativeBrush NOTIFY changed)
+    Q_PROPERTY(QString nativeBrushIssue READ nativeBrushIssue NOTIFY changed)
     Q_PROPERTY(int size READ size WRITE setSize NOTIFY changed)
     Q_PROPERTY(int opacity READ opacity WRITE setOpacity NOTIFY changed)
     Q_PROPERTY(int flow READ flow WRITE setFlow NOTIFY changed)
@@ -85,14 +89,18 @@ public:
     using QObject::QObject;
     static constexpr int MinSize = brush::MinBrushDiameter, MaxSize = brush::MaxBrushDiameter;
     static constexpr int MinSpacing = 5, MaxSpacing = 50;
-    int size() const { return m_size; }
+    int size() const {
+        return m_nativeBrush ? static_cast<int>(std::lround(m_nativeBrush->parameters.value("size", 16))) : m_size;
+    }
     int opacity() const { return m_opacity; }
     int flow() const { return m_flow; }
     int spacing() const { return m_spacing; }
     bool textured() const { return m_textured; }
     QString tipStyle() const { return m_tipStyle; }
     int hardness() const { return m_hardness; }
-    int stabilization() const { return m_stabilization; }
+    int stabilization() const {
+        return m_nativeBrush ? static_cast<int>(std::lround(m_nativeBrush->parameters.value("stabilization", 0))) : m_stabilization;
+    }
     int pressureSize() const { return m_pressureSize; }
     int pressureOpacity() const { return m_pressureOpacity; }
     int pressureFlow() const { return m_pressureFlow; }
@@ -136,7 +144,19 @@ public:
     int maximumSize() const { return MaxSize; }
     int minimumSpacing() const { return MinSpacing; }
     int maximumSpacing() const { return MaxSpacing; }
-    void setSize(int v) { v = qBound(MinSize, v, MaxSize); if (m_size != v) { m_size = v; emit changed(); } }
+    // Immutable authored definition for the next stroke. An issue without a
+    // document is still a native selection; it must never paint a legacy tip.
+    bool hasNativeBrush() const { return m_nativeBrush || !m_nativeIssue.isEmpty(); }
+    const QString& nativeBrushIssue() const { return m_nativeIssue; }
+    std::shared_ptr<const brush::BrushDocument> nativeBrushDocument() const { return m_nativeBrush; }
+    void setNativeBrush(std::shared_ptr<const brush::BrushDocument> document, const QString& issue = {}) {
+        if (m_nativeBrush == document && m_nativeIssue == issue) return;
+        m_nativeBrush = std::move(document);
+        m_nativeIssue = issue;
+        emit changed();
+    }
+
+    void setSize(int v) { if (hasNativeBrush()) return; v = qBound(MinSize, v, MaxSize); if (m_size != v) { m_size = v; emit changed(); } }
     void setOpacity(int v) { v = qBound(0, v, 100); if (m_opacity != v) { m_opacity = v; emit changed(); } }
     void setFlow(int v) { v = qBound(0, v, 100); if (m_flow != v) { m_flow = v; emit changed(); } }
     void setSpacing(int v) { v = qBound(MinSpacing, v, MaxSpacing); if (m_spacing != v) { m_spacing = v; emit changed(); } }
@@ -286,6 +306,8 @@ signals:
     void presetAvailabilityChanged();
     void materialMixtureChanged();
 private:
+    std::shared_ptr<const brush::BrushDocument> m_nativeBrush;
+    QString m_nativeIssue;
     int m_size = 16, m_opacity = 100, m_flow = 100, m_spacing = 15;
     int m_hardness = 100, m_stabilization = 0;
     bool m_textured = false;

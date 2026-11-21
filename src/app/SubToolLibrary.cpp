@@ -1,6 +1,7 @@
 #include "SubToolLibrary.h"
 #include "BrushSettings.h"
 #include "ToolSettings.h"
+#include "drawing/BrushDocumentAdapter.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -11,6 +12,8 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <new>
+#include <stdexcept>
 
 static void initializeBrushPresetResources()
 {
@@ -88,7 +91,7 @@ SubToolLibrary::SubToolLibrary(BrushSettings* brush, QObject* parent)
     if (!m_loadError.isEmpty()) qWarning("[KomaPaint] %s", qUtf8Printable(m_loadError));
 
     auto onSettingsMutated = [this] {
-        if (m_applying) return;
+        if (m_applying || (m_brush && m_brush->hasNativeBrush())) return;
         if (!hasCollections()) return;
         capture();
         persist();
@@ -121,7 +124,7 @@ void SubToolLibrary::setToolSettings(ToolSettings* toolSettings)
     m_toolSettings = toolSettings;
     if (m_toolSettings) {
         connect(m_toolSettings, &ToolSettings::changed, this, [this] {
-            if (m_applying || !hasCollections()) return;
+            if (m_applying || !hasCollections() || (m_brush && m_brush->hasNativeBrush())) return;
             capture();
             persist();
             emit subToolsChanged();
@@ -139,15 +142,16 @@ bool SubToolLibrary::initializePersistence(const QString& filePath)
     const bool existed = QFile::exists(filePath);
     BrushLibraryDocument loaded;
     QString err;
-    if (!BrushLibraryStore::load(filePath, m_bundledCollections, &loaded, &err)) {
+    m_persistenceLoadFailed = !BrushLibraryStore::load(filePath, m_bundledCollections, &loaded, &err);
+    if (m_persistenceLoadFailed) {
         setLastError(err);
         m_collections = m_bundledCollections;
     } else {
         m_collections = std::move(loaded);
         setLastError({});
     }
-    if (!existed) persist();
-    if (hasCollections()) apply();
+    if (!existed && !persist() && err.isEmpty()) err = m_lastError;
+    apply();
     emit tabsChanged();
     emit subToolsChanged();
     emit currentChanged();
@@ -361,7 +365,7 @@ void SubToolLibrary::setTool(const QString& tool)
         m_categoryFilter.clear();
         emit filterChanged();
     }
-    if (hasCollections()) apply();
+    apply();
     emit toolChanged();
     emit tabsChanged();
     emit subToolsChanged();
@@ -651,7 +655,7 @@ void SubToolLibrary::select(int index)
     auto* tab = currentTabPtr();
     if (!tab || index < 0 || index >= tab->brushes.size()) return;
     const QString nextId = tab->brushes[index].id;
-    if (tab->currentBrushId == nextId) return;
+    if (tab->currentBrushId == nextId && (!m_brush || m_brush->nativeBrushIssue().isEmpty())) return;
     tab->currentBrushId = nextId;
     apply();
     emit subToolsChanged();
@@ -668,6 +672,87 @@ void SubToolLibrary::selectById(const QString& brushId)
             return;
         }
     }
+}
+
+QString SubToolLibrary::registerNativeBrush(const QUrl& file) try
+{
+    if (m_persistenceLoadFailed || m_persistencePath.isEmpty()) {
+        setLastError(tr("The brush library is not available for writing."));
+        return {};
+    }
+    if (!file.isLocalFile() || file.toLocalFile().isEmpty()) {
+        setLastError(tr("Choose a local .kb brush file to install."));
+        return {};
+    }
+    brush::BrushDocument doc;
+    QByteArray original;
+    QString error;
+    if (!BrushLibraryStore::readNativeFile(file.toLocalFile(), {}, &doc, &original, &error)) {
+        setLastError(error);
+        return {};
+    }
+    const auto issue = drawing::digitalBrushIssue(doc);
+    if (!issue.empty()) {
+        setLastError(QString::fromStdString(issue));
+        return {};
+    }
+    auto next = m_collections;
+    auto& collection = next.digital;
+    const int defaultIndex = findTabIndex(collection, collection.defaultTabId);
+    if (defaultIndex < 0) {
+        setLastError(tr("The Digital brush collection has no default tab."));
+        return {};
+    }
+    const QString name = QString::fromStdString(doc.name).trimmed();
+    const QString updateId = QString::fromStdString(doc.id);
+    const QString key = BrushLibraryStore::installNativeFile(m_persistencePath, original, &error);
+    if (key.isEmpty()) {
+        setLastError(error);
+        return {};
+    }
+    BrushEntryData* installed = nullptr;
+    for (auto& tab : collection.tabs) {
+        for (auto& entry : tab.brushes) {
+            if (entry.isNative() && ((!updateId.isEmpty() && entry.nativeUpdateId == updateId) ||
+                                     (updateId.isEmpty() && entry.nativeAssetKey == key))) {
+                installed = &entry;
+                break;
+            }
+        }
+        if (installed) break;
+    }
+    if (!installed) {
+        auto& tab = collection.tabs[defaultIndex];
+        BrushEntryData entry;
+        entry.id = makeId(QStringLiteral("native"));
+        entry.name = uniqueBrushName(tab, name.isEmpty() ? tr("Native brush") : name);
+        entry.category = QString::fromStdString(doc.category).trimmed();
+        if (entry.category.isEmpty()) entry.category = tr("Native");
+        entry.defaults.executableTool = QStringLiteral("brush");
+        entry.current = entry.defaults;
+        entry.nativeUpdateId = updateId;
+        tab.brushes.append(std::move(entry));
+        installed = &tab.brushes.last();
+    }
+    installed->nativeAssetKey = key;
+    const QString id = installed->id;
+    if (!BrushLibraryStore::save(m_persistencePath, next, &error)) {
+        setLastError(error);
+        return {};
+    }
+    m_collections = std::move(next);
+    setLastError({});
+    if (isBrushTool() && activeEngine() == QStringLiteral("digital") && currentBrushId() == id) apply();
+    emit tabsChanged();
+    emit subToolsChanged();
+    emit currentChanged();
+    return id;
+} catch (const std::bad_alloc&) {
+    setLastError(tr("Not enough memory to install the native brush."));
+    return {};
+} catch (const std::length_error&) {
+    setLastError(tr("The native brush is too large to install on this system."));
+    return {};
 }
 
 void SubToolLibrary::resetCurrent()
@@ -724,7 +809,9 @@ QString SubToolLibrary::createBrushFromCurrent(const QString& name)
     if (idx >= 0) {
         eraseHint = tab->brushes[idx].current.erase;
     }
-    const Values captured = captureFromSettings(isRealistic, execHint, eraseHint);
+    const bool native = idx >= 0 && tab->brushes[idx].isNative();
+    const Values captured = native ? tab->brushes[idx].current
+                                  : captureFromSettings(isRealistic, execHint, eraseHint);
     const QString base = name.trimmed().isEmpty()
         ? (currentName().isEmpty() ? QStringLiteral("Custom Sub-Tool") : currentName() + QStringLiteral(" Copy"))
         : name.trimmed();
@@ -735,6 +822,7 @@ QString SubToolLibrary::createBrushFromCurrent(const QString& name)
     entry.builtIn = false;
     entry.defaults = captured;
     entry.current = captured;
+    if (native) entry.nativeAssetKey = tab->brushes[idx].nativeAssetKey;
     tab->brushes.append(entry);
     tab->currentBrushId = entry.id;
     persist();
@@ -759,6 +847,7 @@ QString SubToolLibrary::duplicateBrushById(const QString& brushId)
     for (int i = 0; i < tab->brushes.size(); ++i) {
         if (tab->brushes[i].id != brushId) continue;
         BrushEntryData copy = tab->brushes[i];
+        copy.nativeUpdateId.clear();
         copy.id = makeId(QStringLiteral("subtool"));
         copy.builtIn = false;
         copy.name = uniqueBrushName(*tab, copy.name + QStringLiteral(" Copy"));
@@ -850,7 +939,7 @@ bool SubToolLibrary::moveSubToolTo(const QString& brushId, const QString& target
             if (src.brushes[i].id != brushId) continue;
             const QString exec = src.brushes[i].current.executableTool.isEmpty()
                 ? m_tool : src.brushes[i].current.executableTool;
-            if (targetTool != m_tool && !compatibleToolsFor(exec).contains(targetTool)) {
+            if (targetTool != m_tool && (src.brushes[i].isNative() || !compatibleToolsFor(exec).contains(targetTool))) {
                 setLastError(QStringLiteral("This sub-tool is not compatible with %1.").arg(targetTool));
                 return false;
             }
@@ -891,12 +980,13 @@ QString SubToolLibrary::copySubToolTo(const QString& brushId, const QString& tar
             if (b.id != brushId) continue;
             const QString exec = b.current.executableTool.isEmpty()
                 ? m_tool : b.current.executableTool;
-            if (targetTool != m_tool && !compatibleToolsFor(exec).contains(targetTool)) {
+            if (targetTool != m_tool && (b.isNative() || !compatibleToolsFor(exec).contains(targetTool))) {
                 setLastError(QStringLiteral("This sub-tool is not compatible with %1.").arg(targetTool));
                 return {};
             }
             auto& dst = dstCol->tabs[dstIdx];
             BrushEntryData copy = b;
+            copy.nativeUpdateId.clear();
             copy.id = makeId(QStringLiteral("subtool"));
             copy.builtIn = false;
             if (copy.defaults.executableTool.isEmpty()) copy.defaults.executableTool = exec;
@@ -1046,12 +1136,31 @@ SubToolLibrary::Values SubToolLibrary::captureFromSettings(bool traditionalMedia
 void SubToolLibrary::apply()
 {
     auto* tab = currentTabPtr();
-    if (!tab || tab->brushes.isEmpty()) return;
     const int idx = currentBrushIndexInTab(tab);
-    if (idx < 0) return;
-    tab->currentBrushId = tab->brushes[idx].id;
-    const bool fallbackErase = (m_tool == QStringLiteral("eraser"));
-    applyValuesToSettings(tab->brushes[idx].current, fallbackErase);
+    const BrushEntryData* entry = idx < 0 ? nullptr : &tab->brushes[idx];
+    if (entry) tab->currentBrushId = entry->id;
+    if (m_brush) {
+        std::shared_ptr<const brush::BrushDocument> native;
+        QString issue;
+        if (entry && entry->isNative()) {
+            try {
+                brush::BrushDocument doc;
+                const QString path = BrushLibraryStore::nativeFilePath(m_persistencePath, entry->nativeAssetKey);
+                if (BrushLibraryStore::readNativeFile(path, entry->nativeAssetKey, &doc, nullptr, &issue)) {
+                    issue = QString::fromStdString(drawing::digitalBrushIssue(doc));
+                    if (issue.isEmpty()) native = std::make_shared<const brush::BrushDocument>(std::move(doc));
+                }
+            } catch (const std::bad_alloc&) {
+                issue = tr("Not enough memory to select this native brush.");
+            } catch (const std::length_error&) {
+                issue = tr("The native brush is too large to load on this system.");
+            }
+        }
+        m_applying = true;
+        m_brush->setNativeBrush(std::move(native), issue);
+        m_applying = false;
+    }
+    if (entry) applyValuesToSettings(entry->current, m_tool == QStringLiteral("eraser"));
 }
 
 void SubToolLibrary::capture()
@@ -1060,6 +1169,7 @@ void SubToolLibrary::capture()
     const int idx = currentBrushIndexInTab(tab);
     if (!tab || idx < 0) return;
     auto& entry = tab->brushes[idx];
+    if (entry.isNative()) return;
     const bool trad = isBrushTool()
         ? (m_brush && m_brush->isRealisticEngine())
         : (m_brush ? m_brush->traditionalMedia() : entry.current.traditionalMedia);
@@ -1069,6 +1179,7 @@ void SubToolLibrary::capture()
 
 bool SubToolLibrary::persist()
 {
+    if (m_persistenceLoadFailed) return false;
     if (m_persistencePath.isEmpty()) return true;
     QString err;
     if (!BrushLibraryStore::save(m_persistencePath, m_collections, &err)) {
@@ -1106,6 +1217,7 @@ QVariantList SubToolLibrary::subTools() const
         item.insert(QStringLiteral("name"), entry.name);
         item.insert(QStringLiteral("category"), entry.category);
         item.insert(QStringLiteral("builtIn"), entry.builtIn);
+        item.insert(QStringLiteral("nativeBrush"), entry.isNative());
         item.insert(QStringLiteral("executableTool"), cur.executableTool.isEmpty() ? m_tool : cur.executableTool);
         item.insert(QStringLiteral("erase"), cur.erase);
         item.insert(QStringLiteral("size"), cur.size);
