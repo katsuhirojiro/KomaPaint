@@ -870,12 +870,18 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
         emit strokeError(QStringLiteral("Select a visible, unlocked layer to paint."));
         return false;
     }
-    if (!brush->isRealisticEngine() && brush->traditionalMedia()) {
+    if (!brush->nativeBrushIssue().isEmpty()) {
+        emit strokeError(brush->nativeBrushIssue());
+        return false;
+    }
+    auto document = brush->nativeBrushDocument();
+    const bool native = bool(document);
+    if (!native && !brush->isRealisticEngine() && brush->traditionalMedia()) {
         emit strokeError(QStringLiteral("This brush uses physical materials and requires the Realistic brush engine. "
                                         "Switch to Realistic in Settings → Brush Engine, or select a Digital brush preset."));
         return false;
     }
-    const bool effectiveErase = eraseOverride || brush->erase();
+    const bool effectiveErase = eraseOverride || (!native && brush->erase());
     m_modifiedBeforeStroke = m_document->isModified();
     const int effectiveStab = brush->stabilization() > 0
         ? brush->stabilization()
@@ -888,17 +894,23 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
     m_strokeMaskContext.protectedRegion = m_strokeMaskContext.protectInterior ? &m_protectedRegion : nullptr;
     const bool useMaskCallback = m_strokeMaskContext.hasSelection || m_strokeMaskContext.protectInterior;
 
-    // The brush document is what both engines paint from: a Sub-Tool migrated
-    // into the model today, a Studio-authored brush once the editor writes one.
-    // Building it once keeps the two branches reading the same source.
     StrokeRuntime runtime;
     runtime.color = color.rgba();
     runtime.erase = effectiveErase;
-    brush::BrushDocument document =
-        brush::BrushDocument::fromLegacy(brush->toLegacyBrush(), "live-brush", "Brush");
-    document.seed = 20260101u;
+    // A native selection is already a validated immutable definition. Only
+    // legacy presets are migrated; a missing native selection never gets here.
+    if (!document) {
+        try {
+            auto migrated = brush::BrushDocument::fromLegacy(brush->toLegacyBrush(), "live-brush", "Brush");
+            migrated.seed = 20260101u;
+            document = std::make_shared<const brush::BrushDocument>(std::move(migrated));
+        } catch (const std::bad_alloc&) {
+            emit strokeError(QStringLiteral("Not enough memory to start a stroke."));
+            return false;
+        }
+    }
 
-    if (brush->isRealisticEngine()) {
+    if (!native && brush->isRealisticEngine()) {
         if (!m_history->beginMaterialStroke(layer)) {
             emit strokeError(QStringLiteral("Could not start material stroke history; no paint was applied."));
             return false;
@@ -968,13 +980,13 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
             }
             // The document and the flat record both resolve through the adapter,
             // so the physical numbers below live in one place.
-            definition = drawing::materialDefinition(definition, document, runtime);
+            definition = drawing::materialDefinition(definition, *document, runtime);
             if (useMaskCallback) {
                 definition.pixelMask = &evaluatePixelMask;
                 definition.pixelMaskContext = &m_strokeMaskContext;
             }
             if (!effectiveErase && !mixerPaintLoaded) {
-                drawing::assignInitialPaint(&definition, document, color.rgba(),
+                drawing::assignInitialPaint(&definition, *document, color.rgba(),
                                             double(color.alphaF()));
             }
             const bool mixtureUpdated = mixerPaintLoaded
@@ -1043,7 +1055,7 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
     // One conversion, in the adapter: the document becomes the record the
     // engine reads. An inline copy of these formulae used to live here, and two
     // copies of a brush is how a brush stops matching itself.
-    BrushDefinition definition = drawing::digitalDefinition(document, runtime);
+    BrushDefinition definition = drawing::digitalDefinition(*document, runtime);
     if (useMaskCallback) {
         definition.pixelMask = &evaluatePixelMask;
         definition.pixelMaskContext = &m_strokeMaskContext;
@@ -1055,7 +1067,7 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
     // paints all of them.
     try {
         m_stroke = std::make_unique<drawing::DocumentStroke>(
-            layer->tiles(), std::move(document), definition, ++m_strokeSerial);
+            layer->tiles(), std::move(document), definition, ++m_strokeSerial, native);
     }
     catch (const std::bad_alloc&) {
         m_history->cancelStroke();

@@ -38,7 +38,7 @@ Rectangle {
         Item {
             Layout.fillWidth: true
             implicitHeight: 52
-            visible: panel.painting
+            visible: panel.painting && !panel.brush.nativeBrush
 
             Rectangle {
                 id: previewWell
@@ -95,12 +95,25 @@ Rectangle {
             }
         }
 
+        Text {
+            visible: panel.painting && panel.brush.nativeBrush
+            Layout.fillWidth: true
+            Layout.margins: KP.panelInset
+            text: panel.brush.nativeBrushIssue.length > 0 ? panel.brush.nativeBrushIssue
+                : qsTr("Native .kb brush · Edit its settings in Brush Studio.")
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            color: panel.brush.nativeBrushIssue.length > 0 ? KP.error : KP.textMuted
+            font.pixelSize: KP.fontS
+        }
+        Item { Layout.fillHeight: true; visible: panel.painting && panel.brush.nativeBrush }
+
         Flickable {
             id: scroll
             objectName: "toolPropertyScroll"
             Layout.fillWidth: true
             Layout.fillHeight: true
-            visible: panel.painting
+            visible: panel.painting && !panel.brush.nativeBrush
             clip: true
             contentWidth: width
             contentHeight: properties.height + 2 * KP.gapM

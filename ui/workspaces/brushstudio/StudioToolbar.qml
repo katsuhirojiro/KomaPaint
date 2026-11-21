@@ -169,7 +169,7 @@ ColumnLayout {
                 glyph: "save"
                 label: qsTr("Save .kb…")
                 variant: "primary"
-                tip: qsTr("Save this draft to a local .kb file, not to the Sub-Tool library")
+                tip: qsTr("Save this draft as .kb and install it if it can paint in Digital mode")
             }
             KpButton {
                 objectName: "brushStudioClose"

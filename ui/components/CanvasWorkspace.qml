@@ -148,8 +148,8 @@ Rectangle {
             canvas.zoomAt(mouse.x, mouse.y, out ? 1 / 1.5 : 1.5)
         }
     }
-    // Outline of the brush tip at its real size on the artwork, following the
-    // unified C++ pointer/stylus hover state while a painting tool is active.
+    // Legacy tip outline. A single ellipse would misrepresent a native brush
+    // with a bitmap, several tips, or per-stamp transforms.
     Item {
         id: brushOutline
         objectName: "brushOutline"
@@ -169,7 +169,7 @@ Rectangle {
         // Don't hand a billion-pixel rounded rectangle to the scene graph.
         readonly property real farthestCorner: Math.hypot(Math.max(Math.abs(canvas.cursorPos.x), Math.abs(canvas.width - canvas.cursorPos.x)),
                                                           Math.max(Math.abs(canvas.cursorPos.y), Math.abs(canvas.height - canvas.cursorPos.y)))
-        visible: Workspace.subTools.paintTool && canvas.cursorVisible && outlineHeight / 2 <= farthestCorner + 2
+        visible: Workspace.subTools.paintTool && !Workspace.brush.nativeBrush && canvas.cursorVisible && outlineHeight / 2 <= farthestCorner + 2
         x: canvas.cursorPos.x - width / 2
         y: canvas.cursorPos.y - height / 2
         width: visible ? diameter : 0

@@ -8,8 +8,8 @@ import "../components"
 import "../themes"
 import "brushstudio"
 
-// The native window owns a draft. It deliberately has no Workspace,
-// SubToolLibrary or CanvasViewport binding.
+// The native window owns the draft and private canvas. Its library reference
+// is used only after a successful explicit Save, not while testing the draft.
 Window {
     id: studio
     objectName: "brushStudioWindow"
@@ -30,11 +30,32 @@ Window {
     property int previewPreference: -1
     readonly property bool previewExpanded: previewPreference < 0 ? height >= 660 : previewPreference === 1
     property string fileNotice: ""
+    property string libraryNotice: ""
+    property var brushLibrary: null
+    property var tabletSettings: null
+    property color previewInk: "black"
+
+    function saveDraftToLibrary(url) {
+        libraryNotice = ""
+        if (!brushDraft.saveDraft(url)) return false
+        if (!brushLibrary) {
+            fileNotice = qsTr("Brush file saved")
+            return true
+        }
+        const installed = brushLibrary.registerNativeBrush(url)
+        if (installed.length > 0) {
+            fileNotice = qsTr("Saved · Sub Tool → Brush → Digital")
+        } else {
+            fileNotice = qsTr("Brush file saved")
+            libraryNotice = qsTr("Saved to file, not installed: %1").arg(brushLibrary.lastError)
+        }
+        return true
+    }
 
     BrushStudioModel {
         id: brushDraft
         objectName: "brushStudioModel"
-        onDocumentChanged: studio.fileNotice = ""
+        onDocumentChanged: { studio.fileNotice = ""; studio.libraryNotice = "" }
     }
 
     function present() {
@@ -75,7 +96,7 @@ Window {
         fileMode: FileDialog.SaveFile
         defaultSuffix: "kb"
         nameFilters: [qsTr("KomaPaint brushes (*.kb)")]
-        onAccepted: if (brushDraft.saveDraft(selectedFile)) studio.fileNotice = qsTr("Brush file saved")
+        onAccepted: studio.saveDraftToLibrary(selectedFile)
     }
     FileDialog {
         id: exportBrush
@@ -87,6 +108,17 @@ Window {
         defaultSuffix: "kb"
         nameFilters: [qsTr("KomaPaint brushes (*.kb)")]
         onAccepted: if (brushDraft.exportDraft(selectedFile)) studio.fileNotice = qsTr("Brush copy exported")
+    }
+
+    FileDialog {
+        id: importTip
+        parentWindow: studio
+        modality: Qt.WindowModal
+        objectName: "brushStudioTipImageDialog"
+        title: qsTr("Load a bitmap tip image")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("Images (*.png *.jpg *.jpeg *.bmp)")]
+        onAccepted: brushDraft.importTipImage(selectedFile)
     }
 
     ColumnLayout {
@@ -138,6 +170,7 @@ Window {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 draft: brushDraft
+                onImportImageRequested: importTip.open()
             }
             StudioSettings {
                 objectName: "brushStudioSettings"
@@ -156,8 +189,8 @@ Window {
             Layout.rightMargin: KP.panelInset
             Layout.topMargin: visible ? KP.gapS : 0
             Layout.bottomMargin: visible ? KP.gapS : 0
-            visible: brushDraft.error.length > 0
-            text: brushDraft.error
+            visible: brushDraft.error.length > 0 || studio.libraryNotice.length > 0
+            text: brushDraft.error.length > 0 ? brushDraft.error : studio.libraryNotice
             textFormat: Text.PlainText
             color: KP.error
             font.family: KP.fontUi
@@ -169,6 +202,9 @@ Window {
         StudioPreview {
             objectName: "brushStudioPreview"
             Layout.fillWidth: true
+            draft: brushDraft
+            tabletSettings: studio.tabletSettings
+            ink: studio.previewInk
             expanded: studio.previewExpanded
             expandedHeight: Math.min(250, Math.max(104, Math.round(studio.height * 0.23)))
             onToggleRequested: studio.togglePreview()

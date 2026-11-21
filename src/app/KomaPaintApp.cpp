@@ -1,6 +1,7 @@
 #include "KomaPaintApp.h"
 #include "BrushStudioAssetView.h"
 #include "BrushStudioModel.h"
+#include "BrushStudioPad.h"
 #include "CanvasViewport.h"
 #include "MixerSurfaceItem.h"
 #include "PaintMixerController.h"
@@ -76,6 +77,7 @@ void KomaPaintApp::registerTypes()
     qmlRegisterType<MixerSurfaceItem>("KomaPaint", 1, 0, "MixerSurfaceItem");
     qmlRegisterType<BrushStudioAssetView>("KomaPaint", 1, 0, "BrushStudioAssetView");
     qmlRegisterType<BrushStudioModel>("KomaPaint", 1, 0, "BrushStudioModel");
+    qmlRegisterType<BrushStudioPad>("KomaPaint", 1, 0, "BrushStudioPad");
 }
 
 void KomaPaintApp::loadStyles() {}
@@ -463,21 +465,110 @@ void KomaPaintApp::runPackagedVerification()
         fail(QStringLiteral("Brush Studio did not open with its independent draft and bundled controls."));
         return;
     }
-    const auto brushPath = QUrl::fromLocalFile(tempDir.filePath(QStringLiteral("verify_brush.kb")));
-    draft->setName(QStringLiteral("Packaged Studio brush"));
-    if (!draft->saveDraft(brushPath) || !draft->newDraft() || !draft->openDraft(brushPath) ||
-        draft->name() != QStringLiteral("Packaged Studio brush") || m_workspace.document() != reopenedDoc) {
-        fail(QStringLiteral("Studio .kb round-trip failed or changed the active artwork."));
+    auto* pad = qobject_cast<BrushStudioPad*>(findVisual(findVisual, studio->contentItem(), QStringLiteral("brushStudioPad")));
+    auto* subTools = m_workspace.subTools();
+    if (!pad || !subTools->initializePersistence(tempDir.filePath(QStringLiteral("verify-brush-library.json")))) {
+        fail(QStringLiteral("The private preview pad or test brush library could not be initialized."));
         return;
     }
+    m_workspace.setActiveTool(QStringLiteral("brush"));
+    subTools->selectTabById(subTools->defaultTabId());
+    const auto stockId = subTools->currentBrushId();
+    const auto historyBefore = m_workspace.history()->memoryBytes();
+    auto& artwork = reopenedDoc->layers()->layerAt(0)->tiles();
+    const auto artworkBefore = artwork.dirtyVersion();
+    auto authored = draft->document();
+    authored.name = "Packaged Studio brush";
+    authored.setParameter("size", 20);
+    authored.components[0].kind = brush::ComponentKind::Image;
+    authored.components[0].parameters = {};
+    authored.components[0].resourceId = "packaged-pixels";
+    brush::BrushResource image;
+    image.id = authored.components[0].resourceId;
+    image.kind = brush::ResourceKind::Rgba8;
+    image.width = 2;
+    image.height = 1;
+    image.setPixels({48, 220, 123, 255, 255, 0, 0, 0});
+    if (!authored.addResource(std::move(image)) || !draft->setDocument(std::move(authored)) ||
+        !draft->isModified() || !pad->renderIssue().isEmpty()) {
+        fail(QStringLiteral("The authored unsaved RGBA tip is not ready to paint: %1").arg(pad->renderIssue()));
+        return;
+    }
+    constexpr TilePoint knownInk{352, 360};
+    constexpr TilePoint knownClear{367, 360};
+    constexpr std::uint32_t imagePixel = 0xff30dc7b;
+    auto tap = [](CanvasViewport* view, QObject* settings) {
+        const QPointF where = view->documentToViewport(360, 360);
+        if (!view->beginStroke(where.x(), where.y(), 1, settings, Qt::black)) return false;
+        view->endStroke(where.x(), where.y(), 1);
+        return true;
+    };
+    const auto padDocument = qobject_cast<CanvasDocument*>(pad->document());
+    if (!padDocument || !padDocument->layers()->layerAt(0)) {
+        fail(QStringLiteral("The pad did not own an editable layer."));
+        return;
+    }
+    const auto& padTiles = padDocument->layers()->layerAt(0)->tiles();
+    if (!tap(pad, pad->brushSettings()) || !pad->canUndoPad() || pad->document() == reopenedDoc ||
+        pad->history() == m_workspace.history() || padTiles.pixel(knownInk).value_or(0U) != imagePixel ||
+        padTiles.pixel(knownClear).value_or(0U) != 0U || artwork.dirtyVersion() != artworkBefore ||
+        m_workspace.history()->memoryBytes() != historyBefore || subTools->currentBrushId() != stockId) {
+        fail(QStringLiteral("The unsaved native preview did not paint the expected pixels in isolation."));
+        return;
+    }
+    pad->undoPad();
+    if (padTiles.allocatedTiles() || !tap(pad, pad->brushSettings()) || !pad->clearPad() ||
+        padTiles.allocatedTiles() || pad->canUndoPad()) {
+        fail(QStringLiteral("Private test pad undo or clear failed."));
+        return;
+    }
+    report << QStringLiteral("8. Independent Brush Studio painted an unsaved bitmap draft; pad undo/clear left artwork unchanged.");
+
+    const auto brushPath = QUrl::fromLocalFile(tempDir.filePath(QStringLiteral("verify_brush.kb")));
+    const auto expectedBrush = draft->document();
+    QVariant saved;
+    if (!QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
+                                  Q_ARG(QVariant, QVariant::fromValue(brushPath))) || !saved.toBool() ||
+        !draft->newDraft() || !draft->openDraft(brushPath) || draft->document() != expectedBrush ||
+        m_workspace.document() != reopenedDoc || subTools->currentBrushId() != stockId) {
+        fail(QStringLiteral("Studio .kb round-trip failed or changed the active artwork/brush."));
+        return;
+    }
+    QString installedId;
+    for (const auto& row : subTools->subTools()) {
+        const auto item = row.toMap();
+        if (item.value(QStringLiteral("nativeBrush")).toBool() &&
+            item.value(QStringLiteral("name")) == draft->name()) {
+            installedId = item.value(QStringLiteral("id")).toString();
+            break;
+        }
+    }
     studio->close();
-    report << QStringLiteral("8. Independent Brush Studio opened from the package; .kb round-trip verified.");
+    if (installedId.isEmpty() || !QFile::remove(brushPath.toLocalFile()) ||
+        !subTools->initializePersistence(subTools->persistencePath())) {
+        fail(QStringLiteral("The Studio brush was not found in the reloaded library."));
+        return;
+    }
+    subTools->selectById(installedId);
+    const auto selected = m_workspace.brush()->nativeBrushDocument();
+    if (!selected || *selected != expectedBrush || !tap(canvas, m_workspace.brush()) ||
+        artwork.pixel(knownInk).value_or(0U) != imagePixel || artwork.pixel(knownClear).value_or(0U) != 0U ||
+        !m_workspace.saveToPath(komaPath) || !m_workspace.closeTab(0, true) || !m_workspace.openFromPath(komaPath)) {
+        fail(QStringLiteral("The installed .kb did not paint its bitmap on the artwork, or the project did not reopen."));
+        return;
+    }
+    const auto& finalTiles = m_workspace.layers()->layerAt(0)->tiles();
+    if (finalTiles.pixel(knownInk).value_or(0U) != imagePixel || finalTiles.pixel(knownClear).value_or(0U) != 0U) {
+        fail(QStringLiteral("Reopened artwork lost the native brush pixels."));
+        return;
+    }
+    report << QStringLiteral("9. Studio .kb installed, resolved after library reload, painted exact bitmap pixels and survived artwork save/reopen.");
 
     if (!m_qmlWarnings.isEmpty()) {
         fail(QStringLiteral("QML warnings occurred: %1").arg(m_qmlWarnings.join(QStringLiteral(" | "))));
         return;
     }
-    report << QStringLiteral("9. Zero QML warnings, missing Qt plugins, or critical errors.");
+    report << QStringLiteral("10. Zero QML warnings, missing Qt plugins, or critical errors.");
 
     const QString reportPath = qEnvironmentVariable("KOMAPAINT_VERIFY_REPORT");
     if (!reportPath.isEmpty()) {

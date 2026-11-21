@@ -114,10 +114,11 @@ Rectangle {
                 verticalAlignment: Text.AlignVCenter
             }
             Divider { Layout.alignment: Qt.AlignVCenter }
-            Caption { Layout.alignment: Qt.AlignVCenter; text: qsTr("SIZE") }
-            Fact { Layout.alignment: Qt.AlignVCenter; text: Workspace.brush.size + " px" }
-            Caption { Layout.alignment: Qt.AlignVCenter; text: qsTr("OPACITY") }
-            Fact { Layout.alignment: Qt.AlignVCenter; text: Workspace.brush.opacity + "%" }
+            Fact { Layout.alignment: Qt.AlignVCenter; visible: Workspace.brush.nativeBrush; text: qsTr("Native .kb") }
+            Caption { Layout.alignment: Qt.AlignVCenter; visible: !Workspace.brush.nativeBrush; text: qsTr("SIZE") }
+            Fact { Layout.alignment: Qt.AlignVCenter; visible: !Workspace.brush.nativeBrush; text: Workspace.brush.size + " px" }
+            Caption { Layout.alignment: Qt.AlignVCenter; visible: !Workspace.brush.nativeBrush; text: qsTr("OPACITY") }
+            Fact { Layout.alignment: Qt.AlignVCenter; visible: !Workspace.brush.nativeBrush; text: Workspace.brush.opacity + "%" }
             Caption {
                 Layout.alignment: Qt.AlignVCenter
                 visible: root.message.length > 0

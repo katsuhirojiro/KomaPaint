@@ -8,6 +8,7 @@ import "../../themes"
 Rectangle {
     id: editor
     required property BrushStudioModel draft
+    signal importImageRequested()
     property string modeOverride: ""
     readonly property var selected: draft.selectedComponent
     readonly property string mode: modeOverride || (selected.texture ? "texture" : "tip")
@@ -248,17 +249,28 @@ Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: KP.controlHeightSmall
                 color: KP.toolbarBg
-                Text {
+                RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: KP.gapM
-                    anchors.rightMargin: KP.gapM
-                    text: asset.visible ? (editor.mode === "texture" ? qsTr("Stored resource · repeated tiles · read-only") : qsTr("Stored resource · read-only"))
-                          : qsTr("Pixel and node tools unavailable")
-                    elide: Text.ElideRight
-                    verticalAlignment: Text.AlignVCenter
-                    color: KP.textSubtle
-                    font.family: KP.fontUi
-                    font.pixelSize: KP.fontXS
+                    anchors.rightMargin: KP.gapS
+                    Text {
+                        Layout.fillWidth: true
+                        text: asset.visible ? (editor.mode === "texture" ? qsTr("Stored resource · repeated tiles · read-only") : qsTr("Stored resource · read-only"))
+                              : qsTr("Pixel and node tools unavailable")
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                        color: KP.textSubtle
+                        font.family: KP.fontUi
+                        font.pixelSize: KP.fontXS
+                    }
+                    KpButton {
+                        objectName: "brushStudioLoadTipImage"
+                        visible: editor.matching && editor.draft.canImportTipImage
+                        small: true
+                        label: qsTr("Load image…")
+                        tip: qsTr("Replace this component’s stored tip pixels")
+                        onClicked: editor.importImageRequested()
+                    }
                 }
             }
         }

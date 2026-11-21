@@ -8,6 +8,8 @@ add_library(komapaint_app STATIC
     BrushStudioHistory.cpp
     BrushStudioModel.cpp
     BrushStudioModel.h
+    BrushStudioPad.cpp
+    BrushStudioPad.h
     CanvasToolExecutor.cpp
     CanvasToolExecutor.h
     ToolSettings.h

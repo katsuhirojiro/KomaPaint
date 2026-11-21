@@ -503,16 +503,10 @@ With these fixes, all four Studio UI cases passed with normal fonts and with
 no fonts, all 49 Linux CTest suites passed (72.65 s), and all nine
 packaged-resource checks passed.
 
-## Next
+## After B2
 
-B2 is implemented and locally verified. B3 (tip editor), B4 (brush library
-integration), and B5 (isolated production-engine preview) are not started.
-Hardware tablet and artist workflow testing are still outstanding.
-
-For human testing, open **Edit → Brush Studio**, add a Texture component to
-see the repeated stored tile, change a setting, and save or reopen the draft
-with a local `.kb` file. In **Creator exposure**, try relabeling and removing a
-property, then restore defaults. Narrow the window to exercise the panel
-switcher and preview collapse. Check that the active artwork, brush and
-painting undo history remain untouched. The Nodes and Live Preview areas are
-intentionally unavailable, not simulated.
+The [native Digital brush-to-canvas pipeline](native-digital-brush-pipeline.md)
+connects the independent Studio draft, private production test pad, native
+file, ordinary Sub-Tool library, and artwork. See that page for the current
+workflow and limits; the unavailable-preview notes above describe earlier
+stages. Hardware tablet and artist workflow testing remain separate.

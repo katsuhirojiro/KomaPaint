@@ -581,7 +581,7 @@ jobs:
             Fail-Smoke "KomaPaint.exe exited prematurely with code $($p.ExitCode) (expected the event loop to run; check for a startup crash or a QML load failure)."
           }
 
-          # Now run the 9-point packaged functional verification inside the extracted KomaPaint.exe itself
+          # Now run the packaged functional verification inside the extracted KomaPaint.exe itself
           $verifyReport = Join-Path $env:RUNNER_TEMP "komapaint-verify-report.txt"
           Remove-Item $verifyReport -ErrorAction SilentlyContinue
           $env:KOMAPAINT_VERIFY_PACKAGED = "1"

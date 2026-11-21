@@ -58,6 +58,9 @@ ApplicationWindow {
         source: "BrushStudioWindow.qml"
         onLoaded: {
             item.transientParent = root
+            item.brushLibrary = Workspace.subTools
+            item.tabletSettings = Workspace.inputSettings
+            item.previewInk = Qt.binding(function() { return Workspace.colors.foreground })
             item.present()
         }
     }
@@ -252,8 +255,8 @@ ApplicationWindow {
             for (let i = sizes.length - 1; i >= 0; --i) if (sizes[i] < now) { Workspace.brush.size = sizes[i]; return }
         }
     }
-    Shortcut { sequence: root.shortcutSeq("brush.sizeDown"); enabled: root.shortcutsEnabled; onActivated: root.stepBrushSize(-1) }
-    Shortcut { sequence: root.shortcutSeq("brush.sizeUp"); enabled: root.shortcutsEnabled; onActivated: root.stepBrushSize(1) }
+    Shortcut { sequence: root.shortcutSeq("brush.sizeDown"); enabled: root.shortcutsEnabled && !Workspace.brush.nativeBrush; onActivated: root.stepBrushSize(-1) }
+    Shortcut { sequence: root.shortcutSeq("brush.sizeUp"); enabled: root.shortcutsEnabled && !Workspace.brush.nativeBrush; onActivated: root.stepBrushSize(1) }
     Connections {
         target: Workspace.history
         function onErrorOccurred(message) { historyErrorText.text = message; historyErrorDialog.open() }

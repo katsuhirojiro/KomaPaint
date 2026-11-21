@@ -1,14 +1,17 @@
 import QtQuick
 import QtQuick.Layouts
+import KomaPaint 1.0
 import "../../components"
 import "../../themes"
 
-// Reserve the comparison shelf, not a substitute renderer. B5 will put a
-// production-engine preview here; a mock stroke would misrepresent the draft.
 Rectangle {
     id: shelf
+    required property BrushStudioModel draft
     required property bool expanded
     required property int expandedHeight
+    property var tabletSettings: null
+    property color ink: "black"
+    property string padNotice: ""
     signal toggleRequested
     implicitHeight: expanded ? expandedHeight : KP.panelHeaderH
     color: KP.toolbarBg
@@ -23,23 +26,31 @@ Rectangle {
             title: qsTr("Live Preview")
             actions: [
                 Text {
+                    visible: shelf.expanded && shelf.width >= 820
                     anchors.verticalCenter: parent.verticalCenter
-                    text: qsTr("Preview unavailable")
+                    text: pad.renderIssue.length ? qsTr("Draft cannot paint") : qsTr("Private test pad · Digital")
                     color: KP.textMuted
                     font.family: KP.fontUi
                     font.pixelSize: KP.fontS
                 },
-                Row {
-                    visible: shelf.width >= 820 && shelf.expanded
-                    spacing: KP.gapXS
-                    KpButton { small: true; glyph: "reset"; label: qsTr("Clear"); enabled: false }
-                    KpButton { small: true; label: qsTr("Paper"); enabled: false; variant: "solid" }
-                    KpButton { small: true; label: qsTr("Dark"); enabled: false; variant: "solid" }
-                    KpButton { small: true; label: qsTr("Checker"); enabled: false; variant: "solid" }
-                    KpButton { small: true; label: qsTr("Stroke"); enabled: false; variant: "solid" }
-                    KpButton { small: true; label: qsTr("Stamps"); enabled: false; variant: "solid" }
-                    KpButton { small: true; label: qsTr("Pressure"); enabled: false; variant: "solid" }
-                    KpButton { objectName: "brushStudioCompare"; small: true; glyph: "swap"; label: qsTr("A/B"); enabled: false }
+                KpButton {
+                    objectName: "brushStudioPadUndo"
+                    visible: shelf.expanded
+                    small: true
+                    glyph: "undo"
+                    label: qsTr("Undo stroke")
+                    tip: qsTr("Undo the last test stroke, not a brush edit")
+                    enabled: pad.canUndoPad
+                    onClicked: { shelf.padNotice = ""; pad.undoPad() }
+                },
+                KpButton {
+                    objectName: "brushStudioPadClear"
+                    visible: shelf.expanded
+                    small: true
+                    glyph: "reset"
+                    label: qsTr("Clear")
+                    tip: qsTr("Clear the test pad and its stroke history")
+                    onClicked: { shelf.padNotice = ""; pad.clearPad() }
                 },
                 KpButton {
                     objectName: "brushStudioTogglePreview"
@@ -50,100 +61,60 @@ Rectangle {
                 }
             ]
         }
-        RowLayout {
-            visible: shelf.expanded
+        Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.margins: KP.gapM
-            spacing: KP.gapM
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                radius: KP.radiusXS
-                color: KP.previewPaper
-                Text {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.margins: KP.panelInset
-                    text: qsTr("CURRENT")
-                    color: KP.isDark ? KP.textOnAccent : KP.text
-                    font.family: KP.fontUi
-                    font.pixelSize: KP.fontMicro
-                    font.letterSpacing: KP.trackingMicro
-                }
-                Rectangle {
-                    visible: shelf.width >= 820
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    anchors.topMargin: KP.gapM
-                    anchors.bottomMargin: KP.gapM
-                    width: KP.hairlineWidth
-                    color: KP.border
-                }
-                Text {
-                    visible: shelf.width >= 820
-                    x: parent.width / 2 + KP.panelInset
-                    y: KP.panelInset
-                    text: qsTr("SAVED")
-                    color: KP.isDark ? KP.textOnAccent : KP.text
-                    font.family: KP.fontUi
-                    font.pixelSize: KP.fontMicro
-                    font.letterSpacing: KP.trackingMicro
-                }
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: KP.panelInset
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Math.max(0, (shelf.width >= 820 ? parent.width / 2 : parent.width) - 2 * KP.panelInset)
-                    text: qsTr("Live stroke rendering isn’t available in this build.")
-                    color: KP.isDark ? KP.textOnAccent : KP.text
-                    font.family: KP.fontUi
-                    font.pixelSize: KP.fontM
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                }
-                Text {
-                    visible: shelf.width >= 820
-                    x: parent.width / 2 + KP.panelInset
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Math.max(0, parent.width / 2 - 2 * KP.panelInset)
-                    text: qsTr("Saved comparison unavailable")
-                    color: KP.isDark ? KP.textOnAccent : KP.text
-                    font.family: KP.fontUi
-                    font.pixelSize: KP.fontM
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                }
+            Layout.margins: KP.gapS
+            visible: shelf.expanded
+            BrushStudioPad {
+                id: pad
+                objectName: "brushStudioPad"
+                anchors.fill: parent
+                clip: true
+                draft: shelf.draft
+                inputSettings: shelf.tabletSettings
+                brushColor: shelf.ink
+                deskColour: KP.previewPaper
+                checkerLight: KP.previewPaper
+                checkerDark: KP.previewPaper
+                enabled: renderIssue.length === 0
+                onStrokeError: function(message) { shelf.padNotice = message }
+                onPadNotice: function(message) { shelf.padNotice = message }
+                onRenderIssueChanged: shelf.padNotice = ""
             }
             Rectangle {
-                Layout.preferredWidth: Math.min(320, shelf.width * 0.25)
-                Layout.fillHeight: true
-                visible: shelf.width >= 820
+                visible: pad.renderIssue.length > 0
+                anchors.fill: parent
                 color: KP.panelInsetBg
-                radius: KP.radiusXS
-                ColumnLayout {
+                Text {
+                    objectName: "brushStudioPadIssue"
                     anchors.fill: parent
                     anchors.margins: KP.panelInset
-                    spacing: KP.gapS
-                    Text {
-                        text: qsTr("STAMPS  ·  SIZES")
-                        color: KP.textSectionLabel
-                        font.family: KP.fontUi
-                        font.pixelSize: KP.fontMicro
-                        font.letterSpacing: KP.trackingMicro
-                    }
-                    Text {
-                        Layout.fillWidth: true
-                        text: qsTr("Stamp and size samples require Live Preview.")
-                        color: KP.textSubtle
-                        font.family: KP.fontUi
-                        font.pixelSize: KP.fontS
-                        wrapMode: Text.WordWrap
-                    }
-                    Item { Layout.fillHeight: true }
+                    text: pad.renderIssue
+                    textFormat: Text.PlainText
+                    color: KP.text
+                    font.family: KP.fontUi
+                    font.pixelSize: KP.fontM
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    wrapMode: Text.Wrap
+                    elide: Text.ElideRight
                 }
             }
+        }
+        Text {
+            visible: shelf.expanded && shelf.padNotice.length > 0
+            Layout.fillWidth: true
+            Layout.leftMargin: KP.panelInset
+            Layout.rightMargin: KP.panelInset
+            text: shelf.padNotice
+            textFormat: Text.PlainText
+            color: KP.warning
+            font.family: KP.fontUi
+            font.pixelSize: KP.fontS
+            wrapMode: Text.Wrap
+            maximumLineCount: 2
+            elide: Text.ElideRight
         }
     }
 }

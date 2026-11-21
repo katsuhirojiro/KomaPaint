@@ -35,6 +35,7 @@
 #include "app/BrushLibraryStore.h"
 #include "app/BrushSettings.h"
 #include "app/BrushStudioModel.h"
+#include "app/BrushStudioPad.h"
 #include "app/CanvasViewport.h"
 #include "app/DockModel.h"
 #include "app/KomaPaintApp.h"
@@ -336,6 +337,7 @@ private slots:
     void paletteShowsEveryToolAndSelectsOnlyWorkingOnes();
     void brushStudioWindowIsIndependentAndReusable();
     void brushStudioCommandsAndCompactLayout();
+    void nativeBrushStudioPadToArtwork();
     void brushStudioComponentsAndReadOnlyEditor();
     void brushStudioRegistryInspectorAndCreatorExposure();
     void brushSizeGridSetsTheRealSize();
@@ -536,9 +538,10 @@ void TestBrushUi::brushStudioCommandsAndCompactLayout()
                                "brushStudioSettings", "brushStudioPreview"}) {
         QVERIFY2(control(region) && control(region)->isVisible() && control(region)->height() > 0, region);
     }
-    QVERIFY(control("brushStudioCompare") && !control("brushStudioCompare")->isEnabled());
+    QTRY_VERIFY(control("brushStudioPad") && control("brushStudioPad")->isEnabled());
     QVERIFY(chooseStudioSegment(studio, "brushStudioEngineChoice", 1, 2));
     QCOMPARE(draft->document().engine, brush::Engine::Realistic);
+    QTRY_VERIFY(!control("brushStudioPad")->isEnabled());
     QVERIFY(!app.workspace.isRealisticEngine());
 
     QVERIFY(press("brushStudioDraftName"));
@@ -614,6 +617,160 @@ void TestBrushUi::brushStudioCommandsAndCompactLayout()
     QTRY_VERIFY(!studio->isVisible());
     QVERIFY(app.window->isVisible());
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+}
+
+void TestBrushUi::nativeBrushStudioPadToArtwork()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiNativePipeline")));
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    QVERIFY(app.workspace.initializeSession(files.filePath(QStringLiteral("session.json"))));
+    app.workspace.setActiveTool(QStringLiteral("brush"));
+    auto* library = app.workspace.subTools();
+    library->selectTabById(library->defaultTabId());
+    const auto stockId = library->currentBrushId();
+    QVERIFY(!stockId.isEmpty());
+    auto* artwork = qobject_cast<CanvasDocument*>(app.canvas->document());
+    QVERIFY(artwork);
+    auto* layer = artwork->layers()->layerAt(0);
+    auto* history = app.workspace.history();
+    auto* settings = app.workspace.brush();
+    const auto legacy = brush::BrushDocument::fromLegacy(settings->toLegacyBrush(), "legacy", "Legacy");
+    const auto corner = app.canvas->documentToViewport(16, 16);
+    QVERIFY(app.canvas->beginStroke(corner.x(), corner.y(), 1, settings, Qt::blue));
+    app.canvas->endStroke(corner.x(), corner.y(), 1);
+    QVERIFY(history->canUndo());
+    const auto historyBytes = history->memoryBytes();
+    const auto artworkPixels = [&](const SparseTileStore& tiles) {
+        std::vector<std::uint32_t> pixels;
+        for (int y = 0; y < artwork->height(); ++y)
+            for (int x = 0; x < artwork->width(); ++x) pixels.push_back(tiles.pixel({x, y}).value_or(0));
+        return pixels;
+    };
+    const auto initial = artworkPixels(layer->tiles());
+
+    QVERIFY(QMetaObject::invokeMethod(app.root.get(), "openBrushStudio"));
+    QQuickWindow* studio = nullptr;
+    QTRY_VERIFY((studio = studioWindow()) && studio->isVisible());
+    studio->resize(1240, 780);
+    auto* draft = studio->findChild<BrushStudioModel*>();
+    QVERIFY(draft);
+    auto* pad = qobject_cast<BrushStudioPad*>(studioControl(studio, "brushStudioPad"));
+    QTRY_VERIFY(pad && pad->isVisible() && pad->height() >= 80);
+    QVERIFY(pad->document() != artwork && pad->history() != history && pad->brushSettings() != settings);
+
+    // Author an asymmetrical two-pixel image stamp through Studio. The RGB
+    // and alpha values below have no round-tip approximation that could pass.
+    auto authored = draft->document();
+    authored.name = "Two-texel pipeline test";
+    authored.components[0].kind = brush::ComponentKind::ColourImage;
+    authored.components[0].parameters = {};
+    QVERIFY(authored.setParameter("size", 24.5));
+    brush::BrushResource placeholder;
+    placeholder.id = "temporary";
+    placeholder.kind = brush::ResourceKind::Rgba8;
+    placeholder.width = placeholder.height = 1;
+    placeholder.setPixels({0, 0, 0, 255});
+    authored.components[0].resourceId = placeholder.id;
+    QVERIFY(authored.addResource(std::move(placeholder)));
+    QVERIFY(draft->setDocument(std::move(authored)));
+    const auto png = files.filePath(QStringLiteral("Tip.png"));
+    QImage image(2, 1, QImage::Format_RGBA8888);
+    image.setPixelColor(0, 0, QColor(255, 95, 29));
+    image.setPixelColor(1, 0, QColor(0, 0, 255, 0));
+    QVERIFY(image.save(png));
+    auto* tipDialog = studio->findChild<QObject*>(QStringLiteral("brushStudioTipImageDialog"));
+    QVERIFY(tipDialog && tipDialog->setProperty("options", int(QFileDialog::DontUseNativeDialog)));
+    QVERIFY(tipDialog->setProperty("selectedFile", QUrl::fromLocalFile(png)));
+    QVERIFY(pressStudio(studio, "brushStudioLoadTipImage"));
+    QTRY_VERIFY(tipDialog->property("visible").toBool());
+    QVERIFY(QMetaObject::invokeMethod(tipDialog, "accept"));
+    QTRY_VERIFY(draft->selectedResource() && draft->selectedResource()->width == 2);
+    QVERIFY2(draft->error().isEmpty(), qPrintable(draft->error()));
+    QVERIFY(draft->isModified());
+    QVERIFY2(pad->renderIssue().isEmpty(), qPrintable(pad->renderIssue()));
+    const auto unsaved = draft->document();
+    const auto* padDoc = qobject_cast<CanvasDocument*>(pad->document());
+    QVERIFY(padDoc);
+    const auto& padTiles = padDoc->layers()->layerAt(0)->tiles();
+    const auto nativeFile = files.filePath(QStringLiteral("Pipeline.kb"));
+
+    // Real mouse freehand in the expanded shelf, at exactly the same document
+    // coordinates another viewport will use below (including rounding by Qt).
+    pad->restoreView(100, 160, 120);
+    const auto startAt = pad->mapToScene(pad->documentToViewport(140, 120)).toPoint();
+    const auto endAt = pad->mapToScene(pad->documentToViewport(180, 126)).toPoint();
+    const auto docPoint = [&](const QPoint& windowPoint) {
+        const auto viewPoint = pad->mapFromScene(windowPoint);
+        return pad->viewportToDocument(viewPoint.x(), viewPoint.y());
+    };
+    const auto begin = docPoint(startAt);
+    const auto end = docPoint(endAt);
+    const auto drawOnPad = [&] {
+        QTest::mousePress(studio, Qt::LeftButton, Qt::NoModifier, startAt);
+        QTest::mouseMove(studio, endAt, 20);
+        QTest::mouseRelease(studio, Qt::LeftButton, Qt::NoModifier, endAt);
+    };
+    drawOnPad();
+    QTRY_VERIFY(pad->canUndoPad());
+    const auto sx = std::int64_t(std::floor(begin.x())) - 8;
+    const auto sy = std::int64_t(std::floor(begin.y()));
+    QCOMPARE(padTiles.pixel({sx, sy}).value(), 0xffff5f1dU);
+    QVERIFY(!QFile::exists(nativeFile));
+    QCOMPARE(artworkPixels(layer->tiles()), initial);
+    QCOMPARE(history->memoryBytes(), historyBytes);
+    QCOMPARE(library->currentBrushId(), stockId);
+    QVERIFY(brush::BrushDocument::fromLegacy(settings->toLegacyBrush(), "legacy", "Legacy") == legacy);
+
+    QVERIFY(pressStudio(studio, "brushStudioPadUndo"));
+    QCOMPARE(padTiles.allocatedTiles(), std::size_t(0));
+    QVERIFY(draft->document() == unsaved && draft->isModified());
+    drawOnPad();
+    QVERIFY(pad->canUndoPad());
+    QVERIFY(pressStudio(studio, "brushStudioPadClear"));
+    QCOMPARE(padTiles.allocatedTiles(), std::size_t(0));
+    QVERIFY(!pad->canUndoPad());
+    drawOnPad();
+    QTRY_VERIFY(pad->canUndoPad());
+    const auto testPixels = artworkPixels(padTiles);
+
+    QVariant saved;
+    QVERIFY(QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
+                                      Q_ARG(QVariant, QVariant::fromValue(QUrl::fromLocalFile(nativeFile)))));
+    QVERIFY(saved.toBool() && !draft->isModified() && QFile::exists(nativeFile));
+    QCOMPARE(library->currentBrushId(), stockId);
+    studio->close();
+    library->setSearchText(QString::fromStdString(unsaved.name));
+    const auto rows = library->subTools();
+    QCOMPARE(rows.size(), 1);
+    const auto row = rows.first().toMap();
+    QVERIFY(row.value(QStringLiteral("nativeBrush")).toBool());
+    auto* listRow = item(app, QStringLiteral("subTool%1").arg(row.value(QStringLiteral("index")).toInt()));
+    QTRY_VERIFY((listRow = item(app, QStringLiteral("subTool%1").arg(row.value(QStringLiteral("index")).toInt()))) && listRow->isVisible());
+    click(app, listRow);
+    QCOMPARE(library->currentBrushId(), row.value(QStringLiteral("id")).toString());
+    QVERIFY(settings->nativeBrushDocument() && *settings->nativeBrushDocument() == unsaved);
+
+    const auto artworkBegin = app.canvas->documentToViewport(begin.x(), begin.y());
+    const auto artworkEnd = app.canvas->documentToViewport(end.x(), end.y());
+    QVERIFY(app.canvas->beginStroke(artworkBegin.x(), artworkBegin.y(), 1, settings, Qt::black));
+    app.canvas->continueStroke(artworkEnd.x(), artworkEnd.y(), 1);
+    app.canvas->endStroke(artworkEnd.x(), artworkEnd.y(), 1);
+    auto expected = initial;
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        if (!testPixels[i]) continue;
+        QCOMPARE(initial[i], 0U);
+        expected[i] = testPixels[i];
+    }
+    QCOMPARE(artworkPixels(layer->tiles()), expected);
+    QVERIFY(history->memoryBytes() > historyBytes);
+    const auto koma = files.filePath(QStringLiteral("Pipeline.koma"));
+    QVERIFY(app.workspace.saveToPath(koma));
+    WorkspaceState reopened;
+    QVERIFY(reopened.openFromPath(koma));
+    QCOMPARE(artworkPixels(reopened.layers()->layerAt(0)->tiles()), expected);
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(u'\n')));
 }
 
 void TestBrushUi::brushStudioComponentsAndReadOnlyEditor()

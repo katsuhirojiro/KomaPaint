@@ -61,7 +61,20 @@ Rectangle {
         return Math.max(1, Math.min(largest, Math.round(Math.pow(largest, t))))
     }
 
+    Text {
+        visible: panel.brush.nativeBrush
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: KP.panelInset
+        text: qsTr("Size is set in the native brush. Edit it in Brush Studio.")
+        wrapMode: Text.Wrap
+        color: KP.textMuted
+        font.pixelSize: KP.fontS
+    }
+
     ColumnLayout {
+        visible: !panel.brush.nativeBrush
         anchors.fill: parent
         spacing: 0
 

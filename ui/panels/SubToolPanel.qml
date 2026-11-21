@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import "../components"
 import "../themes"
@@ -49,6 +50,7 @@ Rectangle {
     }
 
     function presetBadgeText(preset) {
+        if (preset.nativeBrush) return ""
         const exec = preset.executableTool || Workspace.activeTool
         if (isStrokeRow(preset)) {
             if (exec === "boundary_eraser") return qsTr("Boundary")
@@ -63,6 +65,7 @@ Rectangle {
     }
 
     function tipLabel(preset) {
+        if (preset.nativeBrush) return qsTr("Native Digital")
         const exec = preset.executableTool || Workspace.activeTool
         if (exec === "boundary_eraser") return qsTr("boundary-aware")
         if (exec === "smart_fill") {
@@ -695,7 +698,7 @@ Rectangle {
                         border.color: KP.hairline
 
                         BrushStrokePreview {
-                            visible: panel.isStrokeRow(row.modelData)
+                            visible: panel.isStrokeRow(row.modelData) && !row.modelData.nativeBrush
                             anchors.fill: parent
                             anchors.margins: 2
                             brushSize: row.modelData.size
@@ -711,6 +714,13 @@ Rectangle {
                             blendStrength: row.modelData.blendStrength || 0
                             scaleHint: 0.60
                             ink: KP.text
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            visible: row.modelData.nativeBrush
+                            text: qsTr(".kb")
+                            color: KP.textMuted
+                            font.pixelSize: KP.fontXS
                         }
                         KpIcon {
                             visible: !panel.isStrokeRow(row.modelData)
@@ -859,11 +869,24 @@ Rectangle {
         }
     }
 
+    FileDialog {
+        id: installNativeBrush
+        title: qsTr("Install a KomaPaint brush")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("KomaPaint brushes (*.kb)")]
+        onAccepted: panel.library.registerNativeBrush(selectedFile)
+    }
+
     // ---- Context Menu: Tab Management
     KpMenu {
         id: tabContextMenu
         objectName: "collectionTabMenu"
 
+        KpMenuItem {
+            visible: panel.isBrushTool && !panel.realisticEngine
+            text: qsTr("Install .kb…")
+            onTriggered: installNativeBrush.open()
+        }
         KpMenuItem {
             objectName: "tabMenuRename"
             text: qsTr("Rename Tab…")
