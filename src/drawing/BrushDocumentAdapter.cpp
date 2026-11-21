@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
+#include <new>
+#include <stdexcept>
+#include <string_view>
 
 namespace komapaint {
 namespace {
@@ -292,6 +296,107 @@ void assignPaint(material::BrushDefinition* definition,
 
 } // namespace
 
+std::string digitalBrushIssue(const brush::BrushDocument& doc) {
+    using brush::ComponentKind;
+    using brush::Signal;
+    if (doc.engine != brush::Engine::Digital)
+        return "Native Realistic brushes can be saved, but this renderer only paints native Digital brushes.";
+    const auto validation = doc.validate();
+    if (!validation.ok()) return validation.summary();
+    if (doc.formatFlags || !doc.opaqueChunks.empty())
+        return "This brush contains native extensions this renderer cannot interpret. The extensions are preserved on save.";
+
+    constexpr std::string_view brushValues[] = {
+        "size", "opacity", "flow", "spacing", "hardness", "aspect", "tip-angle",
+        "pressure-size", "pressure-opacity", "pressure-flow", "pressure-gamma", "min-size-ratio",
+        "tilt-size", "tilt-angle", "follow-rotation", "follow-direction", "blend-strength", "color-mix",
+        "stabilization", "rotation-offset", "scatter-x", "scatter-y", "scatter-count", "cluster", "sequence-step"
+    };
+    auto contains = [](const auto& keys, std::string_view key) {
+        return std::find(std::begin(keys), std::end(keys), key) != std::end(keys);
+    };
+    for (const auto& [name, value] : doc.parameters.entries()) {
+        const auto* info = brush::findParameter(name);
+        // A missing taper is off in this renderer; the registry's suggested
+        // editor value is not a supported taper (even if explicitly set to 20).
+        const bool taper = name == "taper-in" || name == "taper-out";
+        if (!contains(brushValues, name) && (!info || value != (taper ? 0.0 : info->defaultValue)))
+            return "Digital painting does not yet support " + std::string(info ? info->label : name.c_str()) + ".";
+    }
+    for (const auto& binding : doc.dynamics) {
+        if (binding.amount == 0.0) continue;
+        const char* explicitKey = nullptr;
+        if (binding.signal == Signal::Pressure) {
+            if (binding.parameter == "size") explicitKey = "pressure-size";
+            if (binding.parameter == "opacity") explicitKey = "pressure-opacity";
+            if (binding.parameter == "flow") explicitKey = "pressure-flow";
+        } else if (binding.signal == Signal::Tilt && binding.parameter == "size") {
+            explicitKey = "tilt-size";
+        }
+        double amount = binding.amount * 100;
+        if (binding.parameter == "opacity") amount = 100 - amount;
+        if (!explicitKey || !binding.perStamp || binding.amount > 1.0 ||
+            binding.curve != brush::ResponseCurve::linear() ||
+            (doc.parameters.contains(explicitKey) && std::abs(stored(doc, explicitKey) - amount) > 1.0e-9))
+            return "This Digital renderer cannot apply the stored response for '" + binding.parameter + "'.";
+    }
+    constexpr std::string_view variableValues[] = {
+        "rotation-offset", "scatter-x", "scatter-y", "scatter-count", "cluster", "component-scale", "component-opacity"
+    };
+    for (const auto& rule : doc.randomization) {
+        if (rule.enabled && (!contains(variableValues, rule.parameter) || !std::isfinite(rule.minimum) ||
+                             !std::isfinite(rule.maximum) || !std::isfinite(rule.maximum - rule.minimum)))
+            return "This Digital renderer cannot apply the stored variation for '" + rule.parameter + "'.";
+    }
+
+    for (const auto& generator : doc.generators) {
+        if (!generator.enabled) continue;
+        if (generator.kind != brush::GeneratorKind::Continuous || !generator.parameters.empty())
+            return "Digital painting does not yet support the stored '" + std::string(brush::toString(generator.kind)) +
+                   "' generator or its overrides.";
+    }
+    auto hasGenerator = [&](std::string_view groupId) {
+        for (const auto& generator : doc.generators) {
+            // An ungrouped generator paints ungrouped components, not all groups.
+            if (generator.enabled && generator.groupId == groupId) return true;
+        }
+        return false;
+    };
+    bool hasTip = false;
+    for (const auto& component : doc.components) {
+        if (!component.visible) continue;
+        bool connected = hasGenerator(component.groupId);
+        for (const auto* group = doc.group(component.groupId); group && !connected && !group->parentGroupId.empty();
+             group = doc.group(group->parentGroupId)) {
+            connected = hasGenerator(group->parentGroupId);
+        }
+        if (!connected) continue;
+        hasTip = true;
+        const std::string label = component.name.empty() ? component.id : component.name;
+        if (component.blend != brush::ComponentBlend::Normal || !component.maskComponentId.empty())
+            return "Component '" + label + "' uses a blend or mask not yet supported in Digital painting.";
+        if (component.kind == ComponentKind::ProceduralShape && component.resourceId.empty()) {
+            for (const auto& [key, value] : component.parameters.entries()) {
+                (void)value;
+                if (key != "tip-shape") return "Component '" + label + "' has unsupported tip settings.";
+            }
+            continue;
+        }
+        const bool colour = component.kind == ComponentKind::Image || component.kind == ComponentKind::ColourImage;
+        if (!(colour || component.kind == ComponentKind::Tip) || !component.parameters.empty())
+            return "Digital painting does not yet support component '" + label + "' (" + brush::toString(component.kind) + ").";
+        const auto* bitmap = doc.resource(component.resourceId);
+        if (!bitmap || (colour && bitmap->kind != brush::ResourceKind::Rgba8))
+            return "Component '" + label + "' needs " + (colour ? "an RGBA image." : "valid tip pixels.");
+        if (stored(doc, "hardness") != 100.0)
+            return "Bitmap tips use their own edges. Digital painting cannot apply the stored Hardness to '" + label + "'.";
+        if (colour && stored(doc, "blend-strength") != 0.0)
+            return "Colour image stamps do not support Digital smudging yet ('" + label + "').";
+    }
+    if (!hasTip) return "No visible tip is connected to an enabled generator.";
+    return {};
+}
+
 BrushDefinition digitalDefinition(const brush::LegacyBrush& legacy,
                                   const StrokeRuntime& runtime) {
     const ResolvedValues v = resolve(legacy);
@@ -340,7 +445,32 @@ void assignInitialPaint(material::BrushDefinition* definition,
 
 DocumentStroke::DocumentStroke(SparseTileStore& store, brush::BrushDocument document,
                                BrushDefinition base, std::uint32_t strokeSeed)
-    : m_document(std::move(document)), m_base(base), m_strokeSeed(strokeSeed) {
+    : DocumentStroke(store, std::make_shared<const brush::BrushDocument>(std::move(document)),
+                     base, strokeSeed, false) {}
+
+DocumentStroke::DocumentStroke(SparseTileStore& store, std::shared_ptr<const brush::BrushDocument> document,
+                               BrushDefinition base, std::uint32_t strokeSeed, bool native)
+    : m_document(std::move(document)), m_native(native), m_base(base), m_strokeSeed(strokeSeed) {
+    if (!m_document) { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; return; }
+    // Off-canvas input can still leave visible pixels after per-component
+    // scale, rotation or scattering. Use a conservative footprint in the
+    // shared scheduler; the rasterizer clips the actual dab to the tiles.
+    auto maxParameter = [&](const char* name) {
+        for (const auto& rule : m_document->randomization)
+            if (rule.enabled && rule.parameter == name) return brush::findParameter(name)->maximum;
+        return stored(*m_document, name);
+    };
+    const double scatter = std::hypot(maxParameter("scatter-x"), maxParameter("scatter-y"))
+                           * (1.0 + maxParameter("cluster") / 100.0) / 100.0;
+    const double scale = maxParameter("component-scale") / 100.0;
+    for (const auto& component : m_document->components) {
+        if (!component.visible) continue;
+        const auto& t = component.transform;
+        const double offset = std::hypot(t.offsetX / 100.0, t.offsetY / 100.0);
+        const double extent = t.scale * scale * (component.resourceId.empty() ? 1.0 : std::sqrt(2.0));
+        m_base.stampReach = std::max(m_base.stampReach, offset + scatter + extent);
+    }
+    if (!std::isfinite(m_base.stampReach)) { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; return; }
     m_stroke = std::make_unique<BrushStroke>(store, m_base, &DocumentStroke::sink, this);
     if (m_stroke->failed()) {
         m_failed = true;
@@ -367,7 +497,13 @@ SparseTileStore::WriteResult DocumentStroke::sink(SparseTileStore& store,
                                                   void* context) {
     auto* self = static_cast<DocumentStroke*>(context);
     if (!self) return SparseTileStore::WriteResult::InvalidPixel;
-    return self->paintStamp(store, brush, sample, strokeAngle, carryPremul, hasCarry);
+    try {
+        return self->paintStamp(store, brush, sample, strokeAngle, carryPremul, hasCarry);
+    } catch (const std::bad_alloc&) {
+        return SparseTileStore::WriteResult::AllocationFailed;
+    } catch (const std::length_error&) {
+        return SparseTileStore::WriteResult::AllocationFailed;
+    }
 }
 
 SparseTileStore::WriteResult DocumentStroke::paintStamp(SparseTileStore& store,
@@ -390,12 +526,12 @@ SparseTileStore::WriteResult DocumentStroke::paintStamp(SparseTileStore& store,
     context.input.directionRadians = 0.0;
     context.input.distance = m_distance;
     context.sizePixels = brush.size;
-    context.brushSeed = m_document.seed;
+    context.brushSeed = m_document->seed;
     context.strokeSeed = m_strokeSeed;
     context.stampIndex = m_stampCount;
 
     const std::vector<brush::DrawRequest> requests =
-        brush::BrushEvaluator::evaluate(m_document, context);
+        brush::BrushEvaluator::evaluate(*m_document, context);
 
     if (m_stampCount > 0) {
         m_distance += std::hypot(sample.x - m_lastX, sample.y - m_lastY);
@@ -408,30 +544,31 @@ SparseTileStore::WriteResult DocumentStroke::paintStamp(SparseTileStore& store,
     const double radius = brush.size / 2.0;
     SparseTileStore::WriteResult combined = SparseTileStore::WriteResult::Unchanged;
     for (const brush::DrawRequest& request : requests) {
-        // The common case -- one component, no transform -- uses the stroke's
-        // own definition untouched. That is what makes a migrated brush paint
-        // the same pixels as the flat record it came from.
+        const auto* component = m_document->component(request.componentId);
+        if (!component || request.blend != brush::ComponentBlend::Normal || !component->maskComponentId.empty())
+            return SparseTileStore::WriteResult::InvalidPixel;
         BrushDefinition dabBrush = brush;
+        dabBrush.nativeAspect = m_native;
+        if (component->kind == brush::ComponentKind::ProceduralShape) {
+            dabBrush.tip = digitalTipForShape(component->parameters.value("tip-shape", 0.0));
+        } else if (component->kind == brush::ComponentKind::Tip || component->kind == brush::ComponentKind::Image ||
+                   component->kind == brush::ComponentKind::ColourImage) {
+            dabBrush.bitmapTip = m_document->resource(component->resourceId);
+            dabBrush.bitmapColour = component->kind != brush::ComponentKind::Tip;
+            if (!dabBrush.bitmapTip) return SparseTileStore::WriteResult::InvalidPixel;
+        } else {
+            return SparseTileStore::WriteResult::InvalidPixel;
+        }
         InputSample dabSample = sample;
-        if (request.scale != 1.0) dabBrush.size = brush.size * request.scale;
-        if (request.opacity != 1.0) {
-            dabBrush.opacity = brush.opacity * request.opacity;
-            dabBrush.flow = brush.flow * request.opacity;
-        }
-        if (request.rotationDegrees != 0.0) {
-            dabBrush.angleRadians = brush.angleRadians + request.rotationDegrees * (kPi / 180.0);
-        }
-        if (request.aspect != 1.0) dabBrush.aspectRatio = brush.aspectRatio * request.aspect;
-        if (request.flipX) dabBrush.angleRadians += kPi;
-        if (request.flipY) dabBrush.aspectRatio = -dabBrush.aspectRatio;
+        dabBrush.size *= request.scale;
+        dabBrush.opacity *= request.opacity;
+        dabBrush.angleRadians += request.rotationDegrees * (kPi / 180.0);
+        dabBrush.aspectRatio *= request.aspect;
+        dabBrush.flipX = request.flipX;
+        dabBrush.flipY = request.flipY;
         if (request.erases) dabBrush.erase = true;
-        if (request.offsetX != 0.0 || request.offsetY != 0.0) {
-            dabSample.x = sample.x + request.offsetX * radius;
-            dabSample.y = sample.y + request.offsetY * radius;
-        }
-        // Component blends other than Normal are evaluated and reported but the
-        // dab path composites Normal only; the Studio surfaces that rather than
-        // pretending the blend happened.
+        dabSample.x += request.offsetX * radius;
+        dabSample.y += request.offsetY * radius;
 
         const auto result = BrushRasterizer::dab(store, dabBrush, dabSample, strokeAngle,
                                                  carryPremul, hasCarry);

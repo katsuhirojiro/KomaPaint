@@ -11,6 +11,7 @@
 // offsets, and reproducibility from a seed.
 //
 // Qt-free, like the engine it tests.
+#include "brush/BrushFormat.h"
 #include "brush/BrushModel.h"
 #include "drawing/BrushDocumentAdapter.h"
 #include "drawing/BrushEngine.h"
@@ -539,6 +540,122 @@ void testRandomizationReachesThePixels() {
     CHECK(hashOf(pixelsOf(steadyStore)) != paint(21u));
 }
 
+BrushDocument bitmapDocument(ResourceKind kind, std::vector<std::uint8_t> pixels) {
+    BrushDocument doc = multiComponentDocument(SelectionMode::All, 1, 1);
+    doc.setParameter("size", 16.0);
+    doc.setParameter("opacity", 100.0);
+    doc.setParameter("flow", 100.0);
+    doc.setParameter("hardness", 100.0);
+    auto* tip = doc.component("c1");
+    tip->transform = {};
+    tip->parameters = {};
+    tip->kind = kind == ResourceKind::Rgba8 ? ComponentKind::ColourImage : ComponentKind::Tip;
+    tip->resourceId = "pixels";
+    BrushResource resource;
+    resource.id = tip->resourceId;
+    resource.width = 2;
+    resource.height = 1;
+    resource.kind = kind;
+    resource.setPixels(std::move(pixels));
+    CHECK(doc.addResource(std::move(resource)));
+    CHECK(drawing::digitalBrushIssue(doc).empty());
+    return doc;
+}
+
+std::vector<std::uint32_t> paintNative(const BrushDocument& doc, bool artworkMask = false,
+                                       bool tap = true) {
+    const auto native = std::make_shared<const BrushDocument>(doc);
+    SparseTileStore store(kWidth, kHeight);
+    StrokeRuntime runtime{0xff2468ac, false};
+    auto brush = drawing::digitalDefinition(*native, runtime);
+    if (artworkMask) brush.pixelMask = [](void*, std::int64_t x, std::int64_t) noexcept {
+        return x < 48 ? 0.5 : 0.0;
+    };
+    drawing::DocumentStroke stroke(store, native, brush, 541u);
+    const InputSample p{48, 48, 1};
+    CHECK(stroke.begin(p));
+    if (!tap) {
+        for (const auto& sample : strokePath()) CHECK(stroke.extend(sample));
+    } else {
+        CHECK(stroke.end(p));
+    }
+    CHECK(!stroke.failed());
+    return pixelsOf(store);
+}
+
+std::uint32_t at(const std::vector<std::uint32_t>& pixels, int x, int y) {
+    return pixels[std::size_t(y * kWidth + x)];
+}
+
+void testBitmapTipPaintsActualPixels() {
+    auto doc = bitmapDocument(ResourceKind::Grayscale8, {255, 0});
+    const auto pixels = paintNative(doc);
+    CHECK(at(pixels, 42, 48) == 0xff2468acU);
+    CHECK(at(pixels, 53, 48) == 0);
+    CHECK(at(pixels, 42, 42) == 0); // 2:1 source rectangle, not an ellipse
+    CHECK(at(pixels, 48, 48) != 0 && (at(pixels, 48, 48) >> 24) < 255);
+    const auto masked = paintNative(doc, true);
+    CHECK((at(masked, 42, 48) >> 24) == 128);
+    CHECK(at(masked, 48, 48) == 0); // artwork selection still gates bitmap coverage
+    doc.components[0].transform.flipX = true;
+    const auto flipped = paintNative(doc);
+    CHECK(at(flipped, 42, 48) == 0);
+    CHECK(at(flipped, 53, 48) == 0xff2468acU);
+
+    doc.components[0].transform.rotationDegrees = 90;
+    const auto rotated = paintNative(doc);
+    CHECK(at(rotated, 48, 53) == 0xff2468acU);
+    CHECK(at(rotated, 48, 42) == 0);
+    CHECK(at(rotated, 53, 48) == 0);
+}
+
+void testColourPixelsAndNativeRoundTrip() {
+    auto doc = bitmapDocument(ResourceKind::Rgba8, {255, 24, 0, 128, 0, 0, 255, 0});
+    const auto tap = paintNative(doc);
+    CHECK(at(tap, 42, 48) == 0x80800c00U);
+    CHECK(at(tap, 53, 48) == 0);
+    CHECK((at(tap, 48, 48) & 255u) == 0); // transparent blue does not bleed into red
+    const auto bytes = encodeBrush(doc);
+    BrushDocument reloaded;
+    DecodeResult decoded;
+    CHECK(decodeBrush(bytes.data(), bytes.size(), &reloaded, &decoded));
+    CHECK(drawing::digitalBrushIssue(reloaded).empty());
+    CHECK(paintNative(doc, false, false) == paintNative(reloaded, false, false));
+    reloaded.resources[0].setPixels({0, 255, 0, 128, 0, 0, 255, 0});
+    CHECK(paintNative(reloaded) != tap);
+    reloaded.components[0].kind = ComponentKind::Tip;
+    CHECK(at(paintNative(reloaded), 42, 48) == 0x80123456U); // RGBA tip uses alpha, not imported hue
+}
+
+void testUnsupportedAndBadAssetsAreDiagnosed() {
+    const auto bitmap = bitmapDocument(ResourceKind::Alpha8, {0, 255});
+    auto broken = bitmap;
+    broken.resources.clear();
+    CHECK(drawing::digitalBrushIssue(broken).find("missing resource") != std::string::npos);
+    broken = bitmap;
+    broken.resources[0].setPixels({255});
+    CHECK(!drawing::digitalBrushIssue(broken).empty());
+    auto native = std::make_shared<const BrushDocument>(broken);
+    SparseTileStore store(kWidth, kHeight);
+    drawing::DocumentStroke rejected(store, native, drawing::digitalDefinition(*native, {}), 1u);
+    CHECK(!rejected.begin({48, 48, 1}));
+    CHECK(rejected.failed());
+    CHECK(changedPixels(pixelsOf(store)) == 0);
+
+    auto unsupported = bitmap;
+    unsupported.components[0].blend = ComponentBlend::Multiply;
+    CHECK(drawing::digitalBrushIssue(unsupported).find("blend") != std::string::npos);
+    unsupported = bitmap;
+    unsupported.setParameter("taper-out", 20);
+    CHECK(drawing::digitalBrushIssue(unsupported).find("Taper out") != std::string::npos);
+    unsupported = bitmap;
+    unsupported.opaqueChunks.push_back({"FUTR", "retained"});
+    CHECK(drawing::digitalBrushIssue(unsupported).find("extensions") != std::string::npos);
+    unsupported = bitmap;
+    unsupported.engine = Engine::Realistic;
+    CHECK(drawing::digitalBrushIssue(unsupported).find("Realistic") != std::string::npos);
+}
+
 void testInvalidStrokeIsReportedNotSilent() {
     // A size below the engine's minimum must fail loudly, exactly as the flat
     // path does, rather than painting nothing.
@@ -568,6 +685,9 @@ int main() {
     testHiddenComponentsDoNotPaint();
     testRandomizationReachesThePixels();
     testInvalidStrokeIsReportedNotSilent();
+    testBitmapTipPaintsActualPixels();
+    testColourPixelsAndNativeRoundTrip();
+    testUnsupportedAndBadAssetsAreDiagnosed();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -1,5 +1,5 @@
 #include "BrushEngine.h"
-#include "brush/BrushTypes.h"
+#include "brush/BrushModel.h"
 #include "core/FastRounding.h"
 #include <algorithm>
 #include <cmath>
@@ -53,6 +53,40 @@ std::uint32_t lerpPremul(std::uint32_t a, std::uint32_t b, double t)
     const unsigned outG = std::min(outA, ch(8));
     const unsigned outB = std::min(outA, ch(0));
     return (outA << 24) | (outR << 16) | (outG << 8) | outB;
+}
+
+struct BitmapSample {
+    double coverage = 0;
+    std::uint32_t colour = 0;
+};
+
+// UVs refer to the original image rectangle, not a procedural ellipse. Filter
+// in premultiplied space so RGB in a transparent texel can't fringe a mark.
+BitmapSample sampleBitmap(const brush::BrushResource& bitmap, double u, double v,
+                          bool colour) noexcept {
+    if (!(std::abs(u) < 1.0 && std::abs(v) < 1.0)) return {};
+    const auto& bytes = bitmap.pixels();
+    const double px = std::clamp((u + 1.0) * (bitmap.width * 0.5) - 0.5, 0.0, double(bitmap.width - 1));
+    const double py = std::clamp((v + 1.0) * (bitmap.height * 0.5) - 0.5, 0.0, double(bitmap.height - 1));
+    const int x0 = static_cast<int>(px), y0 = static_cast<int>(py);
+    const int x1 = std::min(x0 + 1, bitmap.width - 1), y1 = std::min(y0 + 1, bitmap.height - 1);
+    const double fx = px - x0, fy = py - y0;
+    const bool rgba = bitmap.kind == brush::ResourceKind::Rgba8;
+    double alpha = 0, red = 0, green = 0, blue = 0;
+    auto add = [&](int x, int y, double weight) {
+        const auto i = std::size_t(y) * std::size_t(bitmap.width) + std::size_t(x);
+        if (!rgba) { alpha += bytes[i] * weight; return; }
+        const auto* pixel = bytes.data() + i * 4;
+        const double a = pixel[3] * weight;
+        alpha += a;
+        if (colour) { red += pixel[0] * a; green += pixel[1] * a; blue += pixel[2] * a; }
+    };
+    add(x0, y0, (1.0 - fx) * (1.0 - fy)); add(x1, y0, fx * (1.0 - fy));
+    add(x0, y1, (1.0 - fx) * fy); add(x1, y1, fx * fy);
+    if (alpha <= 0.0) return {};
+    auto straight = [&](double c) { return static_cast<std::uint32_t>(std::clamp(c / alpha + 0.5, 0.0, 255.0)); };
+    return {clamp01(alpha / 255.0), colour ? (0xff000000U | (straight(red) << 16) |
+                                               (straight(green) << 8) | straight(blue)) : 0U};
 }
 
 struct Batch {
@@ -156,7 +190,7 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
 {
     using R = SparseTileStore::WriteResult;
     if (!valid(p) || !std::isfinite(b.size) || !std::isfinite(b.opacity) || !std::isfinite(b.flow)
-        || b.size < 1 || b.opacity < 0 || b.opacity > 1 || b.flow < 0 || b.flow > 1
+        || (b.nativeAspect ? b.size <= 0.0 : b.size < 1.0) || b.opacity < 0 || b.opacity > 1 || b.flow < 0 || b.flow > 1
         || !std::isfinite(b.hardness) || b.hardness < 0 || b.hardness > 1
         || !std::isfinite(b.aspectRatio) || !std::isfinite(b.angleRadians)
         || !std::isfinite(b.pressureSize) || !std::isfinite(b.pressureOpacity)
@@ -189,9 +223,13 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const double pFlowWeight = clamp01(b.pressureFlow);
     const double pressureFlowScale = (1.0 - pFlowWeight) + pFlowWeight * pShaped;
 
-    if (!std::isfinite((radius + 0.5) * (radius + 0.5))) return R::InvalidPixel;
-    const auto docBounds = g.rasterBounds(p.x - radius - 1, p.y - radius - 1,
-                                          p.x + radius + 1, p.y + radius + 1);
+    const auto* bitmap = b.bitmapTip;
+    if (bitmap && (!bitmap->expectedBytes() || bitmap->pixels().size() != bitmap->expectedBytes() ||
+                   (b.bitmapColour && bitmap->kind != brush::ResourceKind::Rgba8))) return R::InvalidPixel;
+    const double reach = bitmap ? radius * std::sqrt(2.0) : radius;
+    if (!std::isfinite((reach + 0.5) * (reach + 0.5))) return R::InvalidPixel;
+    const auto docBounds = g.rasterBounds(p.x - reach - 1, p.y - reach - 1,
+                                          p.x + reach + 1, p.y + reach + 1);
     if (!docBounds) return R::Unchanged;
     const auto [docLeft, docTop, docRight, docBottom] = *docBounds;
     const auto tileRange = g.tilesForRect(*docBounds);
@@ -208,10 +246,16 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const bool hasRotation = totalAngle != 0.0;
     const double cosA = hasRotation ? std::cos(-totalAngle) : 1.0;
     const double sinA = hasRotation ? std::sin(-totalAngle) : 0.0;
-    const double baseAspect = std::clamp(b.aspectRatio, 1.0, 4.0);
-    const double aspect = (p.hasTilt && b.tiltAngle)
-        ? std::clamp(baseAspect * (1.0 + tiltMag * 0.75), 1.0, 4.0)
-        : baseAspect;
+    if (b.nativeAspect && !(b.aspectRatio > 0.0)) return R::InvalidPixel;
+    const double baseAspect = b.nativeAspect ? b.aspectRatio : std::clamp(b.aspectRatio, 1.0, 4.0);
+    const double tiltedAspect = baseAspect * ((p.hasTilt && b.tiltAngle) ? (1.0 + tiltMag * 0.75) : 1.0);
+    const double aspectY = b.nativeAspect ? std::max(1.0, tiltedAspect) : std::clamp(tiltedAspect, 1.0, 4.0);
+    const double aspectX = b.nativeAspect ? std::max(1.0, 1.0 / tiltedAspect) : 1.0;
+    if (!std::isfinite(aspectX) || !std::isfinite(aspectY)) return R::InvalidPixel;
+    const double longSide = bitmap ? double(std::max(bitmap->width, bitmap->height)) : 1.0;
+    const double bitmapX = bitmap ? (longSide / bitmap->width) * aspectX / radius : 0.0;
+    const double bitmapY = bitmap ? (longSide / bitmap->height) * aspectY / radius : 0.0;
+    if (!std::isfinite(bitmapX) || !std::isfinite(bitmapY)) return R::InvalidPixel;
     const double softness = 1.0 - clamp01(b.hardness);
     const double radiusPlusHalf = radius + 0.5;
     const double maxDistSq = radiusPlusHalf * radiusPlusHalf;
@@ -244,8 +288,9 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
             lx = dx * cosA - dy * sinA;
             ly = dx * sinA + dy * cosA;
         }
-        const double sy = ly * aspect;
-        const double distSq = lx * lx + sy * sy;
+        const double sx = lx * aspectX;
+        const double sy = ly * aspectY;
+        const double distSq = sx * sx + sy * sy;
         if (distSq >= maxDistSq) return 0.0;
         double coverage;
         if (distSq <= hardInnerSq) {
@@ -321,11 +366,11 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
                 // tip keeps the full row because its span needs the general
                 // quadratic; the unrotated case covers nearly every brush.
                 std::int64_t rowBegin = x0, rowEnd = x1;
-                if (!hasRotation) {
-                    const double axis = dy * aspect;
+                if (!bitmap && !hasRotation) {
+                    const double axis = dy * aspectY;
                     const double remaining = maxDistSq - axis * axis;
                     if (remaining <= 0.0) continue;
-                    const double halfSpan = std::sqrt(remaining);
+                    const double halfSpan = std::sqrt(remaining) / aspectX;
                     // One extra pixel on each side keeps the exact coverage test
                     // inside the loop authoritative.
                     const double lo = p.x - halfSpan - 0.5;
@@ -334,7 +379,18 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
                     rowEnd = clampPixelEdge(std::floor(hi) + 2.0, x0, x1);
                 }
                 for (std::int64_t x = rowBegin; x < rowEnd; ++x) {
-                    double coverage = computeCoverage(static_cast<double>(x) + 0.5 - p.x, dy, x, y);
+                    const double dx = static_cast<double>(x) + 0.5 - p.x;
+                    BitmapSample bitmapSample;
+                    double coverage;
+                    if (bitmap) {
+                        const double lx = dx * cosA - dy * sinA;
+                        const double ly = dx * sinA + dy * cosA;
+                        bitmapSample = sampleBitmap(*bitmap, lx * (b.flipX ? -bitmapX : bitmapX),
+                                                    ly * (b.flipY ? -bitmapY : bitmapY), b.bitmapColour);
+                        coverage = bitmapSample.coverage;
+                    } else {
+                        coverage = computeCoverage(dx, dy, x, y);
+                    }
                     if (coverage <= 0.0) continue;
                     if (b.pixelMask) {
                         coverage *= clamp01(b.pixelMask(b.pixelMaskContext, x, y));
@@ -347,6 +403,8 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
                     if (b.erase) {
                         if (old == 0U) continue;
                         next = erase(old, amount);
+                    } else if (bitmap && b.bitmapColour) {
+                        next = deposit(old, bitmapSample.colour, amount);
                     } else if (blending) {
                         const double mixAmt = clamp01(amount * blendFactor);
                         next = blend(old, effectiveCarry, mixAmt);
@@ -498,7 +556,8 @@ bool BrushStroke::extend(InputSample p) {
     double start = 0, end = 1;
     const double tiltReach = (p.hasTilt || m_previous.hasTilt)
         ? 1.0 + clamp01(m_brush.tiltSize) * 1.5 : 1.0;
-    const double radius = m_brush.size * tiltReach / 2 + 1;
+    const double radius = m_brush.size * 0.5 * tiltReach * m_brush.stampReach + 1.0;
+    if (!std::isfinite(radius)) { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; return false; }
     const auto& g = m_store.geometry();
     if (clipAxis(m_previous.x, dx, -radius, static_cast<double>(g.width()) + radius, start, end) &&
         clipAxis(m_previous.y, dy, -radius, static_cast<double>(g.height()) + radius, start, end)) {

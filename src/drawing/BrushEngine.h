@@ -3,6 +3,7 @@
 #include <cstdint>
 
 namespace komapaint {
+namespace brush { struct BrushResource; }
 // Digital brush tips: crisp/soft round, anchored grain texture, multi-tuft
 // bristle, directional pencil/graphite, and organic stipple/scatter.
 enum class BrushTip { Round, Textured, Bristle, Graphite, Stipple };
@@ -39,6 +40,15 @@ struct BrushDefinition {
     // Optional per-pixel mask callback (e.g. active SelectionMask or Boundary-Aware protection).
     double (*pixelMask)(void*, std::int64_t, std::int64_t) noexcept = nullptr;
     void* pixelMaskContext = nullptr;
+
+    // Optional immutable source for a single dab, owned by the DocumentStroke.
+    // The original procedural rasterizer remains the legacy/default route.
+    const brush::BrushResource* bitmapTip = nullptr;
+    bool bitmapColour = false;
+    bool flipX = false;
+    bool flipY = false;
+    bool nativeAspect = false;
+    double stampReach = 1.0;       // conservative outer footprint in base radii for stroke clipping
 };
 
 struct InputSample {

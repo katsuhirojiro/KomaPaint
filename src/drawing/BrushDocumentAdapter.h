@@ -37,6 +37,11 @@ struct StrokeRuntime {
 
 namespace drawing {
 
+// The native Digital subset actually consumed by this renderer. An empty
+// result means the definition can paint; a diagnostic must block activation,
+// not cause the caller to replace the definition with a legacy approximation.
+std::string digitalBrushIssue(const brush::BrushDocument& document);
+
 // ---- translation -----------------------------------------------------------
 
 BrushDefinition digitalDefinition(const brush::LegacyBrush& legacy,
@@ -72,12 +77,16 @@ class DocumentStroke {
 public:
     DocumentStroke(SparseTileStore& store, brush::BrushDocument document,
                    BrushDefinition base, std::uint32_t strokeSeed);
+    DocumentStroke(SparseTileStore& store, std::shared_ptr<const brush::BrushDocument> document,
+                   BrushDefinition base, std::uint32_t strokeSeed, bool native = true);
 
     bool begin(InputSample sample);
     bool extend(InputSample sample);
     bool end(InputSample sample);
-    bool failed() const { return m_failed; }
-    SparseTileStore::WriteResult failureReason() const { return m_failureReason; }
+    bool failed() const { return m_failed || (m_stroke && m_stroke->failed()); }
+    SparseTileStore::WriteResult failureReason() const {
+        return m_failed || !m_stroke ? m_failureReason : m_stroke->failureReason();
+    }
 
     // Stamps placed so far and components painted, for tests and diagnostics.
     std::uint64_t stampCount() const { return m_stampCount; }
@@ -94,7 +103,8 @@ private:
                                             const InputSample& sample, double strokeAngle,
                                             std::uint32_t carryPremul, bool hasCarry);
 
-    brush::BrushDocument m_document;
+    std::shared_ptr<const brush::BrushDocument> m_document;
+    bool m_native = false;
     BrushDefinition m_base;
     std::uint32_t m_strokeSeed = 0;
     std::unique_ptr<BrushStroke> m_stroke;
