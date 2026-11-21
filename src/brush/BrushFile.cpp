@@ -161,7 +161,9 @@ bool detail::saveBrushFile(const fs::path& path, const BrushDocument& document,
     } catch (const std::bad_alloc&) {
         return failed(error, "Not enough memory to save the brush file.");
     } catch (const std::length_error&) {
-        return failed(error, "The brush file is too large to write on this system.");
+        return failed(error, "The brush cannot be represented or written as a .kb v1 file at this size.");
+    } catch (const std::invalid_argument& cause) {
+        return failed(error, cause.what());
     } catch (const std::system_error& cause) {
         return failed(error, "Could not save the brush file: " + cause.code().message());
     }

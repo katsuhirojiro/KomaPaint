@@ -202,6 +202,14 @@ struct LegacyBrush {
     bool persistentReservoir = false;
 };
 
+// Opaque v1 extensions are authored by other builds. Do not interpret them as
+// paint instructions or discard their bytes when saving an edited brush.
+struct BrushOpaqueChunk {
+    std::string tag;
+    std::string payload;
+    bool operator==(const BrushOpaqueChunk&) const = default;
+};
+
 class BrushDocument {
 public:
     // ---- identity ----------------------------------------------------------
@@ -223,6 +231,8 @@ public:
     std::vector<ExposedProperty> exposed;
     std::vector<BrushResource> resources;
     ParamBag parameters;              // brush-scope values
+    std::uint16_t formatFlags = 0;
+    std::vector<BrushOpaqueChunk> opaqueChunks;
 
     BrushDocument();
     explicit BrushDocument(std::string name);

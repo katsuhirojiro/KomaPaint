@@ -278,9 +278,10 @@ void testRejectsImpossibleChunkLength() {
     CHECK(result.error.rfind("truncated-chunk", 0) == 0);
 }
 
-void testSkipsUnknownChunk() {
+void testPreservesUnknownChunk() {
     auto bytes = encodeBrush(makeDocument());
-    appendChunk(&bytes, "XTRA", {1, 2, 3, 4, 5});
+    appendChunk(&bytes, "XTRA", {1, 2, 0, 4, 5});
+    setU16(&bytes, 10, 0x0200);
     reseal(&bytes);
 
     BrushDocument doc;
@@ -289,8 +290,19 @@ void testSkipsUnknownChunk() {
     CHECK(result.ok);
     CHECK(result.ignoredChunks.size() == 1);
     CHECK(result.ignoredChunks[0] == "XTRA");
-    // Skipping an unknown chunk does not damage what we do understand.
     CHECK(doc.components.size() == 4);
+    CHECK(doc.formatFlags == 0x0200);
+    CHECK(doc.opaqueChunks.size() == 1);
+    if (doc.opaqueChunks.size() == 1) {
+        CHECK(doc.opaqueChunks[0].tag == "XTRA");
+        CHECK(doc.opaqueChunks[0].payload == std::string("\x01\x02\x00\x04\x05", 5));
+    }
+    CHECK(encodeBrush(doc) == bytes);
+    doc.name = "Edited, extension retained";
+    BrushDocument reopened;
+    const auto edited = encodeBrush(doc);
+    CHECK(decodeBrush(edited.data(), edited.size(), &reopened, &result));
+    CHECK(reopened == doc);
 }
 
 void testRejectsDuplicateChunk() {
@@ -527,7 +539,7 @@ int main() {
     testRejectsCorruptByte();
     testRejectsFutureVersion();
     testRejectsImpossibleChunkLength();
-    testSkipsUnknownChunk();
+    testPreservesUnknownChunk();
     testRejectsDuplicateChunk();
     testRejectsIncoherentBrush();
     testFailedDecodeLeavesTargetUntouched();

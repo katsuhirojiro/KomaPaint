@@ -12,7 +12,7 @@
 //   payload = [ tag[4] u32 length bytes ]*
 //
 // Chunks are independent, so a newer build can add one and an older build
-// skips it instead of refusing the file. A chunk we *do* know that is the
+// preserves its bytes without interpreting them. A chunk we *do* know that is the
 // wrong size, or that fails validation, is a hard error: a brush is never
 // half-loaded.
 #include "brush/BrushModel.h"
@@ -30,7 +30,7 @@ inline constexpr char kBrushFormatMagic[8] = {'K', 'O', 'M', 'A', 'B', 'R', 'S',
 struct DecodeResult {
     bool ok = false;
     std::string error;                    // empty when ok
-    std::vector<std::string> ignoredChunks; // tags this build does not know
+    std::vector<std::string> ignoredChunks; // tags preserved opaquely, not interpreted
     std::uint16_t version = 0;
 };
 

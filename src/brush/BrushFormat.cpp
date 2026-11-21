@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstring>
+#include <stdexcept>
 
 namespace komapaint::brush {
 namespace {
@@ -22,6 +23,11 @@ public:
             m_bytes.push_back(std::uint8_t((value >> shift) & 0xFF));
         }
     }
+    void u32Size(std::size_t count) {
+        if (count > std::numeric_limits<std::uint32_t>::max())
+            throw std::length_error("Value does not fit the .kb v1 representation");
+        u32(static_cast<std::uint32_t>(count));
+    }
     void u64(std::uint64_t value) {
         for (int shift = 0; shift < 64; shift += 8) {
             m_bytes.push_back(std::uint8_t((value >> shift) & 0xFF));
@@ -38,7 +44,7 @@ public:
         m_bytes.insert(m_bytes.end(), value.begin(), value.end());
     }
     void text(std::string_view value) {
-        u32(static_cast<std::uint32_t>(value.size()));
+        u32Size(value.size());
         m_bytes.insert(m_bytes.end(), value.begin(), value.end());
     }
     void blob(const std::vector<std::uint8_t>& value) {
@@ -46,14 +52,14 @@ public:
         m_bytes.insert(m_bytes.end(), value.begin(), value.end());
     }
     void bag(const ParamBag& bag) {
-        u32(static_cast<std::uint32_t>(bag.entries().size()));
+        u32Size(bag.entries().size());
         for (const auto& [key, value] : bag.entries()) {
             text(key);
             f64(value);
         }
     }
     void curve(const ResponseCurve& curve) {
-        u32(static_cast<std::uint32_t>(curve.points().size()));
+        u32Size(curve.points().size());
         for (const auto& point : curve.points()) {
             f64(point.x);
             f64(point.y);
@@ -200,7 +206,7 @@ bool readEnum(Reader& reader, ParseFn parse, T* out) {
 
 bool writeChunk(Writer* out, const char tag[5], const Writer& payload) {
     out->rawBytes(std::string_view(tag, 4));
-    out->u32(static_cast<std::uint32_t>(payload.bytes().size()));
+    out->u32Size(payload.bytes().size());
     for (std::uint8_t byte : payload.bytes()) out->u8(byte);
     return true;
 }
@@ -217,7 +223,7 @@ void encodeMeta(const BrushDocument& doc, Writer* w) {
     w->text(doc.description);
     w->text(toString(doc.engine));
     w->text(doc.category);
-    w->u32(static_cast<std::uint32_t>(doc.tags.size()));
+    w->u32Size(doc.tags.size());
     for (const auto& tag : doc.tags) w->text(tag);
     w->text(doc.thumbnail);
     w->u32(doc.seed);
@@ -225,7 +231,7 @@ void encodeMeta(const BrushDocument& doc, Writer* w) {
 }
 
 void encodeResources(const BrushDocument& doc, Writer* w) {
-    w->u32(static_cast<std::uint32_t>(doc.resources.size()));
+    w->u32Size(doc.resources.size());
     for (const auto& r : doc.resources) {
         w->text(r.id);
         w->text(r.name);
@@ -237,13 +243,13 @@ void encodeResources(const BrushDocument& doc, Writer* w) {
 }
 
 void encodeGroups(const BrushDocument& doc, Writer* w) {
-    w->u32(static_cast<std::uint32_t>(doc.groups.size()));
+    w->u32Size(doc.groups.size());
     for (const auto& g : doc.groups) {
         w->text(g.id);
         w->text(g.name);
         w->text(g.parentGroupId);
         w->text(toString(g.mode));
-        w->u32(static_cast<std::uint32_t>(g.members.size()));
+        w->u32Size(g.members.size());
         for (const auto& member : g.members) w->text(member);
         w->u32(static_cast<std::uint32_t>(g.membersPerStamp));
         w->u32(g.seed);
@@ -251,7 +257,7 @@ void encodeGroups(const BrushDocument& doc, Writer* w) {
 }
 
 void encodeComponents(const BrushDocument& doc, Writer* w) {
-    w->u32(static_cast<std::uint32_t>(doc.components.size()));
+    w->u32Size(doc.components.size());
     for (const auto& c : doc.components) {
         w->text(c.id);
         w->text(c.name);
@@ -276,7 +282,7 @@ void encodeComponents(const BrushDocument& doc, Writer* w) {
 }
 
 void encodeGenerators(const BrushDocument& doc, Writer* w) {
-    w->u32(static_cast<std::uint32_t>(doc.generators.size()));
+    w->u32Size(doc.generators.size());
     for (const auto& g : doc.generators) {
         w->text(g.id);
         w->text(toString(g.kind));
@@ -287,7 +293,7 @@ void encodeGenerators(const BrushDocument& doc, Writer* w) {
 }
 
 void encodeDynamics(const BrushDocument& doc, Writer* w) {
-    w->u32(static_cast<std::uint32_t>(doc.dynamics.size()));
+    w->u32Size(doc.dynamics.size());
     for (const auto& b : doc.dynamics) {
         w->text(b.parameter);
         w->text(toString(b.signal));
@@ -298,7 +304,7 @@ void encodeDynamics(const BrushDocument& doc, Writer* w) {
 }
 
 void encodeRandomization(const BrushDocument& doc, Writer* w) {
-    w->u32(static_cast<std::uint32_t>(doc.randomization.size()));
+    w->u32Size(doc.randomization.size());
     for (const auto& r : doc.randomization) {
         w->text(r.parameter);
         w->boolean(r.enabled);
@@ -312,7 +318,7 @@ void encodeRandomization(const BrushDocument& doc, Writer* w) {
 }
 
 void encodeExposed(const BrushDocument& doc, Writer* w) {
-    w->u32(static_cast<std::uint32_t>(doc.exposed.size()));
+    w->u32Size(doc.exposed.size());
     for (const auto& p : doc.exposed) {
         w->text(p.parameter);
         w->text(p.label);
@@ -394,11 +400,17 @@ std::vector<std::uint8_t> encodeBrush(const BrushDocument& document) {
         writeChunk(&payload, "EXPO", chunk);
     }
 
+    for (const auto& chunk : document.opaqueChunks) {
+        if (chunk.tag.size() != 4) throw std::invalid_argument("Invalid .kb extension tag");
+        payload.rawBytes(chunk.tag);
+        payload.u32Size(chunk.payload.size());
+        payload.rawBytes(chunk.payload);
+    }
     const auto& bytes = payload.bytes();
     Writer file;
     for (char c : kBrushFormatMagic) file.u8(static_cast<std::uint8_t>(c));
     file.u16(kBrushFormatVersion);
-    file.u16(0);
+    file.u16(document.formatFlags);
     file.u32(crc32(bytes.data(), bytes.size()));
     for (std::uint8_t byte : bytes) file.u8(byte);
     return file.take();
@@ -425,7 +437,7 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
     reader.skip(sizeof(kBrushFormatMagic));
     const std::uint16_t version = reader.u16();
     report->version = version;
-    (void)reader.u16();  // reserved flags
+    const std::uint16_t flags = reader.u16();
     const std::uint32_t expectedCrc = reader.u32();
     if (!reader.ok()) {
         report->error = reason("truncated", "file ends inside the header");
@@ -448,6 +460,7 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
     }
 
     BrushDocument doc;
+    doc.formatFlags = flags;
     bool seenMeta = false;
     bool seenResources = false;
     bool seenGroups = false;
@@ -468,16 +481,11 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
             report->error = reason("truncated-chunk", "chunk '" + tag + "' runs past the payload");
             return false;
         }
-        const std::size_t chunkEnd = reader.offset() + length;
-
-        auto chunkReader = [&]() {
-            return Reader(data + reader.offset(), length);
-        };
+        Reader r(data + reader.offset(), length);
 
         if (tag == "META") {
             if (seenMeta) { report->error = reason("duplicate-chunk", "two META chunks"); return false; }
             seenMeta = true;
-            Reader r = chunkReader();
             if (!r.text(&doc.id) || !r.text(&doc.name) || !r.text(&doc.description)) {
                 report->error = reason("bad-meta", "META chunk is incomplete");
                 return false;
@@ -511,7 +519,6 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
         } else if (tag == "RSRC") {
             if (seenResources) { report->error = reason("duplicate-chunk", "two RSRC chunks"); return false; }
             seenResources = true;
-            Reader r = chunkReader();
             const std::uint32_t count = r.u32();
             if (count > r.remaining()) {
                 report->error = reason("bad-resource", "RSRC declares more resources than it holds");
@@ -541,7 +548,6 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
         } else if (tag == "GRUP") {
             if (seenGroups) { report->error = reason("duplicate-chunk", "two GRUP chunks"); return false; }
             seenGroups = true;
-            Reader r = chunkReader();
             const std::uint32_t count = r.u32();
             if (count > r.remaining()) {
                 report->error = reason("bad-group", "GRUP declares more groups than it holds");
@@ -575,7 +581,6 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
         } else if (tag == "COMP") {
             if (seenComponents) { report->error = reason("duplicate-chunk", "two COMP chunks"); return false; }
             seenComponents = true;
-            Reader r = chunkReader();
             const std::uint32_t count = r.u32();
             if (count > r.remaining()) {
                 report->error = reason("bad-component", "COMP declares more components than it holds");
@@ -623,7 +628,6 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
         } else if (tag == "GENR") {
             if (seenGenerators) { report->error = reason("duplicate-chunk", "two GENR chunks"); return false; }
             seenGenerators = true;
-            Reader r = chunkReader();
             const std::uint32_t count = r.u32();
             if (count > r.remaining()) {
                 report->error = reason("bad-generator", "GENR declares more generators than it holds");
@@ -647,7 +651,6 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
         } else if (tag == "DYNA") {
             if (seenDynamics) { report->error = reason("duplicate-chunk", "two DYNA chunks"); return false; }
             seenDynamics = true;
-            Reader r = chunkReader();
             const std::uint32_t count = r.u32();
             if (count > r.remaining()) {
                 report->error = reason("bad-dynamics", "DYNA declares more bindings than it holds");
@@ -669,7 +672,6 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
         } else if (tag == "RAND") {
             if (seenRandomization) { report->error = reason("duplicate-chunk", "two RAND chunks"); return false; }
             seenRandomization = true;
-            Reader r = chunkReader();
             const std::uint32_t count = r.u32();
             if (count > r.remaining()) {
                 report->error = reason("bad-randomization", "RAND declares more rules than it holds");
@@ -694,7 +696,6 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
         } else if (tag == "EXPO") {
             if (seenExposed) { report->error = reason("duplicate-chunk", "two EXPO chunks"); return false; }
             seenExposed = true;
-            Reader r = chunkReader();
             const std::uint32_t count = r.u32();
             if (count > r.remaining()) {
                 report->error = reason("bad-exposed", "EXPO declares more settings than it holds");
@@ -719,18 +720,13 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
                 doc.exposed.push_back(std::move(p));
             }
         } else {
-            // Unknown but structurally valid: skip it and say so. This is how a
-            // file written by a newer build still opens, minus what we cannot use.
             report->ignoredChunks.push_back(tag);
+            BrushOpaqueChunk chunk{std::move(tag), {}};
+            if (!r.rawBytes(length, &chunk.payload)) return false;
+            doc.opaqueChunks.push_back(std::move(chunk));
         }
-
-        if (chunkEnd > size) {
-            report->error = reason("truncated-chunk", "chunk '" + tag + "' overruns the file");
-            return false;
-        }
-        const std::size_t consumed = reader.offset() + length;
-        if (consumed > size) {
-            report->error = reason("truncated-chunk", "chunk '" + tag + "' overruns the file");
+        if (!r.ok() || r.remaining() != 0) {
+            report->error = reason("unsupported-chunk-data", "Unexpected trailing data in '" + tag + "'");
             return false;
         }
         reader.skip(length);

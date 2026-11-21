@@ -73,6 +73,8 @@ public:
         buffer(d.resources);
         for (const auto& r : d.resources) { text(r.id); text(r.name); }
         bag(d.parameters);
+        buffer(d.opaqueChunks);
+        for (const auto& chunk : d.opaqueChunks) { text(chunk.tag); text(chunk.payload); }
     }
 
     std::size_t bytes() const noexcept { return m_bytes; }
