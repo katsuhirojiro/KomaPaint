@@ -6,6 +6,13 @@ import os
 import sys
 
 
+def note_startup(message):
+    trace = os.environ.get("KOMAPAINT_STUDIO_TRACE")
+    if trace:
+        with Path(trace).open("a", encoding="utf-8") as stream:
+            stream.write(message + "\n")
+
+
 def create_app(remote=False):
     # The Python image renderer and QML bindings share the GUI thread.
     os.environ.setdefault("QSG_RENDER_LOOP", "basic")
@@ -16,14 +23,18 @@ def create_app(remote=False):
     if remote:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         os.environ.setdefault("QT_QUICK_BACKEND", "software")
-    from PySide6.QtCore import QUrl
+    note_startup("Importing the packaged Qt runtime")
+    from PySide6.QtCore import QUrl, qInstallMessageHandler
     from PySide6.QtGui import QFontDatabase, QGuiApplication, QIcon
     from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterType
     from art import ArtSheet, Assets
     from model import Studio
     import art
 
+    if os.environ.get("KOMAPAINT_STUDIO_TRACE"):
+        qInstallMessageHandler(lambda _mode, _context, message: note_startup(message))
     app = QGuiApplication([sys.argv[0]])
+    note_startup(f"Qt platform: {app.platformName()}")
     app.setApplicationName("KomaPaint Brush Workshop")
     root = Path(__file__).resolve().parent
     app.setWindowIcon(QIcon(str(root / "windows" / "BrushStudio.ico")))
@@ -38,6 +49,7 @@ def create_app(remote=False):
     engine.load(QUrl.fromLocalFile(str(root / "qml" / "Main.qml")))
     if not engine.rootObjects():
         raise RuntimeError("Brush Studio QML did not load; see the Qt message above.")
+    note_startup("Brush Studio QML loaded")
     return app, engine, studio, engine.rootObjects()[0]
 
 
@@ -55,7 +67,13 @@ def main():
         from verify import verify_package
         return verify_package(create_app, args.verify_package)
     remote = not packaged and args.review_port is not None
-    app, engine, studio, window = create_app(remote=remote)
+    try:
+        app, engine, studio, window = create_app(remote=remote)
+    except Exception:
+        if os.environ.get("KOMAPAINT_STUDIO_TRACE"):
+            import traceback
+            note_startup(traceback.format_exc())
+        raise
     if remote:
         from remote import Mirror
         mirror = Mirror(window, studio, args.review_host, args.review_port)

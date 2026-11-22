@@ -63,9 +63,15 @@ jobs:
       - name: Native launch, dependency isolation, interactions and screenshots
         shell: pwsh
         run: |
-          & "$env:RUNNER_TEMP\brush-candidate\verify-extracted.ps1" `
-            -Zip "$env:RUNNER_TEMP\brush-candidate\KomaPaint-Brush-Studio-Windows-x64.zip" `
-            -OutputDirectory "$env:RUNNER_TEMP\brush-verified"
+          try {
+            & "$env:RUNNER_TEMP\brush-candidate\verify-extracted.ps1" `
+              -Zip "$env:RUNNER_TEMP\brush-candidate\KomaPaint-Brush-Studio-Windows-x64.zip" `
+              -OutputDirectory "$env:RUNNER_TEMP\brush-verified"
+          } catch {
+            $details = "$($_.ToString())`n$($_.ScriptStackTrace)".Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error title=Extracted Windows verification::$details"
+            throw
+          }
       - uses: actions/upload-artifact@v4
         id: verified
         with:

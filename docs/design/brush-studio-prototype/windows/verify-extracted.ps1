@@ -47,6 +47,7 @@ try {
 
     Write-Host "Testing ZIP SHA-256: $sha256"
     Write-Host 'Starting the extracted GUI as-is, with no arguments.'
+    $env:KOMAPAINT_STUDIO_TRACE = Join-Path $work 'initial-launch.log'
     $app = Start-Process -FilePath $exe.FullName -WorkingDirectory $cwd.FullName -PassThru
     try {
         $wait = [Diagnostics.Stopwatch]::StartNew()
@@ -57,7 +58,8 @@ try {
         $app.Refresh()
         if ($app.HasExited -or $app.MainWindowHandle -eq [IntPtr]::Zero -or
             $app.MainWindowTitle -notlike 'KomaPaint*Brush Studio Design Prototype*') {
-            throw "No Brush Studio window appeared. Title: $($app.MainWindowTitle)"
+            $trace = if (Test-Path -LiteralPath $env:KOMAPAINT_STUDIO_TRACE) { Get-Content -LiteralPath $env:KOMAPAINT_STUDIO_TRACE -Raw } else { '(no app log)' }
+            throw "No Brush Studio window appeared. Title: $($app.MainWindowTitle); exited: $($app.HasExited). $trace"
         }
         $title = $app.MainWindowTitle
         $launchSeconds = [math]::Round($wait.Elapsed.TotalSeconds, 2)
@@ -79,6 +81,7 @@ try {
         Write-Host "Normal native GUI launch + orderly close passed ($launchSeconds s to window). All app runtimes are from the ZIP."
     } finally {
         if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
+        Remove-Item Env:KOMAPAINT_STUDIO_TRACE
     }
 
     # The same Windows EXE runs its interactive check. Only the test uses a fixed DPI.
@@ -103,9 +106,9 @@ try {
         $head = [byte[]]::new(24)
         $f = [IO.File]::OpenRead($image.FullName)
         try { $n = $f.Read($head, 0, 24) } finally { $f.Close() }
-        if ($n -ne 24 -or [Convert]::ToHexString($head[0..7]) -ne '89504E470D0A1A0A') { throw "Bad PNG: $($image.Name)" }
-        $width = [Convert]::ToInt32([Convert]::ToHexString($head[16..19]), 16)
-        $height = [Convert]::ToInt32([Convert]::ToHexString($head[20..23]), 16)
+        if ($n -ne 24 -or [Convert]::ToHexString([byte[]] $head[0..7]) -ne '89504E470D0A1A0A') { throw "Bad PNG: $($image.Name)" }
+        $width = [Convert]::ToInt32([Convert]::ToHexString([byte[]] $head[16..19]), 16)
+        $height = [Convert]::ToInt32([Convert]::ToHexString([byte[]] $head[20..23]), 16)
         if ($width -lt 1200 -or $height -lt 750) { throw "Unexpected screenshot size: $width x $height" }
     }
 
