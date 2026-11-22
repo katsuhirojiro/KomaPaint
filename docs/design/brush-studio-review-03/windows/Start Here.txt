@@ -1,0 +1,43 @@
+KomaPaint Brush Studio | Third Design Review | Windows x64
+==========================================================
+
+1. Extract the entire ZIP. Do not run the app from inside the ZIP viewer.
+2. Double-click KomaPaint Brush Studio Review 03.exe in the extracted folder.
+3. Keep the _internal folder next to the executable.
+
+No installer, Python, Qt SDK, terminal, or internet connection is needed.
+This is an unsigned standalone review build, not an installer or updater.
+
+A quick walkthrough:
+  Areas: use the 180 px rail on the left. Every area is one card stack;
+  Show advanced settings reveals the rest without changing a value.
+  Ownership: Personal writes overrides; Creator edits the definition.
+  Reset mine clears only your overrides and pins. The creator is untouched.
+  Quick Access: pin a row with the pin mark, then open Quick Access.
+  Curves: open the curve affordance under a row, or use the dock below the
+  pad. Drag nodes, double-click the graph to add one, and try a reusable
+  preset. Linear restores a straight response.
+  Draw: choose a test mode, set simulated pressure, and draw in the pad.
+  Ctrl+Z is test-pad undo. Ctrl+Alt+Z is brush-edit undo. They do not mix.
+  Retain keeps the current input and settings for comparison; Clear releases it.
+  Construction: select a node. Add/duplicate/remove a mark, group, texture or
+  secondary brush. Secondary brushes are independent subtrees.
+  Tip Room: draw several strokes, then Use as tip. A hand-drawn tip is
+  stored once and can be assigned to several marks.
+  Reuse: open Reuse from Construction, pick a source, and insert it into the
+  selected group or brush. The inserted copy is editable on its own.
+  Compact: resize toward 1024 x 720. The rail collapses and the curve dock
+  drops its preset column instead of clipping.
+
+Honesty labels:
+  AFFECTS PREVIEW  the isolated compositor changes pixels from this value.
+  ORGANISATION ONLY  the review presents it but does not claim to render it.
+  DEVICE ONLY  application/input assistance that is never saved into a brush.
+
+This app is an isolated design mockup: it does not read or write KomaPaint's
+production brush library, artwork, or documents. Its compositor is not the
+production renderer. The capability audit explains what the production engine
+does and does not paint, and what would have to change.
+
+See Licenses for third-party notices and fonts/Inter-OFL.txt for Inter 4.1.
+The audit is in docs/architecture/brush-capability-audit.md in the repository.

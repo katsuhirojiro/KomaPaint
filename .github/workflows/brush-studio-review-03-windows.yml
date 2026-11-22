@@ -1,0 +1,123 @@
+name: Brush Studio Review 03 Windows x64
+
+on:
+  push:
+    branches: [arena/64f169fc-komapaint]
+    paths:
+      - 'docs/design/brush-studio-review-03/**'
+      - 'docs/architecture/brush-capability-audit.md'
+      - '.github/workflows/brush-studio-review-03-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Freeze and ZIP the isolated third review
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: docs/design/brush-studio-review-03
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+          architecture: x64
+      - name: Install build-only dependencies
+        run: |
+          python -m pip install --only-binary=:all: -r windows/requirements.txt
+      - name: Build relocatable Windows GUI executable
+        run: |
+          python -m PyInstaller --noconfirm --clean --workpath "$env:RUNNER_TEMP\brush-review03-freeze" `
+            --distpath "$env:RUNNER_TEMP\brush-review03-dist" windows/BrushStudio.spec
+      - name: Assemble the candidate ZIP
+        run: |
+          python windows/archive.py "$env:RUNNER_TEMP\brush-review03-dist\KomaPaint Brush Studio Review 03" "$env:RUNNER_TEMP\brush-review03-candidate"
+          Copy-Item windows/verify-extracted.ps1 "$env:RUNNER_TEMP\brush-review03-candidate\verify-extracted.ps1"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Brush-Studio-Review-03-Windows-candidate
+          path: ${{ runner.temp }}/brush-review03-candidate/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 5
+
+  verify:
+    name: Test the extracted EXE on a fresh Windows runner
+    needs: package
+    runs-on: windows-2022
+    timeout-minutes: 10
+    outputs:
+      artifact-id: ${{ steps.verified.outputs.artifact-id }}
+    steps:
+      # Intentionally no checkout, setup-python, Qt install, or build tool setup.
+      - uses: actions/download-artifact@v4
+        with:
+          name: Brush-Studio-Review-03-Windows-candidate
+          path: ${{ runner.temp }}/brush-review03-candidate
+      - name: Native launch, dependency isolation, interactions and screenshots
+        shell: pwsh
+        run: |
+          try {
+            & "$env:RUNNER_TEMP\brush-review03-candidate\verify-extracted.ps1" `
+              -Zip "$env:RUNNER_TEMP\brush-review03-candidate\KomaPaint-Brush-Studio-Review-03-Windows-x64.zip" `
+              -OutputDirectory "$env:RUNNER_TEMP\brush-review03-verified"
+          } catch {
+            $details = "$($_.ToString())`n$($_.ScriptStackTrace)".Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Host "::error title=Extracted Windows verification::$details"
+            throw
+          }
+      - uses: actions/upload-artifact@v4
+        id: verified
+        with:
+          name: KomaPaint-Brush-Studio-Review-03-Windows-x64
+          path: ${{ runner.temp }}/brush-review03-verified/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  publish:
+    name: Publish the verified ZIP and screenshots for direct download
+    needs: verify
+    if: github.ref == 'refs/heads/arena/64f169fc-komapaint'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      ARTIFACT_ID: ${{ needs.verify.outputs.artifact-id }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: KomaPaint-Brush-Studio-Review-03-Windows-x64
+          path: verified
+      - name: Publish an isolated design-review prerelease
+        shell: bash
+        working-directory: verified
+        run: |
+          sha256sum --check SHA256SUMS.txt
+          tag="brush-studio-review-03-windows-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cat > release-notes.md <<EOF_NOTES
+          Standalone **KomaPaint Brush Studio — Third Design Review** Qt/QML prototype for Windows x64. It is not the production app.
+
+          **Download the Windows x64 ZIP, extract everything, and double-click KomaPaint Brush Studio Review 03.exe.** Keep the _internal folder beside it. No Python, Qt, or installer is needed. This design-review build is unsigned.
+
+          The exact ZIP was extracted and tested on a separate Windows runner with a system-only PATH and no project checkout or dependency setup. The 27 attached PNGs are captures from that packaged EXE; the report records a native launch with no arguments, app-local DLL origins, and 34 interaction checks covering the three ownership layers, pins, quick access, split undo, 17 settings areas, construction nodes, eight secondary brushes, tip drawing, reuse, curve editing, device fallback, texture, wet pickup, retain/compare, and compact layout.
+
+          The capability audit is [docs/architecture/brush-capability-audit.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/architecture/brush-capability-audit.md). It separates what production actually paints from what this review only organises. Review 02 remains untouched: [prerelease](https://github.com/katsuhirojiro/KomaPaint/releases/tag/brush-studio-review-02-windows-45004225201-1).
+
+          [GitHub Actions run](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) · [Verified Actions artifact](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts/${ARTIFACT_ID})
+          EOF_NOTES
+          gh release create "$tag" --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "Brush Studio Review 03 · Windows x64 (${GITHUB_SHA:0:8})" --notes-file release-notes.md \
+            KomaPaint-Brush-Studio-Review-03-Windows-x64.zip SHA256SUMS.txt verification.json screenshots/*.png
+          printf '### [Direct Windows download](%s/%s/releases/download/%s/KomaPaint-Brush-Studio-Review-03-Windows-x64.zip)\n' \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$tag" >> "$GITHUB_STEP_SUMMARY"
