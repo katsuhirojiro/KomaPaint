@@ -112,7 +112,6 @@ def main():
         return 0
     if args.verify_package:
         from verify import walkthrough
-        win.resize(1280, 800)
         passed = walkthrough(win, args.verify_package, MESSAGES)
         app.quit()
         return 0 if passed else 1
