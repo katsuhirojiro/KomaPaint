@@ -8,7 +8,14 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
-if getattr(sys, "frozen", False):
+
+# A normal desktop launch keeps Qt's threaded render loop and hardware RHI.
+# Software rasterisation is only for the packaged verification run, where the
+# hosted Windows runner has no reliable GPU; forcing it on an artist's machine
+# would make every repaint needlessly slow.
+_software = (os.environ.get("KOMAPAINT_STUDIO_SOFTWARE") == "1"
+             or "--verify-package" in sys.argv or "--captures" in sys.argv)
+if getattr(sys, "frozen", False) and _software:
     os.environ.setdefault("QSG_RENDER_LOOP", "basic")
     os.environ.setdefault("QT_QUICK_BACKEND", "software")
 

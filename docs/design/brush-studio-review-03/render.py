@@ -13,7 +13,7 @@ from random import Random
 
 import catalog
 from assets import ARGB, SURFACES, qimage
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt
 from PySide6.QtGui import (QBrush, QColor, QFont, QImage, QPainter, QPainterPath,
                            QPen, QTransform)
 
@@ -353,9 +353,6 @@ def draw_mark(painter, doc, node, sample, seed, stamp_index, assets, base_image,
     flip_v = bool(effective(doc, "flip_v")) ^ bool(node.get("flipV"))
     hardness = resolve(doc, "tip_hardness", sample, stamp_index)
     threshold = resolve(doc, "shape_filter", sample, stamp_index)
-    image = assets.stamp(node.get("asset", "nib"), doc.get("colour", "#2b2927"),
-                         hardness, threshold)
-
     alpha = resolve(doc, "flow", sample, stamp_index) / 100.0
     alpha *= resolve(doc, "density", sample, stamp_index) / 100.0
     alpha *= node.get("opacity", 100) / 100.0
@@ -429,8 +426,36 @@ def draw_mark(painter, doc, node, sample, seed, stamp_index, assets, base_image,
     painter.restore()
 
 
+def _max_scale(node):
+    scale = node.get("scale", 100) / 100.0
+    for child in node.get("children", []):
+        scale = max(scale, scale * _max_scale(child))
+    return scale
+
+
+def _stamp_rect(dest, doc, node, sample, stamp_index, chain):
+    """A conservative canvas-space box around one stamp.
+
+    Group layers used to be full-canvas images.  Allocating one per stamp made
+    a slider drag spend seconds copying empty pixels.  Every mark lives inside
+    a small multiple of the effective tip size, so composite a local box and
+    let the parent painter map it back into canvas coordinates.
+    """
+    size = resolve(doc, "tip_size", sample, stamp_index)
+    extent = max(24.0, size * max(0.25, chain.get("scale", 1.0)) * _max_scale(node) * 1.6 + 20.0)
+    left = int(sample.get("x", 0.0) - extent)
+    top = int(sample.get("y", 0.0) - extent)
+    width = int(extent * 2)
+    height = int(extent * 2)
+    left = max(0, min(max(0, dest.device().width() - 1), left))
+    top = max(0, min(max(0, dest.device().height() - 1), top))
+    width = max(1, min(dest.device().width() - left, width))
+    height = max(1, min(dest.device().height() - top, height))
+    return QRect(left, top, width, height)
+
+
 def composite_node(dest, doc, node, sample, seed, stamp_index, assets, base_image,
-                   chain=None, stroke_start=None):
+                   chain=None, stroke_start=None, defer_textures=False):
     if not node.get("visible", True) or node.get("opacity", 100) <= 0:
         return
     chain = chain or {"scale": 1.0, "opacity": 1.0, "angle": 0.0}
@@ -471,29 +496,108 @@ def composite_node(dest, doc, node, sample, seed, stamp_index, assets, base_imag
     chosen = selected_children(node, stamp_index, seed ^ stable_hash(node["uid"]),
                                child_mode, int(effective(doc, "mode_step")),
                                bool(effective(doc, "mode_weighted")))
-    buffer = allocate(dest.device().width(), dest.device().height())
+    amount = node.get("amount", 100) / 100.0 if kind == "brush" else 1.0
+    opacity = bound(node.get("opacity", 100) / 100.0 * amount)
+    textures = [] if defer_textures else [
+        child for child in node.get("children", [])
+        if child.get("visible", True) and child["kind"] in ("texture", "mask")]
+
+    # Composite straight into the parent whenever no local texture layer is
+    # required.  The child chain already carries this node's opacity and scale;
+    # the paint mode only needs to wrap the children.  This avoids allocating
+    # and clearing a layer for every mark of every stamp.
+    if not textures:
+        dest.save()
+        dest.setCompositionMode(BLEND.get(node.get("blend", "Normal"), BLEND["Normal"]))
+        for child in chosen:
+            composite_node(dest, doc, child, sample, seed, stamp_index, assets,
+                           base_image, child_chain, stroke_start, defer_textures)
+        dest.restore()
+        return
+
+    rect = _stamp_rect(dest, doc, node, sample, stamp_index, chain)
+    buffer = allocate(rect.width(), rect.height())
     painter = QPainter(buffer)
     try:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setWindow(rect)
+        painter.setViewport(buffer.rect())
         for child in chosen:
             composite_node(painter, doc, child, sample, seed, stamp_index, assets,
-                           base_image, child_chain, stroke_start)
-        for child in node.get("children", []):
-            if child.get("visible", True) and child["kind"] in ("texture", "mask"):
-                apply_texture(painter, buffer.rect(), child, assets, stroke_start,
-                              resolve(doc, "tip_size", sample, stamp_index), sample, doc)
+                           base_image, child_chain, stroke_start, defer_textures)
+        for child in textures:
+            apply_texture(painter, QRectF(rect), child, assets, stroke_start,
+                          resolve(doc, "tip_size", sample, stamp_index), sample, doc)
     finally:
         painter.end()
 
-    amount = node.get("amount", 100) / 100.0 if kind == "brush" else 1.0
     dest.save()
-    dest.setOpacity(bound(node.get("opacity", 100) / 100.0 * amount))
+    dest.setOpacity(opacity)
     dest.setCompositionMode(BLEND.get(node.get("blend", "Normal"), BLEND["Normal"]))
-    dest.drawImage(0, 0, buffer)
+    dest.drawImage(rect.topLeft(), buffer)
     dest.restore()
 
+def render_stroke_proxy(painter, doc, stroke, w, h):
+    """A cheap, tapered path preview for the frames while a slider moves.
 
-def render_stroke(painter, doc, stroke, w, h, assets, base_image=None):
+    Stamping hundreds of textured marks per frame in Python cannot stay inside
+    a 60 Hz budget.  The proxy keeps the path, pressure taper, width, colour
+    and opacity, then the full stamp renderer replaces it when the drag ends.
+    """
+    raw = [(x * w, y * h, pressure, speed) for x, y, pressure, speed in stroke["points"]]
+    if not raw:
+        return
+    probe = {"pressure": raw[0][2]}
+    smoothing = max(resolve(doc, "path_smoothing", probe, 0),
+                    resolve(doc, "stabilisation", probe, 0) * 0.8,
+                    resolve(doc, "motion_filter", probe, 0) * 0.45)
+    raw = smooth_points(raw, smoothing, resolve(doc, "sharp_angles", probe, 0))
+    size = max(1.0, resolve(doc, "tip_size", {"pressure": 0.8, "speed": 0.2}, 0))
+    colour = QColor(doc.get("colour", "#2b2927"))
+    alpha = bound(resolve(doc, "opacity", {"pressure": 1.0}, 0) / 100.0)
+    alpha *= bound(resolve(doc, "flow", {"pressure": 1.0}, 0) / 100.0 + 0.28)
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setOpacity(alpha)
+    if effective(doc, "property_eraser"):
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOut)
+    else:
+        painter.setCompositionMode(BLEND.get(effective(doc, "layer_blend"), BLEND["Normal"]))
+    if len(raw) == 1:
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(colour)
+        painter.drawEllipse(QPointF(raw[0][0], raw[0][1]), size / 2, size / 2)
+        painter.restore()
+        return
+    # A ribbon whose width follows pressure reads as a brush much better than
+    # a constant-width pen, and costs one filled polygon for the whole stroke.
+    left, right = [], []
+    for index, (x, y, pressure, _speed) in enumerate(raw):
+        previous = raw[max(0, index - 1)]
+        following = raw[min(len(raw) - 1, index + 1)]
+        dx, dy = following[0] - previous[0], following[1] - previous[1]
+        length = max(1e-4, hypot(dx, dy))
+        nx, ny = -dy / length, dx / length
+        taper = min(1.0, index / 6.0, (len(raw) - 1 - index) / 6.0)
+        width = size * (0.34 + 0.66 * pressure) * (0.55 + 0.45 * taper)
+        left.append((x + nx * width / 2, y + ny * width / 2))
+        right.append((x - nx * width / 2, y - ny * width / 2))
+    path = QPainterPath()
+    path.moveTo(*left[0])
+    for point in left[1:]:
+        path.lineTo(*point)
+    for point in reversed(right):
+        path.lineTo(*point)
+    path.closeSubpath()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(colour)
+    painter.drawPath(path)
+    painter.restore()
+
+
+
+def render_stroke(painter, doc, stroke, w, h, assets, base_image=None, quality=1.0,
+                  spacing_scale=1.0, texture_pass=True):
     raw = [(x * w, y * h, pressure, speed) for x, y, pressure, speed in stroke["points"]]
     if not raw:
         return
@@ -505,15 +609,21 @@ def render_stroke(painter, doc, stroke, w, h, assets, base_image=None):
     seed = int(stroke.get("seed", 7))
     size = max(1.0, resolve(doc, "tip_size", {"pressure": 0.8, "speed": 0.2}, 0))
     spacing_px = max(0.7, size * resolve(doc, "spacing", {"pressure": 1.0}, 0) / 100.0)
+    spacing_px *= max(1.0, spacing_scale)
     stream = events(raw, spacing_px, resolve(doc, "spacing_variation", {"pressure": 1.0}, 0),
                     resolve(doc, "jitter", {"pressure": 1.0}, 0), seed)
     if not stream:
         return
-    scratch = allocate(w, h)
+    quality = max(0.25, min(1.0, float(quality)))
+    sw, sh = max(1, int(w * quality)), max(1, int(h * quality))
+    scratch = allocate(sw, sh)
     paint = QPainter(scratch)
     try:
         paint.setRenderHint(QPainter.RenderHint.Antialiasing)
         paint.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        if quality < 0.999:
+            paint.setWindow(QRect(0, 0, int(w), int(h)))
+            paint.setViewport(scratch.rect())
         for sample in stream:
             sample["tilt"] = stroke.get("tilt", 0.22)
             sample["rotation"] = stroke.get("rotation", 0.0)
@@ -529,7 +639,7 @@ def render_stroke(painter, doc, stroke, w, h, assets, base_image=None):
                     local["y"] += sin(angle) * shift
                     local["opacity_scale"] = max(0.0, 1 - falloff * repeat / max(1, repeats - 1))
                 composite_node(paint, doc, doc["root"], local, seed, sample["index"] + repeat,
-                               assets, base_image)
+                               assets, base_image, defer_textures=True)
             if bool(effective(doc, "spray_enabled")):
                 count = int(resolve(doc, "spray_count", sample, sample["index"]))
                 spread = resolve(doc, "spray_scatter", sample, sample["index"]) / 100.0 * size
@@ -545,7 +655,17 @@ def render_stroke(painter, doc, stroke, w, h, assets, base_image=None):
                     local["y"] += sin(angle) * dist
                     local["index"] = sample["index"] * 97 + particle
                     composite_node(paint, doc, doc["root"], local, seed ^ particle,
-                                   local["index"], assets, base_image)
+                                   local["index"], assets, base_image, defer_textures=True)
+        # Grain and masks at the root belong to the finished stroke, not to
+        # every stamp.  Applying them once keeps the texture honest and avoids
+        # a full-canvas pattern fill per stamp.
+        if texture_pass:
+            probe = {"pressure": raw[0][2], "x": raw[0][0], "y": raw[0][1], "index": 0}
+            for child in doc["root"].get("children", []):
+                if child.get("visible", True) and child["kind"] in ("texture", "mask"):
+                    apply_texture(paint, QRectF(0, 0, w, h), child, assets,
+                                  (raw[0][0], raw[0][1], 0.0),
+                                  resolve(doc, "tip_size", probe, 0), probe, doc)
     finally:
         paint.end()
     painter.save()
@@ -554,7 +674,10 @@ def render_stroke(painter, doc, stroke, w, h, assets, base_image=None):
         painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationOut)
     else:
         painter.setCompositionMode(BLEND.get(effective(doc, "layer_blend"), BLEND["Normal"]))
-    painter.drawImage(0, 0, scratch)
+    if quality < 0.999:
+        painter.drawImage(QRectF(0, 0, w, h), scratch)
+    else:
+        painter.drawImage(0, 0, scratch)
     painter.restore()
 
 

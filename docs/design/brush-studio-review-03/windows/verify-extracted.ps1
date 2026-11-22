@@ -48,6 +48,7 @@ try {
 
     Write-Host "Testing ZIP SHA-256: $sha256"
     Write-Host 'Starting the extracted GUI as-is, with no arguments.'
+    $env:KOMAPAINT_STUDIO_SOFTWARE = '1'
     $env:KOMAPAINT_STUDIO_TRACE = Join-Path $work 'initial-launch.log'
     $app = Start-Process -FilePath $exe.FullName -WorkingDirectory $cwd -PassThru
     try {
@@ -83,6 +84,7 @@ try {
     } finally {
         if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
         Remove-Item Env:KOMAPAINT_STUDIO_TRACE
+        Remove-Item Env:KOMAPAINT_STUDIO_SOFTWARE
     }
 
     # The same Windows EXE runs its interactive check. Only the test uses a fixed DPI.

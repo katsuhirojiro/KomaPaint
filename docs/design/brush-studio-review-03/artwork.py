@@ -17,12 +17,16 @@ class Artwork(QQuickPaintedItem):
         self._source = ""
         self._cache = None
         self._cache_key = None
+        self._active_layer = None
+        self._active_key = None
+        self._active_rendered = 0
         self.setAntialiasing(True)
         studio = render.STUDIO
         if studio is not None:
             studio.changed.connect(self.update)
             studio.padChanged.connect(self.update)
             studio.tipChanged.connect(self.update)
+            studio.editStateChanged.connect(self.update)
 
     @Property(str, notify=appearanceChanged)
     def kind(self):
@@ -62,7 +66,7 @@ class Artwork(QQuickPaintedItem):
         painter.setPen(QPen(QColor(0, 0, 0, 28), 1))
         painter.drawRect(QRectF(0.5, 0.5, w - 1, h - 1))
 
-    def _pad_static(self, w, h):
+    def _pad_static(self, w, h, editing=False):
         studio = render.STUDIO
         doc = studio.doc
         image = render.allocate(w, h)
@@ -75,7 +79,10 @@ class Artwork(QQuickPaintedItem):
                 render.paint_mixing_base(painter, w, h)
             render.paint_guides(painter, w, h)
             for stroke in render.sample_strokes(studio.testMode.lower(), doc, w, h):
-                render.render_stroke(painter, doc, stroke, w, h, studio.assets, image)
+                if editing:
+                    render.render_stroke_proxy(painter, doc, stroke, w, h)
+                else:
+                    render.render_stroke(painter, doc, stroke, w, h, studio.assets, image)
             if studio.compare and studio.hasRetained:
                 ghost = render.allocate(w, h)
                 ghost_painter = QPainter(ghost)
@@ -91,7 +98,10 @@ class Artwork(QQuickPaintedItem):
                 painter.drawImage(0, 0, ghost)
                 painter.restore()
             for stroke in studio.strokes:
-                render.render_stroke(painter, doc, stroke, w, h, studio.assets, image)
+                if editing:
+                    render.render_stroke_proxy(painter, doc, stroke, w, h)
+                else:
+                    render.render_stroke(painter, doc, stroke, w, h, studio.assets, image)
             render.paint_labels(painter, studio.testMode.lower(), w, h)
         finally:
             painter.end()
@@ -109,18 +119,45 @@ class Artwork(QQuickPaintedItem):
             return
         if self._kind != "pad":
             return
+        editing = bool(studio.editing)
         key = (w, h, studio.revision, len(studio.strokes), studio.testMode,
-               studio.compare, studio.hasRetained,
+               studio.compare, studio.hasRetained, editing,
                tuple(stroke.get("seed") for stroke in studio.strokes))
         if key != self._cache_key:
-            self._cache = self._pad_static(w, h)
+            self._cache = self._pad_static(w, h, editing)
             self._cache_key = key
         painter.drawImage(0, 0, self._cache)
         active = studio.activeStroke
         if active:
-            base = self._cache.copy()
-            render.render_stroke(painter, studio.doc, active[0], w, h,
-                                 studio.assets, base)
+            # Keep the growing stroke in its own layer and render only the
+            # points that arrived since the last frame.  Re-rendering every
+            # stamp of the stroke on every mouse move made long strokes
+            # quadratic and visibly laggy.
+            stroke = active[0]
+            points = stroke["points"]
+            layer_key = (w, h, studio.revision, stroke.get("seed"))
+            if self._active_layer is None or self._active_key != layer_key:
+                self._active_layer = render.allocate(w, h)
+                self._active_key = layer_key
+                self._active_rendered = 0
+            if len(points) > self._active_rendered:
+                start = max(0, self._active_rendered - 1)
+                chunk = dict(stroke, points=points[start:])
+                layer_painter = QPainter(self._active_layer)
+                try:
+                    layer_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                    layer_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    render.render_stroke(layer_painter, studio.doc, chunk, w, h,
+                                         studio.assets, self._cache, quality=0.75,
+                                         texture_pass=False)
+                finally:
+                    layer_painter.end()
+                self._active_rendered = len(points)
+            painter.drawImage(0, 0, self._active_layer)
+        else:
+            self._active_layer = None
+            self._active_key = None
+            self._active_rendered = 0
         # Honest frame label and comparison marker, drawn in the pad rather
         # than as a fake UI card.
         painter.save()

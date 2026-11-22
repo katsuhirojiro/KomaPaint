@@ -174,7 +174,10 @@ Item {
                             ? root.localPoints[index + 1].x * graphWrap.width - 3 : graphWrap.width - handle.width
                         drag.minimumY: 0
                         drag.maximumY: graphWrap.height - handle.height
-                        onPressed: { root.dragging = true }
+                        onPressed: {
+                            root.dragging = true
+                            studio.beginEdit()
+                        }
                         onPositionChanged: {
                             if (!pressed) return
                             var copy = root.localPoints.slice()
@@ -187,6 +190,7 @@ Item {
                         }
                         onReleased: {
                             root.dragging = false
+                            studio.endEdit()
                             var p = root.localPoints[index]
                             studio.setCurvePoint(root.bindingId, index, p.x, p.y)
                         }

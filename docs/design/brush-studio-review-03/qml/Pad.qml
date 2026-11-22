@@ -197,6 +197,18 @@ Rectangle {
             font.family: Theme.ui
             font.pixelSize: 8
         }
+
+        Text {
+            visible: studio.editing
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: 10
+            text: "FAST PATH DRAFT · FULL QUALITY ON RELEASE"
+            color: Theme.meta
+            font.family: Theme.ui
+            font.pixelSize: 7
+            font.letterSpacing: 0.6
+        }
     }
 
     CurveDock {

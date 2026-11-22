@@ -19,7 +19,7 @@ import catalog
 import recipes
 import render
 from assets import MARKS, SURFACES, Assets
-from PySide6.QtCore import Property, QObject, Signal, Slot
+from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
 
 def fmt_value(meta, value):
@@ -125,6 +125,7 @@ class Studio(QObject):
     bindingChanged = Signal()
     deviceChanged = Signal()
     hintChanged = Signal()
+    editStateChanged = Signal()
 
     def __init__(self, assets: Assets):
         super().__init__()
@@ -161,6 +162,11 @@ class Studio(QObject):
         self._custom_tip = 0
         self._factory_key = 0
         self._reusable = []
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(180)
+        self._preview_timer.timeout.connect(self._preview_finished)
+        self.changed.connect(self._begin_preview)
         for ident, (label, builder, patch) in recipes.STARTERS.items():
             self._reusable.append(dict(id=f"r{ident}", name=label, key=ident))
 
@@ -204,12 +210,33 @@ class Studio(QObject):
         if self._edit_depth == 0:
             self.push_undo()
         self._edit_depth += 1
+        if self._edit_depth == 1:
+            self.editStateChanged.emit()
 
     @Slot()
     def endEdit(self):
         self._edit_depth = max(0, self._edit_depth - 1)
         if self._edit_depth == 0:
+            self.editStateChanged.emit()
             self.layoutChanged.emit()
+
+    def _begin_preview(self):
+        if not self._preview_timer.isActive():
+            self._preview_timer.start()
+            self.editStateChanged.emit()
+
+    def _preview_finished(self):
+        self.editStateChanged.emit()
+
+    @Slot()
+    def finishPreview(self):
+        if self._preview_timer.isActive():
+            self._preview_timer.stop()
+            self.editStateChanged.emit()
+
+    @Property(bool, notify=editStateChanged)
+    def editing(self):
+        return self._edit_depth > 0 or self._preview_timer.isActive()
 
     @Property(bool, notify=historyChanged)
     def editCanUndo(self):

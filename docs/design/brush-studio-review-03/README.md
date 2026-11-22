@@ -61,6 +61,27 @@ result is **34/34 checks passed, 0 Qt warnings**; it is Linux offscreen evidence
 only. It does not validate Windows, a tablet, pressure, tilt, or an artist's
 workflow.
 
+### Performance
+
+The first version of this review re-rendered every stamp of every stroke on
+every mouse move. That is now split into three paths:
+
+- **Drawing** — the active stroke is rendered incrementally into its own layer;
+  a new chunk costs roughly 10–15 ms at 1200×800 instead of growing
+  quadratically with the stroke.
+- **Adjusting a setting** — while a slider or curve is moving, the pad shows a
+  fast tapered path proxy (single-digit milliseconds) and a full-quality stamp
+  render is scheduled when the interaction goes idle. The pad labels this
+  state as `FAST PATH DRAFT` rather than pretending it is the final grain.
+- **Committed strokes** — the normal cached stamp render remains the reference.
+  Composite layers are local to the stamp rather than full-canvas images, and
+  root grain is applied once per stroke rather than once per stamp.
+
+A normal packaged launch keeps Qt's threaded render loop and hardware RHI.
+`KOMAPAINT_STUDIO_SOFTWARE=1` opts into software rasterisation; the packaged
+verifier sets it because the hosted Windows runner has no dependable GPU. The
+software path is the slow path, not the desktop default.
+
 ## Using the prototype
 
 - **Rail** — all 17 areas. Advanced settings are hidden behind one disclosure,
