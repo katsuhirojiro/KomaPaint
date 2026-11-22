@@ -31,10 +31,17 @@ class UI:
         self.captures = captures
         self.touch = QTest.createTouchDevice()
 
+    def visible(self, name):
+        return next((i for i in items(self.window.contentItem()) if i.objectName() == name and i.isVisible()), None)
+
     def get(self, name):
-        found = next((i for i in items(self.window.contentItem()) if i.objectName() == name and i.isVisible()), None)
-        assert found is not None, f"No visible control called {name}"
+        found = self.visible(name)
+        assert found is not None, f"No visible control called {name} at {self.window.width()}×{self.window.height()}"
         return found
+
+    def dock(self, name):
+        if self.visible(name + "Choice"):
+            self.click(name + "Choice")
 
     def point(self, name, x=.5, y=.5):
         item = self.get(name)
@@ -49,6 +56,12 @@ class UI:
         return pt
 
     def click(self, name, x=.5, y=.5, touch=False):
+        if not self.visible(name):
+            if name.startswith(("entry_", "visibility_", "moveEntry")) or name in {
+                    "wholeBrushRow", "addMarkButton", "addEntryButton", "entryActions"}:
+                self.dock("Marks")
+            elif name in ("DynamicsChoice", "BrushChoice", "SelectedChoice"):
+                self.dock("Settings")
         pt = self.point(name, x, y)
         assert self.get(name).isEnabled(), name
         if touch:
@@ -150,6 +163,13 @@ def run(create_app, captures=None, evidence=None):
             assert evidence["qtPlatform"] == "windows" and evidence["architecture"] == 64
         w.requestActivate()
         QTest.qWait(140)
+        # Some native desktops constrain the first shown size. Request the wide
+        # review layout after the top-level window exists, and support either dock.
+        w.resize(1440, 900)
+        QTest.qWait(180)
+        if evidence is not None:
+            evidence["reviewWindow"] = [w.width(), w.height()]
+            evidence["display"] = [w.screen().geometry().width(), w.screen().geometry().height()]
         ui = UI(w, captures)
         assert s.route == "home"
         for starter in ("pencil", "pen", "paint", "airbrush", "scratch", "duplicate", "tip", "import", "cloud"):

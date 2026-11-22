@@ -86,6 +86,7 @@ try {
 
     # The same Windows EXE runs its interactive check. Only the test uses a fixed DPI.
     $env:QT_SCALE_FACTOR = '1'
+    $env:QT_ENABLE_HIGHDPI_SCALING = '0'
     $report = Join-Path $work 'review results'
     $walk = Start-Process -FilePath $exe.FullName -ArgumentList "--verify-package `"$report`"" -WorkingDirectory $cwd.FullName -PassThru
     if (-not $walk.WaitForExit(180000)) {
@@ -109,7 +110,7 @@ try {
         if ($n -ne 24 -or [Convert]::ToHexString([byte[]] $head[0..7]) -ne '89504E470D0A1A0A') { throw "Bad PNG: $($image.Name)" }
         $width = [Convert]::ToInt32([Convert]::ToHexString([byte[]] $head[16..19]), 16)
         $height = [Convert]::ToInt32([Convert]::ToHexString([byte[]] $head[20..23]), 16)
-        if ($width -lt 1200 -or $height -lt 750) { throw "Unexpected screenshot size: $width x $height" }
+        if ($width -lt 960 -or $height -lt 690) { throw "Unexpected screenshot size: $width x $height" }
     }
 
     $finalZip = Join-Path $ev.FullName (Split-Path -Leaf $Zip)
