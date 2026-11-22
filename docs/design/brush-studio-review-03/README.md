@@ -114,8 +114,20 @@ tests that exact ZIP on a **fresh Windows runner with no checkout, Python, Qt or
 project setup**. It publishes the verified ZIP, SHA-256 and app screenshots as a
 prerelease.
 
-The release asset and Actions run are linked from the prerelease after a green
-run. This README does not invent a tag or a digest before the build exists.
+The green run is [45010621488](https://github.com/katsuhirojiro/KomaPaint/actions/runs/45010621488).
+The verified prerelease is
+[`brush-studio-review-03-windows-45010621488-1`](https://github.com/katsuhirojiro/KomaPaint/releases/tag/brush-studio-review-03-windows-45010621488-1).
+
+- Windows x64 ZIP: **68,991,615 bytes**, SHA-256
+  `f6dbd8992e80625870342491aeba4b88dbd1ae5831906987169ed07e5aa87ba0`
+- 34/34 packaged interaction checks passed, zero Qt warnings.
+- 27 screenshots captured from the extracted EXE on the native Windows runner.
+- Launch without arguments, app-local DLL origins, clean close, and ZIP re-hash
+  all passed.
+
+The hosted Windows desktop is 1024×768, so the packaged captures are 1000×700.
+The 1440×900 captures used for local design review are not committed; they are
+Linux offscreen layout evidence and are not a substitute for the native run.
 
 ## Files
 
