@@ -668,7 +668,7 @@ performance measurements.
 
 ## 10. What review 03 proves — and what it does not
 
-**Proves (Linux offscreen, isolated compositor):**
+**Proves (local Linux offscreen and the packaged Windows x64 build):**
 
 - 17 areas, 28 cards, 122 catalogue entries, 66 preview-rendered and 56
   organisation-only entries can coexist without a second naming system.
@@ -677,6 +677,10 @@ performance measurements.
   brush undo, pins and quick access are reviewable interactions.
 - A packaged interaction walkthrough can assert 34 behaviours and zero Qt
   warnings in the isolated app.
+- The exact Windows x64 ZIP (`68,991,615` bytes, SHA-256
+  `f6dbd899…5aa87ba0`) launched from a fresh runner with a system-only PATH and
+  passed 34/34 checks with 27 screenshots at 1000×700. That is evidence about
+  the review app, not about the production window.
 
 **Does not prove:**
 
@@ -685,8 +689,8 @@ performance measurements.
 - that `.abr`/`.sut` import exists;
 - that anti-overflow, reference layers, vector erase or screen-relative size
   exist;
-- that a Windows build launches (that needs the packaged workflow);
-- that a stylus or an artist can use it.
+- that the production `ui/workspaces/BrushStudioWindow.qml` adopts this layout;
+- that a stylus, a physical tablet or an artist can use it.
 
 The 34 checks in `verify.py` are evidence about the review app, not a
 production acceptance suite. The production suites remain
