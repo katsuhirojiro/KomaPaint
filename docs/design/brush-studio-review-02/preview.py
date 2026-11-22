@@ -459,7 +459,7 @@ def leaf_boundary(x, y, xv, yv, bow):
 def drawing_study(p, w, h):
     """A light printed study on the pad. It is paper content, not brush output."""
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    ink = QColor('#a09a91')
+    ink = QColor('#c2bbb0')
     def line(pts, thick):
         if len(pts) < 2:
             return
