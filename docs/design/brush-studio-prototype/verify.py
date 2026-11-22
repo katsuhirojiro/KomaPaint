@@ -62,6 +62,13 @@ class UI:
                 self.dock("Marks")
             elif name in ("DynamicsChoice", "BrushChoice", "SelectedChoice"):
                 self.dock("Settings")
+        item = self.get(name)
+        ancestor = item.parentItem()
+        while ancestor:
+            if ancestor.objectName() in ("settingsScroll", "markList"):
+                self.reveal(name, ancestor.objectName())
+                break
+            ancestor = ancestor.parentItem()
         pt = self.point(name, x, y)
         assert self.get(name).isEnabled(), name
         if touch:
@@ -163,12 +170,11 @@ def run(create_app, captures=None, evidence=None):
             assert evidence["qtPlatform"] == "windows" and evidence["architecture"] == 64
         w.requestActivate()
         QTest.qWait(140)
-        # Some native desktops constrain the first shown size. Request the wide
-        # review layout after the top-level window exists, and support either dock.
-        w.resize(1440, 900)
-        QTest.qWait(180)
+        # The hosted Hyper-V display can be smaller than the requested window.
+        # Use its native window bounds, not offscreen rendering or a fake display.
+        review_size = (w.width(), w.height()) if evidence is not None else (1440, 900)
         if evidence is not None:
-            evidence["reviewWindow"] = [w.width(), w.height()]
+            evidence["reviewWindow"] = list(review_size)
             evidence["display"] = [w.screen().geometry().width(), w.screen().geometry().height()]
         ui = UI(w, captures)
         assert s.route == "home"
@@ -342,13 +348,13 @@ def run(create_app, captures=None, evidence=None):
         ui.click("advancedButton")
 
         current = s.selected
-        w.resize(1024, 768)
+        w.resize(min(1024, review_size[0]), min(768, review_size[1]))
         QTest.qWait(90)
         ui.click("MarksChoice", touch=True)
         assert ui.get("addMarkButton").isVisible()
         ui.click("SettingsChoice", touch=True)
         assert s.selected == current and s.pad.strokes == retained
-        w.resize(768, 960)
+        w.resize(min(768, max(520, review_size[1] - 36)), min(960, review_size[1]))
         QTest.qWait(90)
         ui.scene("06-tablet-portrait")
         w.resize(430, 540)
@@ -362,7 +368,7 @@ def run(create_app, captures=None, evidence=None):
         ui.point("padSurface")
         ui.scene("07-small-window-pad")
 
-        w.resize(1440, 900)
+        w.resize(*review_size)
         QTest.qWait(130)
         ui.click("backToStarters")
         ui.click("tipStarter")
