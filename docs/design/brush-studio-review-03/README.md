@@ -69,7 +69,7 @@ workflow.
   definition. `Reset mine` clears only personal data.
 - **Row** — click the value for exact entry, drag the slider, use the pin for
   Quick Access, reset one row, or open the small curve affordance. A row carries
-  an `ORG` tag when the preview does not compose it.
+  an `ORG` tag when the preview does not compose it, and `DEV` for device-only assistance.
 - **Pad** — draw with a mouse or pen. The pressure slider changes the test input;
   the test-mode list changes the sample. Retain stores the current input and
   effective settings for comparison.
