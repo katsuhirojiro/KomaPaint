@@ -137,12 +137,12 @@ def build_graphite():
 def build_wet():
     return node("brush", "Wet Ochre", children=[
         group("Reservoir mark", [
-            mark("Round nib", "nib", scale=112, opacity=76),
+            mark("Round nib", "nib", scale=92, opacity=68),
             mark("Broken edge", "broken", scale=86, weight=3, opacity=54),
         ], mode="Weighted", members_per_stamp=1),
         texture("Cold press", "Cold press", texture_strength=26, texture_scale=134, texture_depth=58),
-        secondary("Water bloom", [mark("Soft round", "air", scale=178, opacity=18)],
-                  amount=22, blend="Multiply", opacity=60),
+        secondary("Water bloom", [mark("Soft round", "air", scale=78, opacity=7)],
+                  amount=12, blend="Multiply", opacity=38),
     ])
 
 
@@ -159,11 +159,11 @@ def build_spatter():
 
 
 STARTERS = {
-    "ferrous": ("Ferrous Ink", build_ferrous, {"tip_size": 54, "flow": 62, "spacing": 18,
+    "ferrous": ("Ferrous Ink", build_ferrous, {"tip_size": 54, "flow": 62, "spacing": 8,
                                                "taper_pressure": 55, "taper_size": 66, "opacity": 88}),
-    "graphite": ("Dry Graphite", build_graphite, {"tip_size": 28, "flow": 46, "spacing": 11,
+    "graphite": ("Dry Graphite", build_graphite, {"tip_size": 28, "flow": 46, "spacing": 6,
                                                   "opacity": 78, "taper_size": 72, "tip_hardness": 82}),
-    "wet": ("Wet Ochre", build_wet, {"tip_size": 88, "flow": 54, "opacity": 82, "spacing": 15,
+    "wet": ("Wet Ochre", build_wet, {"tip_size": 88, "flow": 54, "opacity": 82, "spacing": 8,
                                      "wet_medium": "Watercolour", "wet_pickup": 48, "wet_pull": 42,
                                      "surface": "Rough paper"}),
     "spatter": ("Mist Spatter", build_spatter, {"tip_size": 36, "flow": 70, "opacity": 74,

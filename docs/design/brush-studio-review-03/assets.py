@@ -9,7 +9,7 @@ from math import cos, pi, sin
 from pathlib import Path
 from random import Random
 
-from PIL import Image, ImageDraw, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtQuick import QQuickImageProvider
@@ -192,8 +192,9 @@ class Assets(QQuickImageProvider):
         self.icons = Path(icons) if icons else None
         self.custom = {}
 
-    @lru_cache(maxsize=512)
-    def stamp(self, key, ink, hardness=74, threshold=0):
+    @lru_cache(maxsize=1024)
+    def stamp(self, key, ink, hardness=74, threshold=0, texture="", strength=0,
+              contrast=100, scale=100):
         alpha = self.marks.get(key)
         if alpha is None:
             return blank()
@@ -208,6 +209,18 @@ class Assets(QQuickImageProvider):
                 a = bound((a - soft * 0.48) / max(0.02, 1 - soft * 0.48))
             lut.append(round(a * 255))
         shaped = alpha.point(lut)
+        if texture and strength > 0:
+            tooth = self.grains.get(texture, self.grains["paper"])
+            if contrast != 100:
+                tooth = tooth.point(lambda v: int(bound(128 + (v - 128) * contrast / 100.0) * 1))
+            step = max(8, int(RES / max(0.2, scale / 100.0)))
+            tooth = tooth.resize((step, step), Image.Resampling.BILINEAR)
+            tile = Image.new("L", shaped.size)
+            for y in range(0, RES, step):
+                for x in range(0, RES, step):
+                    tile.paste(tooth, (x, y))
+            shaped = Image.blend(shaped, ImageChops.multiply(shaped, tile),
+                                 bound(strength))
         image = Image.new("RGBA", shaped.size, ink)
         image.putalpha(shaped)
         return qimage(image)

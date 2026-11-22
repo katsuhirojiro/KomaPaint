@@ -129,35 +129,27 @@ class Artwork(QQuickPaintedItem):
         painter.drawImage(0, 0, self._cache)
         active = studio.activeStroke
         if active:
-            # Keep the growing stroke in its own layer and render only the
-            # points that arrived since the last frame.  Re-rendering every
-            # stamp of the stroke on every mouse move made long strokes
-            # quadratic and visibly laggy.
+            # Draw the live path as one smooth pressure-shaped body.  Stamping
+            # every mark of an in-progress stroke either costs seconds per
+            # frame or shows its individual marks; the finished stroke is
+            # stamped at full quality when the pointer is released.
             stroke = active[0]
-            points = stroke["points"]
             layer_key = (w, h, studio.revision, stroke.get("seed"))
             if self._active_layer is None or self._active_key != layer_key:
                 self._active_layer = render.allocate(w, h)
                 self._active_key = layer_key
-                self._active_rendered = 0
-            if len(points) > self._active_rendered:
-                start = max(0, self._active_rendered - 1)
-                chunk = dict(stroke, points=points[start:])
-                layer_painter = QPainter(self._active_layer)
-                try:
-                    layer_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                    layer_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-                    render.render_stroke(layer_painter, studio.doc, chunk, w, h,
-                                         studio.assets, self._cache, quality=0.75,
-                                         texture_pass=False)
-                finally:
-                    layer_painter.end()
-                self._active_rendered = len(points)
+            else:
+                self._active_layer.fill(Qt.GlobalColor.transparent)
+            layer_painter = QPainter(self._active_layer)
+            try:
+                layer_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                render.render_stroke_body(layer_painter, studio.doc, stroke, w, h, studio.assets)
+            finally:
+                layer_painter.end()
             painter.drawImage(0, 0, self._active_layer)
         else:
             self._active_layer = None
             self._active_key = None
-            self._active_rendered = 0
         # Honest frame label and comparison marker, drawn in the pad rather
         # than as a fake UI card.
         painter.save()

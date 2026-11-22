@@ -209,6 +209,18 @@ Rectangle {
             font.pixelSize: 7
             font.letterSpacing: 0.6
         }
+
+        Text {
+            visible: studio.activeStroke.length > 0
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.margins: 10
+            text: "LIVE PATH · FULL STAMP ON RELEASE"
+            color: Theme.meta
+            font.family: Theme.ui
+            font.pixelSize: 7
+            font.letterSpacing: 0.6
+        }
     }
 
     CurveDock {
