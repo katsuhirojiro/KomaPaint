@@ -1,0 +1,32 @@
+KomaPaint Brush Studio | Second Design Review | Windows x64
+===========================================================
+
+1. Extract the entire ZIP. Do not run the app from inside the ZIP viewer.
+2. Double-click KomaPaint Brush Studio Review 02.exe in the extracted folder.
+3. Keep the _internal folder next to the executable.
+
+No installer, Python, Qt SDK, terminal, or internet connection is needed.
+This is an unsigned standalone review build, not an installer or updater.
+It opens on Graphite Pencil, with a printed graphite study on the paper.
+
+A quick walkthrough:
+  Cloudbank: choose the study brush, then open Advanced Brush Setup.
+  Anatomy: select Broken edge inside Main masses. Its size, angle and mask
+  belong to that one part. Turn Follows stroke direction on and off.
+  Nested groups: select Drift & light. It contains two groups and textures.
+  Selection: change a group between Paint Together, In Order, Random
+  Selection and Weighted Selection, then draw again.
+  Reuse: save the selected group, switch brushes, and add it from Reuse.
+  Add parts: use Add or the BUILD list for a mark, another brush, texture,
+  mask or group. Any brush can contain any other brush, without a part cap.
+  Draw a Tip: draw several strokes, then add the fitted mark to the brush.
+  Import Image: choose a local image and use its alpha or lightness as a mark.
+  Compact: drag the window near 1024 x 720. The footer Advanced button keeps
+  the setup reachable, and the list collapses instead of clipping.
+  Compare: Draft and Original replay the same retained test strokes.
+
+All work stays in this session. The app is an isolated design mockup: it does
+not read or write KomaPaint's production brush library, artwork, or documents.
+See Licenses for third-party notices and fonts/Inter-OFL.txt for Inter 4.1.
+
+First review: https://github.com/katsuhirojiro/KomaPaint/blob/arena/64f169fc-komapaint/docs/design/brush-studio-prototype/README.md
