@@ -94,8 +94,11 @@ def main():
     note("QML loaded")
     win = engine.rootObjects()[0]
     screen = app.primaryScreen().availableGeometry()
-    width = args.width or min(1440, max(1040, screen.width() - 40))
-    height = args.height or min(920, max(720, screen.height() - 70))
+    width = args.width or min(1440, max(1000, screen.width() - 40))
+    height = args.height or min(920, max(700, screen.height() - 70))
+    if app.platformName() == "windows":
+        width = min(width, 1000)
+        height = min(height, 700)
     win.resize(width, height)
     win.show()
     note(f"Window: {win.width()} x {win.height()}")

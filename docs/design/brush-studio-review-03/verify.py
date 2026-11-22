@@ -17,6 +17,19 @@ def settle(ms=280):
     QTest.qWait(ms)
 
 
+def fit(win, width, height):
+    """Keep the packaged Windows captures inside a 1024×768 work area.
+
+    The offscreen/Linux captures keep their requested size; the Windows
+    verification needs deterministic 1000×700 screenshots on the small hosted
+    desktop and must never ask Windows for a geometry larger than the screen.
+    """
+    if QGuiApplication.instance().platformName() == "windows":
+        width = min(width, 1000)
+        height = min(height, 700)
+    win.resize(width, height)
+
+
 def shot(win, path):
     path.parent.mkdir(parents=True, exist_ok=True)
     image = win.grabWindow()
@@ -87,7 +100,7 @@ def render_digest(s, key=None):
 def capture(win, folder):
     out = Path(folder)
     s = render.STUDIO
-    win.resize(1440, 900)
+    fit(win, 1440, 900)
     settle(700)
     areas = ["stroke", "stabilise", "taper", "tip", "texture", "render", "wet",
              "colour", "dynamics", "spray", "modes", "secondary", "material",
@@ -144,12 +157,12 @@ def capture(win, folder):
     settle(200)
     shot(win, out / "25-dynamics-large.png")
 
-    win.resize(1024, 720)
+    fit(win, 1024, 720)
     settle(500)
     s.setArea("wet")
     settle(300)
     shot(win, out / "26-compact-1024.png")
-    win.resize(1440, 900)
+    fit(win, 1440, 900)
     settle(300)
 
 
@@ -167,7 +180,7 @@ def walkthrough(win, folder, warnings):
     try:
         s = render.STUDIO
         capture(win, shots)
-        win.resize(1280, 800)
+        fit(win, 1280, 800)
         settle(400)
         s.setArea("stroke")
         s.setLayer("personal")
@@ -318,7 +331,7 @@ def walkthrough(win, folder, warnings):
               sum(len(v) for v in render.catalog.RENDERED.values()))
         check("no Qt warnings during the walkthrough", not warnings, warnings[:4])
 
-        win.resize(1280, 800)
+        fit(win, 1280, 800)
         settle(300)
         shot(win, shots / "27-final-state.png")
         report = dict(passed=all(c["passed"] for c in checks), frozen=bool(getattr(sys, "frozen", False)),

@@ -8,10 +8,10 @@ C.ApplicationWindow {
     id: window
     objectName: "brushStudioWindow"
     visible: true
-    width: 1440
-    height: 900
-    minimumWidth: 1000
-    minimumHeight: 720
+    width: 1000
+    height: 700
+    minimumWidth: 960
+    minimumHeight: 660
     title: "KomaPaint — Brush Studio (Third Design Review)"
     color: Theme.canvas
 
