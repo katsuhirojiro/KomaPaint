@@ -1,0 +1,20 @@
+KomaPaint Brush Studio | Windows x64 Design Review
+===================================================
+
+1. Extract the entire ZIP. Do not run the app from inside the ZIP viewer.
+2. Double-click KomaPaint Brush Studio.exe in the extracted folder.
+3. Keep the _internal folder next to the executable.
+
+No installer, Python, Qt SDK, terminal, or internet connection is needed.
+This is an unsigned standalone review build, not an installer or updater.
+
+A quick walkthrough:
+  Pencil: lower Opacity without changing Brush size. Draw and undo a test.
+  Cloud study: compare In Order, Random, and Weighted. Edit just Wind wisp.
+  Dynamics + Advanced: draw a curve and compare Modified and Original.
+  Draw a Brush Tip: draw a mark, then choose Use as a mark.
+  Import an Image: select a local file and test its imprint in the editor.
+
+All work stays in this session. The app only simulates brush rendering and
+is not linked to the shipping KomaPaint window, engine, or brush library.
+See Licenses for third-party notices.

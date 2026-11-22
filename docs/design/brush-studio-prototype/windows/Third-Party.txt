@@ -1,0 +1,31 @@
+Third-party components in this standalone design-review package
+===============================================================
+
+Qt 6.8.3, Qt for Python (PySide6 Essentials 6.8.3) and Shiboken 6.8.3
+  The package dynamically links the original, unmodified DLLs and bindings.
+  These components are used under the GNU Lesser General Public License
+  3.0. See LGPL-3.0.txt and GPL-3.0.txt. These license terms allow replacing
+  the bundled LGPL libraries with compatible modified versions and reverse
+  engineering the application to debug those modifications.
+  Source for the corresponding releases and their third-party notices:
+    https://download.qt.io/archive/qt/6.8/6.8.3/single/
+    https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.8.3-src/
+    https://code.qt.io/cgit/pyside/pyside-setup.git/tree/?h=v6.8.3
+    https://doc.qt.io/qt-6/licenses-used-in-qt.html
+  These are arranged as separate files under _internal/PySide6 and
+  _internal/shiboken6 (some dependency DLLs are in _internal itself).
+
+CPython 3.12 and Pillow
+  See Python.txt and Pillow.txt. Pillow's bundled codec notices, where
+  included by the wheels, are copied alongside its license.
+
+PyInstaller 6.16.0
+  Bootloader distributed with the PyInstaller bootloader exception.
+  See PyInstaller.txt.
+
+Microsoft Visual C++ runtime
+  Redistributable application-local runtime DLLs from the official
+  PySide6/CPython distributions. No separately installed SDK is used.
+
+Inter 4.1, copyright The Inter Project Authors
+  SIL Open Font License 1.1. See _internal/fonts/Inter-OFL.txt.

@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>KomaPaint · Live Qt Brush Studio</title>
+<style>
+  :root { color-scheme:dark; font: 15px system-ui,sans-serif; background:#191919; color:#f5f0e8; }
+  * { box-sizing:border-box; }
+  body { margin:0; width:100vw; height:100dvh; overflow:hidden; }
+  #view { display:block; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); touch-action:none; outline:none; image-rendering:auto; }
+  #status { display:grid; place-items:center; position:absolute; inset:0; color:#cec6bb; pointer-events:none; text-align:center; padding:1rem; }
+  #status[hidden] { display:none; }
+  dialog { width:min(430px,calc(100% - 28px)); border:1px solid #49443e; border-radius:12px; padding:24px; background:#242424; color:#f5f0e8; }
+  dialog::backdrop { background:#141413ba; }
+  h1 { font-size:22px; margin:0 0 12px; }
+  p { color:#cdc6bc; line-height:1.5; }
+  input[type=file] { width:100%; font:inherit; padding:12px 0; }
+  input::file-selector-button, button { font:inherit; font-weight:600; border:0; border-radius:6px; background:#efa581; color:#251b16; padding:10px 14px; cursor:pointer; }
+  button { background:#353432; color:#f5f0e8; border:1px solid #514740; margin-top:10px; }
+</style>
+</head>
+<body>
+<canvas id="view" tabindex="0" aria-label="Live KomaPaint Qt window. Use pointer, touch or a keyboard to interact."></canvas>
+<div id="status" role="status">Connecting to the live Qt window…</div>
+<dialog id="upload" aria-labelledby="imageTitle">
+  <h1 id="imageTitle">Choose an image</h1>
+  <p>Choose a PNG, JPEG, WebP or BMP from this device. The Qt mockup uses the file only in this review session.</p>
+  <input type="file" id="image" aria-label="Choose a local image" accept="image/png,image/jpeg,image/webp,image/bmp,.bmp">
+  <p id="error" role="status" hidden></p>
+  <button type="button" id="cancel">Cancel</button>
+</dialog>
+<script>
+  const view = document.getElementById('view'), ctx = view.getContext('2d', {alpha:false});
+  const status = document.getElementById('status'), dialog = document.getElementById('upload');
+  const image = document.getElementById('image'), error = document.getElementById('error');
+  let socket, pendingFrame, rendering = false, pointer = null, viewportSize, previousDown;
+  const endpoint = new URL('qt', window.location.href);
+  endpoint.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  function send(data) { if (socket?.readyState === 1) socket.send(JSON.stringify(data)); }
+  function fitFrame() {
+    const scale = Math.min(1, innerWidth / view.width, innerHeight / view.height);
+    view.style.width = `${view.width * scale}px`;
+    view.style.height = `${view.height * scale}px`;
+  }
+  function resize(force = false) {
+    const w = Math.max(430, Math.min(2048, innerWidth));
+    const h = Math.max(540, Math.min(1440, innerHeight));
+    const next = `${w}×${h}`;
+    if (force || viewportSize !== next) { viewportSize = next; send({t:'size',w,h}); }
+    fitFrame();
+  }
+  window.addEventListener('resize', () => resize());
+  async function playout() {
+    if (rendering) return;
+    rendering = true;
+    while (pendingFrame) {
+      const body = pendingFrame;
+      pendingFrame = null;
+      try {
+        const bitmap = typeof createImageBitmap === 'function' ? await createImageBitmap(body) : await new Promise((resolve, reject) => {
+          const frame = new Image(), url = URL.createObjectURL(body);
+          frame.onload = () => { URL.revokeObjectURL(url); resolve(frame); };
+          frame.onerror = () => { URL.revokeObjectURL(url); reject(); };
+          frame.src = url;
+        });
+        if (view.width !== bitmap.width || view.height !== bitmap.height) {
+          view.width = bitmap.width; view.height = bitmap.height; fitFrame();
+        }
+        ctx.drawImage(bitmap,0,0); bitmap.close?.();
+        status.hidden = true;
+      } catch (_) { /* A fresh frame will follow. */ }
+    }
+    rendering = false;
+  }
+  function connect() {
+    socket = new WebSocket(endpoint);
+    socket.onmessage = event => {
+      if (event.data instanceof Blob) { pendingFrame = event.data; playout(); return; }
+      const message = JSON.parse(event.data);
+      if (message.t === 'ready') resize(true);
+      if (message.t === 'cursor') view.style.cursor = message.value;
+      if (message.t === 'chooseFile' && !dialog.open) {
+        image.value = ''; error.hidden = true; dialog.showModal(); image.focus();
+      }
+    };
+    socket.onclose = () => {
+      status.hidden = false; status.textContent = 'Reconnecting to the Qt window…';
+      setTimeout(connect, 1050);
+    };
+  }
+  function point(event) {
+    const bounds = view.getBoundingClientRect();
+    return {x:(event.clientX-bounds.x)/bounds.width,y:(event.clientY-bounds.y)/bounds.height,
+      shift:event.shiftKey,ctrl:event.ctrlKey,alt:event.altKey,meta:event.metaKey};
+  }
+  view.addEventListener('pointerdown', event => {
+    if (pointer !== null) return;
+    event.preventDefault(); view.focus({preventScroll:true}); view.setPointerCapture(event.pointerId);
+    pointer = event.pointerId;
+    const coords = point(event), now = performance.now();
+    const double = event.pointerType !== 'touch' && previousDown && now - previousDown.time < 350 &&
+      Math.abs(coords.x-previousDown.x)*view.width < 7 && Math.abs(coords.y-previousDown.y)*view.height < 7;
+    send({t:'pointer',device:event.pointerType,phase:double?'double':'down',button:event.button,buttons:event.buttons||1,...coords});
+    previousDown = double ? null : {...coords,time:now};
+  });
+  view.addEventListener('pointermove', event => {
+    if (pointer !== null && pointer !== event.pointerId) return;
+    if (pointer === null && event.pointerType !== 'mouse') return;
+    send({t:'pointer',device:event.pointerType,phase:'move',button:event.button,buttons:event.buttons,...point(event)});
+  });
+  for (const type of ['pointerup','pointercancel']) view.addEventListener(type, event => {
+    if (pointer !== event.pointerId) return;
+    send({t:'pointer',device:event.pointerType,phase:'up',button:event.button<0?0:event.button,buttons:0,...point(event)});
+    pointer = null;
+  });
+  view.addEventListener('contextmenu', event=>event.preventDefault());
+  view.addEventListener('wheel', event => {
+    event.preventDefault();
+    const unit = event.deltaMode ? 36 : 1;
+    send({t:'wheel',dx:event.deltaX*unit,dy:event.deltaY*unit,...point(event)});
+  },{passive:false});
+  for (const type of ['keydown','keyup']) view.addEventListener(type,event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') return;
+    if ((event.ctrlKey || event.metaKey) && ['r','+','-','0'].includes(event.key.toLowerCase())) return;
+    event.preventDefault();
+    send({t:'key',key:event.key,down:type==='keydown',repeat:event.repeat,shift:event.shiftKey,
+      ctrl:event.ctrlKey,alt:event.altKey,meta:event.metaKey});
+  });
+  window.addEventListener('paste',event=>{
+    if (dialog.open) return;
+    const text=event.clipboardData?.getData('text'); if(text) { event.preventDefault(); send({t:'paste',text}); }
+  });
+  document.getElementById('cancel').onclick = ()=>{ send({t:'cancelFile'}); dialog.close(); view.focus(); };
+  dialog.addEventListener('cancel',()=>{ send({t:'cancelFile'}); view.focus(); });
+  image.addEventListener('change',async()=>{
+    const file=image.files[0];
+    if (!file) return;
+    if (file.size>12*1024*1024) { error.textContent='Choose an image under 12 MB.'; error.hidden=false; return; }
+    if (socket?.readyState!==1) { error.textContent='The review window is reconnecting. Try again shortly.'; error.hidden=false; return; }
+    const bytes=await file.arrayBuffer();
+    send({t:'file',name:file.name}); socket.send(bytes); dialog.close(); view.focus();
+  });
+  connect(); resize(true);
+</script>
+</body>
+</html>
