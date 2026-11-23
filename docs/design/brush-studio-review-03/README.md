@@ -57,7 +57,7 @@ QT_QPA_PLATFORM=offscreen LD_LIBRARY_PATH=... \
 ```
 
 The walkthrough writes `qt-walkthrough.json` and 27 PNGs. The current local
-result is **34/34 checks passed, 0 Qt warnings**; it is Linux offscreen evidence
+result is **35/35 checks passed, 0 Qt warnings**; it is Linux offscreen evidence
 only. It does not validate Windows, a tablet, pressure, tilt, or an artist's
 workflow.
 

@@ -679,7 +679,7 @@ performance measurements.
   warnings in the isolated app.
 - The exact Windows x64 ZIP (`68,991,615` bytes, SHA-256
   `f6dbd899…5aa87ba0`) launched from a fresh runner with a system-only PATH and
-  passed 34/34 checks with 27 screenshots at 1000×700. That is evidence about
+  passed 35/35 checks with 28 screenshots at 1000×700. That is evidence about
   the review app, not about the production window.
 
 **Does not prove:**
