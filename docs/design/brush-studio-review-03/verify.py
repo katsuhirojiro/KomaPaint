@@ -180,6 +180,25 @@ def walkthrough(win, folder, warnings):
     try:
         s = render.STUDIO
         capture(win, shots)
+        s.clearPad()
+        s.setTestMode("Stroke")
+        s.beginStroke(0.60, 0.20, 0.9)
+        for step in range(1, 61):
+            angle = step / 60 * 6.283185307179586
+            s.moveStroke(0.50 + 0.10 * __import__("math").cos(angle),
+                         0.20 + 0.06 * __import__("math").sin(angle), 0.85)
+        s.endStroke()
+        settle(900)
+        pad = item(win, "padCanvas")
+        cache = pad._cache if pad is not None else None
+        if cache is not None:
+            center = cache.pixelColor(cache.width() // 2, int(cache.height() * 0.2))
+            ring = cache.pixelColor(int(cache.width() * 0.50),
+                                    int(cache.height() * 0.14))
+            check("a closed loop renders as a ring, not a filled disc",
+                  center.lightness() > 170 and ring.lightness() < 165,
+                  f"centre {center.lightness()} / ring {ring.lightness()}")
+            shot(win, shots / "28-stress-loop.png")
         fit(win, 1280, 800)
         settle(400)
         s.setArea("stroke")

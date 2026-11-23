@@ -14,7 +14,7 @@ from random import Random
 import catalog
 from assets import ARGB, SURFACES, qimage
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
-from PySide6.QtGui import (QBrush, QColor, QFont, QImage, QPainter, QPainterPath,
+from PySide6.QtGui import (QBrush, QColor, QFont, QImage, QPainter, QPainterPath, QPainterPathStroker,
                            QPen, QTransform)
 
 BLEND = {
@@ -555,31 +555,55 @@ def render_stroke_proxy(painter, doc, stroke, w, h):
         painter.drawEllipse(QPointF(raw[0][0], raw[0][1]), size / 2, size / 2)
         painter.restore()
         return
-    # A ribbon whose width follows pressure reads as a brush much better than
-    # a constant-width pen, and costs one filled polygon for the whole stroke.
-    left, right = [], []
-    for index, (x, y, pressure, _speed) in enumerate(raw):
-        previous = raw[max(0, index - 1)]
-        following = raw[min(len(raw) - 1, index + 1)]
-        dx, dy = following[0] - previous[0], following[1] - previous[1]
-        length = max(1e-4, hypot(dx, dy))
-        nx, ny = -dy / length, dx / length
-        taper = min(1.0, index / 6.0, (len(raw) - 1 - index) / 6.0)
-        width = size * (0.34 + 0.66 * pressure) * (0.55 + 0.45 * taper)
-        left.append((x + nx * width / 2, y + ny * width / 2))
-        right.append((x - nx * width / 2, y - ny * width / 2))
-    path = QPainterPath()
-    path.moveTo(*left[0])
-    for point in left[1:]:
-        path.lineTo(*point)
-    for point in reversed(right):
-        path.lineTo(*point)
-    path.closeSubpath()
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(colour)
-    painter.drawPath(path)
+    # One stroked centre line: fast, loop-safe, and free of overlapping cap
+    # seams.  The full stamp renderer replaces it when the drag ends.
+    pressure = sum(point[2] for point in raw) / len(raw)
+    pen = QPen(colour, max(1.0, size * (0.34 + 0.66 * pressure)))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    center = QPainterPath()
+    center.moveTo(raw[0][0], raw[0][1])
+    for point in raw[1:]:
+        jump = hypot(point[0] - center.currentPosition().x(),
+                     point[1] - center.currentPosition().y())
+        if jump > max(size * 6.0, 200.0):
+            center.moveTo(point[0], point[1])
+        else:
+            center.lineTo(point[0], point[1])
+    painter.drawPath(center)
     painter.restore()
 
+
+def _stroke_pen(painter, raw, size, factor, taper_ends=True):
+    """Paint the centre line as round-capped, variable-width segments.
+
+    Painting segments directly avoids the self-intersection fill that a joined
+    left/right ribbon produces on a loop, where the interior turns solid.
+    """
+    if len(raw) == 1:
+        width = max(1.0, size * factor(raw[0][2]))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QRectF(raw[0][0] - width / 2, raw[0][1] - width / 2,
+                                   width, width))
+        return
+    pen = QPen(painter.brush().color())
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    count = max(1, len(raw) - 1)
+    for index, (point, following) in enumerate(zip(raw, raw[1:])):
+        jump = hypot(following[0] - point[0], following[1] - point[1])
+        if jump > max(size * 6.0, 200.0):
+            continue
+        taper = 1.0
+        if taper_ends:
+            taper = min(1.0, (index + 1) / 5.0, (count - index) / 5.0)
+        width = max(1.0, size * factor((point[2] + following[2]) / 2)
+                    * (0.42 + 0.58 * taper))
+        pen.setWidthF(width)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(point[0], point[1]), QPointF(following[0], following[1]))
 
 
 def _stroke_body(painter, doc, raw, w, h, taper_ends=True, strength=0.58):
@@ -590,30 +614,11 @@ def _stroke_body(painter, doc, raw, w, h, taper_ends=True, strength=0.58):
     colour = QColor(doc.get("colour", "#2b2927"))
     alpha = bound(resolve(doc, "opacity", {"pressure": 1.0}, 0) / 100.0)
     alpha *= bound(resolve(doc, "flow", {"pressure": 1.0}, 0) / 100.0)
-    left, right = [], []
-    for index, (x, y, pressure, _speed) in enumerate(raw):
-        previous = raw[max(0, index - 1)]
-        following = raw[min(len(raw) - 1, index + 1)]
-        dx, dy = following[0] - previous[0], following[1] - previous[1]
-        length = max(1e-4, hypot(dx, dy))
-        nx, ny = -dy / length, dx / length
-        taper = min(1.0, index / 7.0, (len(raw) - 1 - index) / 7.0) if taper_ends else 1.0
-        width = size * (0.48 + 0.42 * pressure) * (0.45 + 0.55 * taper)
-        left.append((x + nx * width / 2, y + ny * width / 2))
-        right.append((x - nx * width / 2, y - ny * width / 2))
-    path = QPainterPath()
-    path.moveTo(*left[0])
-    for point in left[1:]:
-        path.lineTo(*point)
-    for point in reversed(right):
-        path.lineTo(*point)
-    path.closeSubpath()
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(colour)
-    painter.setOpacity(alpha * strength)
-    painter.drawPath(path)
+    painter.setOpacity(bound(alpha * strength))
+    _stroke_pen(painter, raw, size, lambda p: 0.52 + 0.40 * p, taper_ends)
     painter.restore()
 
 
@@ -622,32 +627,13 @@ def _stroke_mask(doc, raw, w, h):
     if len(raw) < 2 or effective(doc, "property_eraser") or effective(doc, "spray_enabled"):
         return None
     size = max(1.0, resolve(doc, "tip_size", {"pressure": 0.8, "speed": 0.2}, 0))
-    left, right = [], []
-    for index, (x, y, pressure, _speed) in enumerate(raw):
-        previous = raw[max(0, index - 1)]
-        following = raw[min(len(raw) - 1, index + 1)]
-        dx, dy = following[0] - previous[0], following[1] - previous[1]
-        length = max(1e-4, hypot(dx, dy))
-        nx, ny = -dy / length, dx / length
-        taper = min(1.0, index / 8.0, (len(raw) - 1 - index) / 8.0)
-        width = size * (0.82 + 0.28 * pressure) * (0.28 + 0.72 * taper)
-        left.append((x + nx * width / 2, y + ny * width / 2))
-        right.append((x - nx * width / 2, y - ny * width / 2))
-    path = QPainterPath()
-    path.moveTo(*left[0])
-    for point in left[1:]:
-        path.lineTo(*point)
-    for point in reversed(right):
-        path.lineTo(*point)
-    path.closeSubpath()
     mask = QImage(w, h, QImage.Format.Format_ARGB32_Premultiplied)
     mask.fill(Qt.GlobalColor.transparent)
     mask_painter = QPainter(mask)
     try:
         mask_painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        mask_painter.setPen(Qt.PenStyle.NoPen)
         mask_painter.setBrush(Qt.GlobalColor.white)
-        mask_painter.drawPath(path)
+        _stroke_pen(mask_painter, raw, size, lambda p: 0.88 + 0.24 * p, True)
     finally:
         mask_painter.end()
     return mask
@@ -679,6 +665,10 @@ def render_stroke_body(painter, doc, stroke, w, h, assets):
         dx, dy = point[0] - previous[0], point[1] - previous[1]
         segment = max(1e-4, hypot(dx, dy))
         total += segment
+        if segment > max(size * 6.0, 200.0):
+            previous = point
+            distance = total + step
+            continue
         while distance <= total:
             ratio = (distance - (total - segment)) / segment
             x = previous[0] + dx * ratio
