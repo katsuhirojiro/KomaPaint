@@ -182,21 +182,23 @@ def walkthrough(win, folder, warnings):
         capture(win, shots)
         s.clearPad()
         s.setTestMode("Stroke")
-        s.beginStroke(0.60, 0.20, 0.9)
+        s.setSetting("tip_size", 24)
+        s.beginStroke(0.62, 0.20, 0.9)
         for step in range(1, 61):
             angle = step / 60 * 6.283185307179586
-            s.moveStroke(0.50 + 0.10 * __import__("math").cos(angle),
-                         0.20 + 0.06 * __import__("math").sin(angle), 0.85)
+            s.moveStroke(0.50 + 0.12 * __import__("math").cos(angle),
+                         0.20 + 0.08 * __import__("math").sin(angle), 0.85)
         s.endStroke()
         pad = item(win, "padCanvas")
         if pad is not None:
             pad.update()
         settle(1600)
         cache = pad._cache if pad is not None else None
+        s.resetSetting("tip_size")
         if cache is not None:
             center = cache.pixelColor(cache.width() // 2, int(cache.height() * 0.2))
             ring = cache.pixelColor(int(cache.width() * 0.50),
-                                    int(cache.height() * 0.14))
+                                    int(cache.height() * 0.12))
             corner = cache.pixelColor(cache.width() - 8, 8)
             shot(win, shots / "28-stress-loop.png")
             check("a closed loop renders as a ring, not a filled disc",
