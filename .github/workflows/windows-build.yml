@@ -219,6 +219,37 @@ jobs:
             Write-Host "::notice title=QML responsiveness (ms)::$measureLine"
           }
 
+      - name: Render brush continuity proof
+        shell: pwsh
+        run: |
+          # The engine test can write its rendered continuity sheet to a BMP.
+          # Convert it here with the Windows imaging stack, then publish it as
+          # an artifact so the stroke can be inspected, not only asserted.
+          $proof = Join-Path $env:RUNNER_TEMP 'komapaint-brush-proof'
+          if (Test-Path $proof) { Remove-Item $proof -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $proof | Out-Null
+          $env:KOMAPAINT_BRUSH_PROOF = $proof
+          & "${{ env.TEST_DIR }}\test_brush_engine.exe"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error title=Brush continuity proof::test_brush_engine failed while rendering the proof sheet."
+            exit $LASTEXITCODE
+          }
+          $bmpPath = Join-Path $proof 'brush-continuity.bmp'
+          if (!(Test-Path $bmpPath)) {
+            Write-Host "::error title=Brush continuity proof::brush-continuity.bmp was not written."
+            exit 1
+          }
+          Add-Type -AssemblyName System.Drawing
+          $image = [System.Drawing.Image]::FromFile($bmpPath)
+          try {
+            $pngPath = Join-Path "${{ github.workspace }}" 'brush-continuity.png'
+            $image.Save($pngPath, [System.Drawing.Imaging.ImageFormat]::Png)
+            $bytes = (Get-Item $pngPath).Length
+            Write-Host "::notice title=Brush continuity proof::rendered Windows proof sheet; $bytes bytes; rows: constant 20% pressure, gradual pressure, large tip, small tip."
+          } finally {
+            $image.Dispose()
+          }
+
       - name: Run workload benchmarks (smoke)
         shell: pwsh
         run: |
@@ -605,6 +636,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KomaPaint-Windows-x64-Human-Test
-          path: KomaPaint-Windows-x64-Human-Test.zip
+          path: |
+            KomaPaint-Windows-x64-Human-Test.zip
+            brush-continuity.png
           if-no-files-found: error
           retention-days: 30

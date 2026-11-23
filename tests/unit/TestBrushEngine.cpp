@@ -1,11 +1,133 @@
 #include "drawing/BrushEngine.h"
 #include "brush/BrushTypes.h"
+#include <algorithm>
+#include <cmath>
 #include <limits>
 #include <cstdlib>
 #include <iostream>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 using namespace komapaint;
 #define CHECK(...) do { if (!(__VA_ARGS__)) { std::cerr << "FAIL line " << __LINE__ << ": " << #__VA_ARGS__ << '\n'; std::exit(1); } } while (false)
 static void countCallback(void* ctx, TilePoint) noexcept { ++*static_cast<int*>(ctx); }
+
+static int alphaAt(const SparseTileStore& store, int x, int y)
+{
+    return static_cast<int>(store.pixel({x, y}).value_or(0U) >> 24);
+}
+
+// Longest run of unpainted centreline pixels in [x0,x1]. A continuous stroke
+// has a run of zero; a chain of dabs does not.
+static int longestGap(const SparseTileStore& store, int y, int x0, int x1)
+{
+    int run = 0, worst = 0;
+    for (int x = x0; x <= x1; ++x) {
+        if (alphaAt(store, x, y) == 0) worst = std::max(worst, ++run);
+        else run = 0;
+    }
+    return worst;
+}
+
+static int inkSpan(const SparseTileStore& store, int x, int y0, int y1)
+{
+    int count = 0;
+    for (int y = y0; y <= y1; ++y) count += alphaAt(store, x, y) > 0 ? 1 : 0;
+    return count;
+}
+
+static long long inkSum(const SparseTileStore& store, int x0, int x1, int y0, int y1)
+{
+    long long sum = 0;
+    for (int y = y0; y <= y1; ++y)
+        for (int x = x0; x <= x1; ++x) sum += alphaAt(store, x, y);
+    return sum;
+}
+
+// Optional Windows-CI proof sheet: the production stroke engine, rendered to
+// a plain 24-bit BMP so it can be inspected without Qt or an image library.
+static void writeProofBmp(const std::string& path, const SparseTileStore& store,
+                          int width, int height)
+{
+    const int rowBytes = (width * 3 + 3) & ~3;
+    std::vector<unsigned char> row(static_cast<std::size_t>(rowBytes), 0);
+    std::ofstream out(path, std::ios::binary);
+    if (!out) return;
+    const auto u16 = [&](unsigned v) { out.put(char(v & 255)); out.put(char((v >> 8) & 255)); };
+    const auto u32 = [&](unsigned v) { u16(v & 0xffff); u16((v >> 16) & 0xffff); };
+    out.put('B'); out.put('M');
+    u32(static_cast<unsigned>(54 + rowBytes * height));
+    u16(0); u16(0); u32(54);
+    u32(40); u32(static_cast<unsigned>(width)); u32(static_cast<unsigned>(height));
+    u16(1); u16(24); u32(0);
+    u32(static_cast<unsigned>(rowBytes * height)); u32(2835); u32(2835);
+    u32(0); u32(0);
+    for (int y = height - 1; y >= 0; --y) {
+        std::fill(row.begin(), row.end(), 0);
+        for (int x = 0; x < width; ++x) {
+            const std::uint32_t px = store.pixel({x, y}).value_or(0U);
+            const unsigned a = (px >> 24) & 255U;
+            const unsigned r = (px >> 16) & 255U;
+            const unsigned g = (px >> 8) & 255U;
+            const unsigned b = px & 255U;
+            // Premultiplied ARGB over white paper.
+            row[static_cast<std::size_t>(x) * 3 + 0] = static_cast<unsigned char>((b + 255U * (255U - a)) / 255U);
+            row[static_cast<std::size_t>(x) * 3 + 1] = static_cast<unsigned char>((g + 255U * (255U - a)) / 255U);
+            row[static_cast<std::size_t>(x) * 3 + 2] = static_cast<unsigned char>((r + 255U * (255U - a)) / 255U);
+        }
+        out.write(reinterpret_cast<const char*>(row.data()), rowBytes);
+    }
+}
+
+static BrushDefinition continuityBrush(int size, double spacing, double pressureSize)
+{
+    BrushDefinition b;
+    b.size = size;
+    b.spacing = spacing;
+    b.hardness = 1.0;
+    b.opacity = 1.0;
+    b.flow = 1.0;
+    b.pressureSize = pressureSize;
+    b.pressureOpacity = 0.0;
+    b.pressureFlow = 0.0;
+    b.minSizeRatio = 0.15;
+    b.color = 0xff000000;
+    return b;
+}
+
+static void writeContinuityProof()
+{
+    const char* directory = std::getenv("KOMAPAINT_BRUSH_PROOF");
+    if (!directory || !*directory) return;
+    std::error_code ec;
+    std::filesystem::create_directories(directory, ec);
+    if (ec) return;
+    constexpr int width = 700, height = 380;
+    SparseTileStore sheet(width, height, 32);
+    auto paint = [&](int y, int size, double spacing, bool gradual) {
+        BrushStroke line(sheet, continuityBrush(size, spacing, 1.0));
+        CHECK(line.begin({40, double(y), 0.2}));
+        for (int x = 41; x <= 660; ++x) {
+            double pressure = 0.2;
+            if (gradual) {
+                const double t = double(x - 40) / 620.0;
+                pressure = 0.2 + 0.8 * (1.0 - std::abs(2.0 * t - 1.0));
+            }
+            CHECK(line.extend({double(x), double(y), pressure}));
+        }
+        CHECK(line.end({660, double(y), 0.2}));
+    };
+    paint(60, 32, 0.50, false);
+    paint(150, 32, 0.50, true);
+    paint(250, 128, 0.50, false);
+    paint(340, 8, 0.50, false);
+    writeProofBmp((std::filesystem::path(directory) / "brush-continuity.bmp").string(),
+                  sheet, width, height);
+}
+
 int main() {
     using W = SparseTileStore::WriteResult;
     BrushDefinition brush; brush.size = 8; brush.spacing = 0.25; brush.color = 0xffff0000;
@@ -228,6 +350,166 @@ int main() {
         big.size = std::numeric_limits<double>::max();
         CHECK(BrushRasterizer::dab(small, big, {4, 2, 1.0}) == W::InvalidPixel);
     }
+
+    // ---- Spacing follows the dab that pressure and tilt actually produce.
+    // The matrix renders real pixels and scans the centreline; it does not
+    // check the spacing formula in isolation.
+    {
+        constexpr int y = 160, x0 = 100, x1 = 600;
+        for (double pressureSize : {0.0, 1.0}) {
+            for (int size : {8, 32, 128}) {
+                for (double spacing : {0.05, 0.15, 0.30, 0.50}) {
+                    for (double pressure : {0.2, 0.6, 1.0}) {
+                        SparseTileStore canvas(700, 320, 32);
+                        BrushStroke line(canvas, continuityBrush(size, spacing, pressureSize));
+                        CHECK(line.begin({double(x0), double(y), pressure}));
+                        for (int x = x0 + 1; x <= x1; ++x)
+                            CHECK(line.extend({double(x), double(y), pressure}));
+                        CHECK(line.end({double(x1), double(y), pressure}));
+                        CHECK(longestGap(canvas, y, x0, x1) == 0);
+                        CHECK(alphaAt(canvas, x0, y) > 0);
+                        CHECK(alphaAt(canvas, x1, y) > 0);
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Pressure changing continuously along one stroke.
+    {
+        constexpr int y = 160, x0 = 100, x1 = 600;
+        SparseTileStore canvas(700, 320, 32);
+        BrushStroke line(canvas, continuityBrush(32, 0.50, 1.0));
+        CHECK(line.begin({double(x0), double(y), 0.2}));
+        for (int x = x0 + 1; x <= x1; ++x) {
+            const double t = double(x - x0) / double(x1 - x0);
+            const double pressure = 0.2 + 0.8 * (1.0 - std::abs(2.0 * t - 1.0));
+            CHECK(line.extend({double(x), double(y), pressure}));
+        }
+        CHECK(line.end({double(x1), double(y), 0.2}));
+        CHECK(longestGap(canvas, y, x0, x1) == 0);
+        // The dab really does follow pressure: the crest is wider than the
+        // light-pressure start, and the end tapers back down.
+        CHECK(inkSpan(canvas, 350, 100, 220) > inkSpan(canvas, 120, 100, 220));
+        CHECK(inkSpan(canvas, 580, 100, 220) < inkSpan(canvas, 350, 100, 220));
+    }
+
+    // ---- Tilt broadening changes the dab and therefore the step.
+    {
+        SparseTileStore canvas(700, 320, 32);
+        BrushDefinition b = continuityBrush(32, 0.50, 0.0);
+        b.tiltSize = 1.0;
+        BrushStroke line(canvas, b);
+        CHECK(line.begin({100, 160, 1.0, 0, 0, 0, 0, true}));
+        for (int x = 101; x <= 600; ++x) {
+            const double tilt = 90.0 * double(x - 100) / 500.0;
+            CHECK(line.extend({double(x), 160, 1.0, tilt, 0, 0, 0, true}));
+        }
+        CHECK(line.end({600, 160, 1.0, 90, 0, 0, 0, true}));
+        CHECK(longestGap(canvas, 160, 100, 600) == 0);
+        CHECK(inkSpan(canvas, 550, 80, 240) > inkSpan(canvas, 150, 80, 240));
+
+        // A one-sample tilt jump must not open a gap either.
+        SparseTileStore jump(700, 320, 32);
+        BrushStroke abrupt(jump, b);
+        CHECK(abrupt.begin({100, 160, 1.0, 0, 0, 0, 0, true}));
+        CHECK(abrupt.extend({101, 160, 1.0, 90, 0, 0, 0, true}));
+        CHECK(abrupt.extend({600, 160, 1.0, 90, 0, 0, 0, true}));
+        CHECK(abrupt.end({600, 160, 1.0, 90, 0, 0, 0, true}));
+        CHECK(longestGap(jump, 160, 100, 600) == 0);
+    }
+
+    // ---- Abrupt pressure changes between adjacent input samples.
+    {
+        constexpr int y = 160, x0 = 100, x1 = 600;
+        SparseTileStore canvas(700, 320, 32);
+        BrushStroke line(canvas, continuityBrush(32, 0.50, 1.0));
+        CHECK(line.begin({double(x0), double(y), 1.0}));
+        for (int x = x0 + 1; x <= x1; ++x) {
+            const double pressure = (x % 2) ? 0.2 : 1.0;
+            CHECK(line.extend({double(x), double(y), pressure}));
+        }
+        CHECK(line.end({double(x1), double(y), 0.2}));
+        CHECK(longestGap(canvas, y, x0, x1) == 0);
+
+        // One-sample drop and recovery, at the maximum allowed spacing.
+        SparseTileStore jump(700, 320, 32);
+        BrushStroke abrupt(jump, continuityBrush(64, 0.50, 1.0));
+        CHECK(abrupt.begin({100, 160, 1.0}));
+        CHECK(abrupt.extend({101, 160, 0.2}));
+        CHECK(abrupt.extend({500, 160, 0.2}));
+        CHECK(abrupt.extend({501, 160, 1.0}));
+        CHECK(abrupt.end({600, 160, 1.0}));
+        CHECK(longestGap(jump, 160, 100, 600) == 0);
+    }
+
+    // ---- Very short strokes, including shorter than one spacing step.
+    {
+        for (double length : {0.5, 1.0, 2.5, 8.0}) {
+            SparseTileStore canvas(400, 320, 32);
+            BrushStroke line(canvas, continuityBrush(128, 0.50, 1.0));
+            CHECK(line.begin({150, 160, 0.2}));
+            CHECK(line.end({150 + length, 160, 0.2}));
+            CHECK(alphaAt(canvas, 150, 160) > 0);
+            CHECK(alphaAt(canvas, int(std::floor(150 + length)), 160) > 0);
+            CHECK(longestGap(canvas, 160, 150, int(std::floor(150 + length))) == 0);
+        }
+    }
+
+    // ---- Stationary contact is a dab, not a failed stroke or a spaced line.
+    {
+        SparseTileStore canvas(400, 320, 32);
+        BrushStroke line(canvas, continuityBrush(32, 0.15, 1.0));
+        CHECK(line.begin({200, 160, 1.0}));
+        CHECK(line.extend({200, 160, 0.4}));
+        CHECK(line.end({200, 160, 0.2}));
+        CHECK(!line.failed());
+        CHECK(alphaAt(canvas, 200, 160) > 0);
+    }
+
+    // ---- Sample density must not change the rendered stroke. Constant
+    // pressure means the same stamp positions regardless of how the pointer
+    // was sampled; continuity must hold at every density.
+    {
+        auto paint = [](double sampleStep) {
+            auto canvasPtr = std::make_unique<SparseTileStore>(700, 320, 32);
+            BrushStroke line(*canvasPtr, continuityBrush(32, 0.30, 1.0));
+            CHECK(line.begin({100, 160, 0.35}));
+            for (double x = 100 + sampleStep; x < 600; x += sampleStep)
+                CHECK(line.extend({x, 160, 0.35}));
+            CHECK(line.end({600, 160, 0.35}));
+            CHECK(longestGap(*canvasPtr, 160, 100, 600) == 0);
+            const long long sum = inkSum(*canvasPtr, 100, 600, 130, 190);
+            return std::make_pair(std::move(canvasPtr), sum);
+        };
+        auto sparse = paint(50.0);
+        auto medium = paint(5.0);
+        auto dense = paint(0.5);
+        const long long reference = dense.second;
+        CHECK(std::llabs(sparse.second - reference) <= reference / 100);
+        CHECK(std::llabs(medium.second - reference) <= reference / 100);
+    }
+
+    // ---- Varying pressure at sparse and dense input rates stays continuous.
+    {
+        auto paint = [](double sampleStep) {
+            auto canvasPtr = std::make_unique<SparseTileStore>(700, 320, 32);
+            BrushStroke line(*canvasPtr, continuityBrush(32, 0.50, 1.0));
+            CHECK(line.begin({100, 160, 0.2}));
+            for (double x = 100 + sampleStep; x < 600; x += sampleStep) {
+                const double t = (x - 100.0) / 500.0;
+                const double pressure = 0.2 + 0.8 * (1.0 - std::abs(2.0 * t - 1.0));
+                CHECK(line.extend({x, 160, pressure}));
+            }
+            CHECK(line.end({600, 160, 0.2}));
+            CHECK(longestGap(*canvasPtr, 160, 100, 600) == 0);
+        };
+        paint(0.5);
+        paint(5.0);
+        paint(50.0);
+    }
+
+    writeContinuityProof();
 
     std::cout << "Brush engine tests passed\n";
 }

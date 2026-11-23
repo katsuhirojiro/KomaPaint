@@ -1,6 +1,6 @@
 # Brush strokes reading as separate circles: diagnosis
 
-Status: investigation complete, no renderer or UI changes made yet.
+Status: production spacing fix implemented; the review renderer is unchanged.
 Scope: the stroke appearance reported in Brush Studio, the renderer that
 produces it, and the production path it has to match.
 
@@ -118,7 +118,8 @@ continuous band. There is no 8 px floor.
 
 ## 4. Production defect of the same class
 
-There is still a real gap-producing bug in the production stroke engine:
+There was a real gap-producing bug in the production stroke engine (fixed in
+[section 7](#7-resolution-implemented)):
 
 - `BrushStroke` computes its step once, from the nominal brush size:
   `m_spacing = max(0.25, brush.size * brush.spacing)`
@@ -213,8 +214,16 @@ All appearance and release evidence will come from Windows x64.
    KomaPaint Windows x64 application and its normal Brush Studio. The review
    application is not the product and will not be sent again as proof.
 
-## 7. Immediate next step
+## 7. Resolution implemented
 
-Fix the production spacing/effective-diameter inconsistency first, add the
-continuity test, then build and run the Windows parity mode. The UI stays as it
-is.
+`BrushStroke::spacingFor` now advances by the artist's spacing percentage of the
+diameter that `BrushRasterizer` will actually stamp at that point, including
+pressure-to-size, the minimum ratio and tilt broadening.
+`BrushRasterizer::effectiveDiameter` is the single shared calculation, so the
+spacing loop and the dab cannot disagree. The stroke resamples in arc length and
+recomputes the next step after every stamp, which keeps the overlap ratio
+constant through gradual or abrupt pressure changes. Clipped segments no longer
+walk an unbounded off-canvas prefix, and endpoint dabs keep the previous
+no-duplicate rule.
+
+The UI, default settings and review renderer were not changed.

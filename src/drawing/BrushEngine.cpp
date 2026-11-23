@@ -10,6 +10,24 @@ double clamp01(double n) { return std::clamp(n, 0.0, 1.0); }
 unsigned scale(unsigned value, unsigned factor) { return (value * factor + 127U) / 255U; }
 bool valid(InputSample p) { return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.pressure); }
 
+// The one place that turns pressure and tilt into a dab diameter. Both the
+// rasterizer and the stroke's spacing use it, so the distance between stamps
+// can never drift away from the size of the stamp being placed.
+double effectiveDiameterFor(const BrushDefinition& b, const InputSample& p) noexcept
+{
+    const double pShaped = BrushRasterizer::shapedPressure(p.pressure, b.pressureGamma);
+    const double pSizeWeight = clamp01(b.pressureSize);
+    const double minScale = std::clamp(b.minSizeRatio, 0.05, 1.0);
+    const double sizeScale = (1.0 - pSizeWeight) + pSizeWeight * (minScale + (1.0 - minScale) * pShaped);
+    const double tiltMag = (p.hasTilt && std::isfinite(p.tiltX) && std::isfinite(p.tiltY))
+        ? std::clamp(std::hypot(p.tiltX, p.tiltY) / 90.0, 0.0, 1.0)
+        : 0.0;
+    const double tiltScale = (p.hasTilt && b.tiltSize > 0.0)
+        ? (1.0 + clamp01(b.tiltSize) * tiltMag * 1.5)
+        : 1.0;
+    return std::max(0.5, b.size * sizeScale * tiltScale);
+}
+
 bool clipAxis(double position, double delta, double lo, double hi, double& start, double& end) {
     if (delta == 0) return position >= lo && position <= hi;
     double a = (lo - position) / delta, b = (hi - position) / delta;
@@ -184,6 +202,11 @@ std::uint32_t BrushRasterizer::erase(std::uint32_t dst, double amount)
     return (channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0);
 }
 
+double BrushRasterizer::effectiveDiameter(const BrushDefinition& brush, const InputSample& sample) noexcept
+{
+    return effectiveDiameterFor(brush, sample);
+}
+
 SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const BrushDefinition& b,
                                                   InputSample p, double strokeAngle,
                                                   std::uint32_t carryPremul, bool hasCarry)
@@ -203,19 +226,13 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     if (!store.isValid()) return R::OutOfBounds;
 
     const double pShaped = shapedPressure(p.pressure, b.pressureGamma);
-    const double pSizeWeight = clamp01(b.pressureSize);
-    const double minScale = std::clamp(b.minSizeRatio, 0.05, 1.0);
-    const double sizeScale = (1.0 - pSizeWeight) + pSizeWeight * (minScale + (1.0 - minScale) * pShaped);
     const double tiltMag = (p.hasTilt && std::isfinite(p.tiltX) && std::isfinite(p.tiltY))
         ? std::clamp(std::hypot(p.tiltX, p.tiltY) / 90.0, 0.0, 1.0)
         : 0.0;
-    const double tiltScale = (p.hasTilt && b.tiltSize > 0.0)
-        ? (1.0 + clamp01(b.tiltSize) * tiltMag * 1.5)
-        : 1.0;
     // Only a lower bound: a large brush paints whatever part of the canvas it
     // covers, which is clipped below. The old 256 px ceiling silently failed
     // every stroke drawn with a bigger tip.
-    const double effectiveSize = std::max(0.5, b.size * sizeScale * tiltScale);
+    const double effectiveSize = effectiveDiameterFor(b, p);
     const double radius = effectiveSize / 2.0;
 
     const double pOpWeight = clamp01(b.pressureOpacity);
@@ -447,11 +464,9 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
 
 BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush)
     : m_store(store), m_brush(brush) {
-    if (std::isfinite(brush.size) && std::isfinite(brush.spacing)
-        && brush.size >= brush::MinBrushDiameter && brush.size <= brush::MaxBrushDiameter
-        && brush.spacing >= 0.05 && brush.spacing <= 0.5) {
-        m_spacing = std::max(0.25, brush.size * brush.spacing);
-    } else {
+    if (!(std::isfinite(brush.size) && std::isfinite(brush.spacing)
+          && brush.size >= brush::MinBrushDiameter && brush.size <= brush::MaxBrushDiameter
+          && brush.spacing >= 0.05 && brush.spacing <= 0.5)) {
         m_failed = true;
         m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
     }
@@ -460,14 +475,24 @@ BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush)
 BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush, StampSink sink,
                          void* context)
     : m_store(store), m_brush(brush), m_sink(sink), m_sinkContext(context) {
-    if (std::isfinite(brush.size) && std::isfinite(brush.spacing)
-        && brush.size >= brush::MinBrushDiameter && brush.size <= brush::MaxBrushDiameter
-        && brush.spacing >= 0.05 && brush.spacing <= 0.5) {
-        m_spacing = std::max(0.25, brush.size * brush.spacing);
-    } else {
+    if (!(std::isfinite(brush.size) && std::isfinite(brush.spacing)
+          && brush.size >= brush::MinBrushDiameter && brush.size <= brush::MaxBrushDiameter
+          && brush.spacing >= 0.05 && brush.spacing <= 0.5)) {
         m_failed = true;
         m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
     }
+}
+
+double BrushStroke::spacingFor(const InputSample& sample) const
+{
+    // Spacing is a fraction of the diameter that will actually be stamped at
+    // this point. Pressure-to-size and tilt therefore shorten or lengthen the
+    // step as the input changes, instead of leaving a nominal-size gap.
+    const double diameter = BrushRasterizer::effectiveDiameter(m_brush, sample);
+    if (!(std::isfinite(diameter) && diameter > 0.0)) return 0.0;
+    // Existing lower bound, kept only as a guard against a zero step. The
+    // artist's percentage is otherwise used exactly as stored.
+    return std::max(0.25, diameter * m_brush.spacing);
 }
 
 void BrushStroke::updateCarry(InputSample p)
@@ -524,9 +549,16 @@ bool BrushStroke::begin(InputSample p) {
     }
     m_started = true;
     m_previous = p;
-    m_remaining = m_spacing;
+    m_remaining = spacingFor(p);
     m_hasAngle = false;
     m_hasCarry = false;
+    m_endpointStamped = false;
+    m_moved = false;
+    if (!(m_remaining > 0.0)) {
+        m_failed = true;
+        m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
+        return false;
+    }
     return stamp(p);
 }
 
@@ -553,42 +585,73 @@ bool BrushStroke::extend(InputSample p) {
         }
     }
 
+    m_endpointStamped = false;
+    m_moved = true;
+
     double start = 0, end = 1;
     const double tiltReach = (p.hasTilt || m_previous.hasTilt)
         ? 1.0 + clamp01(m_brush.tiltSize) * 1.5 : 1.0;
     const double radius = m_brush.size * 0.5 * tiltReach * m_brush.stampReach + 1.0;
     if (!std::isfinite(radius)) { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; return false; }
     const auto& g = m_store.geometry();
-    if (clipAxis(m_previous.x, dx, -radius, static_cast<double>(g.width()) + radius, start, end) &&
-        clipAxis(m_previous.y, dy, -radius, static_cast<double>(g.height()) + radius, start, end)) {
-        double at = m_remaining;
-        if (at < start * distance) at += std::ceil((start * distance - at) / m_spacing) * m_spacing;
-        const double last = std::min(end * distance, distance);
-        for (; at <= last;) {
-            const double t = at / distance;
-            InputSample interp;
-            interp.x = m_previous.x + dx * t;
-            interp.y = m_previous.y + dy * t;
-            interp.pressure = m_previous.pressure + (p.pressure - m_previous.pressure) * t;
-            interp.tiltX = m_previous.tiltX + (p.tiltX - m_previous.tiltX) * t;
-            interp.tiltY = m_previous.tiltY + (p.tiltY - m_previous.tiltY) * t;
-            interp.rotationRadians = m_previous.rotationRadians + (p.rotationRadians - m_previous.rotationRadians) * t;
-            interp.tangentialPressure = m_previous.tangentialPressure + (p.tangentialPressure - m_previous.tangentialPressure) * t;
-            interp.hasTilt = m_previous.hasTilt || p.hasTilt;
-            interp.hasRotation = m_previous.hasRotation || p.hasRotation;
-            if (!stamp(interp)) return false;
-            if (at == last) break;
-            const double next = at + m_spacing;
-            if (!(next > at)) {
-                m_failed = true;
-                m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
-                return false;
-            }
-            at = next;
-        }
+    const bool visible = clipAxis(m_previous.x, dx, -radius, static_cast<double>(g.width()) + radius, start, end) &&
+                         clipAxis(m_previous.y, dy, -radius, static_cast<double>(g.height()) + radius, start, end);
+    if (!visible) {
+        // Nothing on this segment can touch the document. Drop the phase so the
+        // next visible segment starts with a dab on its first pixel rather than
+        // inheriting an unknowable number of off-canvas steps.
+        m_remaining = 0.0;
+        m_previous = p;
+        return true;
     }
-    const double remainder = std::fmod(distance - m_remaining, m_spacing);
-    m_remaining = distance < m_remaining ? m_remaining - distance : (remainder == 0 ? m_spacing : m_spacing - remainder);
+
+    const double first = start * distance;
+    const double last = std::min(end * distance, distance);
+    if (m_remaining < first) {
+        // A long clipped prefix must not be walked stamp by stamp: the phase is
+        // irrelevant off-canvas, and starting at the entry point guarantees the
+        // visible edge is inked. Inside the document the phase is preserved.
+        m_remaining = first;
+    }
+
+    double at = m_remaining;
+    while (at <= last) {
+        const double t = at / distance;
+        InputSample interp;
+        interp.x = m_previous.x + dx * t;
+        interp.y = m_previous.y + dy * t;
+        interp.pressure = m_previous.pressure + (p.pressure - m_previous.pressure) * t;
+        interp.tiltX = m_previous.tiltX + (p.tiltX - m_previous.tiltX) * t;
+        interp.tiltY = m_previous.tiltY + (p.tiltY - m_previous.tiltY) * t;
+        interp.rotationRadians = m_previous.rotationRadians + (p.rotationRadians - m_previous.rotationRadians) * t;
+        interp.tangentialPressure = m_previous.tangentialPressure + (p.tangentialPressure - m_previous.tangentialPressure) * t;
+        interp.hasTilt = m_previous.hasTilt || p.hasTilt;
+        interp.hasRotation = m_previous.hasRotation || p.hasRotation;
+        if (!stamp(interp)) return false;
+        if (at >= distance - 1.0e-9) m_endpointStamped = true;
+        if (at >= last) break;
+
+        // The next step is decided by the dab just placed, which is what keeps
+        // the spacing/diameter ratio constant through a pressure transition.
+        const double step = spacingFor(interp);
+        if (!(step > 0.0) || !std::isfinite(step)) {
+            m_failed = true;
+            m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
+            return false;
+        }
+        const double next = at + step;
+        if (!(next > at)) {
+            m_failed = true;
+            m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
+            return false;
+        }
+        at = next;
+    }
+
+    // If the visible range ended before the segment did, the remaining phase is
+    // outside the document; reset it for the next entry. If the whole segment
+    // was visible, keep the exact distance to the next stamp.
+    m_remaining = (last >= distance - 1.0e-9) ? at - distance : 0.0;
     m_previous = p;
     return true;
 }
@@ -596,7 +659,10 @@ bool BrushStroke::extend(InputSample p) {
 bool BrushStroke::end(InputSample p) {
     if (!extend(p)) return false;
     m_started = false;
-    if (m_remaining < m_spacing - 1e-9) return stamp(p);
+    // Finish the tail with the pointer's final sample unless the last extend
+    // already placed a stamp there. This preserves the old "no duplicate dab"
+    // behaviour for stationary strokes.
+    if (m_moved && !m_endpointStamped && m_remaining > 1.0e-9) return stamp(p);
     return true;
 }
 } // namespace komapaint

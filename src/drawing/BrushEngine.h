@@ -79,6 +79,10 @@ public:
     static SparseTileStore::WriteResult dab(SparseTileStore& store, const BrushDefinition& brush,
                                             InputSample sample, double strokeAngle = 0.0,
                                             std::uint32_t carryPremul = 0, bool hasCarry = false);
+    // Diameter the dab will actually occupy after pressure-to-size and tilt
+    // broadening. The stroke loop uses the same value to advance its spacing,
+    // so a shrinking dab also gets a proportionally shorter step.
+    static double effectiveDiameter(const BrushDefinition& brush, const InputSample& sample) noexcept;
 };
 
 // Maintains spacing, directional angle, and smudge carry across input events.
@@ -105,6 +109,7 @@ public:
     SparseTileStore::WriteResult failureReason() const { return m_failureReason; }
 private:
     bool stamp(InputSample sample);
+    double spacingFor(const InputSample& sample) const;
     void updateCarry(InputSample sample);
     SparseTileStore& m_store;
     BrushDefinition m_brush;
@@ -112,12 +117,13 @@ private:
     void* m_sinkContext = nullptr;
     InputSample m_previous{};
     double m_remaining = 0;
-    double m_spacing = 1;
     double m_strokeAngle = 0;
     bool m_hasAngle = false;
     std::uint32_t m_carryPremul = 0;
     bool m_hasCarry = false;
     bool m_started = false;
+    bool m_endpointStamped = false;
+    bool m_moved = false;
     bool m_failed = false;
     SparseTileStore::WriteResult m_failureReason = SparseTileStore::WriteResult::Unchanged;
 };

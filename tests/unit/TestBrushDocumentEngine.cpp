@@ -656,6 +656,42 @@ void testUnsupportedAndBadAssetsAreDiagnosed() {
     CHECK(drawing::digitalBrushIssue(unsupported).find("Realistic") != std::string::npos);
 }
 
+void testDocumentBrushKeepsItsSpacingThroughLowPressure() {
+    // The document path is what Brush Studio paints with. A pressure-scaled
+    // dab at maximum spacing must still leave an unbroken centreline, which
+    // exercises the evaluator, the component sink and the stroke advance
+    // together rather than the flat spacing helper alone.
+    BrushDocument document = multiComponentDocument(SelectionMode::All, 1, 1);
+    document.setParameter("size", 32.0);
+    document.setParameter("opacity", 100.0);
+    document.setParameter("flow", 100.0);
+    document.setParameter("spacing", 50.0);
+    document.setParameter("hardness", 100.0);
+    document.setParameter("pressure-size", 100.0);
+    document.setParameter("min-size-ratio", 15.0);
+    document.setParameter("pressure-opacity", 0.0);
+    document.setParameter("pressure-flow", 0.0);
+
+    StrokeRuntime runtime;
+    runtime.color = 0xff000000;
+    SparseTileStore store(700, 320, 32);
+    drawing::DocumentStroke stroke(store, document,
+                                   drawing::digitalDefinition(document, runtime), 7u);
+    CHECK(stroke.begin({100, 160, 0.2}));
+    for (int x = 101; x <= 600; ++x) CHECK(stroke.extend({double(x), 160, 0.2}));
+    CHECK(stroke.end({600, 160, 0.2}));
+    CHECK(!stroke.failed());
+    CHECK(stroke.dabCount() > 0);
+
+    int run = 0;
+    for (int x = 100; x <= 600; ++x) {
+        const bool inked = (store.pixel({x, 160}).value_or(0U) >> 24) != 0U;
+        CHECK(inked);
+        run = inked ? 0 : run + 1;
+        CHECK(run == 0);
+    }
+}
+
 void testInvalidStrokeIsReportedNotSilent() {
     // A size below the engine's minimum must fail loudly, exactly as the flat
     // path does, rather than painting nothing.
@@ -684,6 +720,7 @@ int main() {
     testPerComponentErase();
     testHiddenComponentsDoNotPaint();
     testRandomizationReachesThePixels();
+    testDocumentBrushKeepsItsSpacingThroughLowPressure();
     testInvalidStrokeIsReportedNotSilent();
     testBitmapTipPaintsActualPixels();
     testColourPixelsAndNativeRoundTrip();
