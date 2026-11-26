@@ -38,6 +38,14 @@ double uniformFromKey(std::uint64_t key) noexcept {
 
 const ParameterInfo* infoFor(std::string_view name) { return findParameter(name); }
 
+// These kinds are source images for another component's mask, not marks of
+// their own. A group may contain them so the artist can reuse the same grain
+// across several tips; the renderer consumes them through maskComponentId.
+bool paintsMark(ComponentKind kind) noexcept {
+    return kind != ComponentKind::Texture && kind != ComponentKind::AlphaMask &&
+           kind != ComponentKind::GrayscaleMask;
+}
+
 double registryDefault(std::string_view name) {
     const ParameterInfo* info = infoFor(name);
     return info ? info->defaultValue : 0.0;
@@ -163,7 +171,7 @@ void selectFromGroup(const BrushDocument& document, const ComponentGroup& group,
     candidates.reserve(group.members.size());
     for (const auto& memberId : group.members) {
         const BrushComponent* c = document.component(memberId);
-        if (!c || !c->visible) continue;
+        if (!c || !c->visible || !paintsMark(c->kind)) continue;
         candidates.push_back(c);
     }
     if (report) report->componentsConsidered += static_cast<int>(candidates.size());
@@ -282,7 +290,7 @@ std::vector<DrawRequest> BrushEvaluator::evaluate(const BrushDocument& document,
         std::vector<const BrushComponent*> chosen;
         if (generator.groupId.empty()) {
             for (const auto& c : document.components) {
-                if (c.groupId.empty() && c.visible) chosen.push_back(&c);
+                if (c.groupId.empty() && c.visible && paintsMark(c.kind)) chosen.push_back(&c);
             }
         } else if (const ComponentGroup* group = document.group(generator.groupId)) {
             selectFromGroup(document, *group, context, &chosen, out);

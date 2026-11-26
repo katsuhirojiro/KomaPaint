@@ -1,6 +1,8 @@
 #pragma once
+#include "brush/BrushTypes.h"
 #include "canvas/SparseTileStore.h"
 #include <cstdint>
+#include <deque>
 
 namespace komapaint {
 namespace brush { struct BrushResource; }
@@ -22,6 +24,10 @@ struct BrushDefinition {
     double aspectRatio = 1.0;     // 1.0 = circular; > 1.0 = flat/chisel ellipse
     double angleRadians = 0.0;    // base tip rotation
     bool followDirection = false; // align tip along stroke tangent
+    double taperIn = 0.0;        // distance ramp at the start, as a share of size
+    double taperOut = 0.0;       // distance ramp at the end, as a share of size
+    double spacingJitter = 0.0;  // 0..1 random variation of each spacing step
+    std::uint32_t randomSeed = 0; // deterministic spacing/scatter seed for this stroke
 
     // Pressure & stylus dynamics (defaults preserve fixed-size linear opacity behaviour)
     double pressureSize = 0.0;    // 0 = fixed size, 1 = full pressure->size modulation
@@ -49,6 +55,22 @@ struct BrushDefinition {
     bool flipY = false;
     bool nativeAspect = false;
     double stampReach = 1.0;       // conservative outer footprint in base radii for stroke clipping
+
+    // A second authored image can gate this mark's coverage. It is sampled in
+    // the same local tip space, then transformed independently so a grain or
+    // leaf mask can be larger, smaller or rotated without moving the tip.
+    const brush::BrushResource* maskTip = nullptr;
+    double maskScale = 1.0;
+    double maskRotationRadians = 0.0;
+    double maskOffsetX = 0.0;      // fraction of the tip radius
+    double maskOffsetY = 0.0;
+    double maskStrength = 1.0;     // 0 = mask off, 1 = full authored coverage
+    double maskContrast = 1.0;     // 1 = unchanged, >1 hardens the grain
+    double maskDepth = 1.0;        // 0 = solid, 1 = dark grain removes paint
+    bool maskInvert = false;
+    // Normal reproduces the original deposit; Multiply/Screen/Overlay blend
+    // the source colour with paint already on the layer.
+    brush::ComponentBlend blend = brush::ComponentBlend::Normal;
 };
 
 struct InputSample {
@@ -108,7 +130,12 @@ public:
     bool failed() const { return m_failed; }
     SparseTileStore::WriteResult failureReason() const { return m_failureReason; }
 private:
-    bool stamp(InputSample sample);
+    struct PendingStamp { InputSample sample; double travelled = 0.0; };
+    bool stamp(InputSample sample, double taper = 1.0);
+    double taperInAt(double travelled) const;
+    double randomUnit();
+    void place(InputSample sample, double travelled);
+    bool flushPending(bool final);
     double spacingFor(const InputSample& sample) const;
     void updateCarry(InputSample sample);
     SparseTileStore& m_store;
@@ -125,6 +152,11 @@ private:
     bool m_endpointStamped = false;
     bool m_moved = false;
     bool m_failed = false;
+    double m_travelled = 0.0;
+    double m_taperDistanceIn = 0.0;
+    double m_taperDistanceOut = 0.0;
+    std::uint32_t m_randomState = 1u;
+    std::deque<PendingStamp> m_pending;
     SparseTileStore::WriteResult m_failureReason = SparseTileStore::WriteResult::Unchanged;
 };
 } // namespace komapaint

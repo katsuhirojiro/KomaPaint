@@ -627,6 +627,63 @@ void testColourPixelsAndNativeRoundTrip() {
     CHECK(at(paintNative(reloaded), 42, 48) == 0x80123456U); // RGBA tip uses alpha, not imported hue
 }
 
+void testMasksAndComponentBlendsReachPixels() {
+    // A texture/mask source gates the mark in tip space and can be scaled and
+    // rotated without moving the mark itself.
+    auto doc = bitmapDocument(ResourceKind::Grayscale8, {255, 255});
+    BrushComponent mask;
+    mask.id = doc.allocateId("c");
+    mask.name = "Grain";
+    mask.kind = ComponentKind::AlphaMask;
+    mask.resourceId = "grain";
+    BrushResource grain;
+    grain.id = mask.resourceId;
+    grain.width = 2;
+    grain.height = 1;
+    grain.kind = ResourceKind::Alpha8;
+    grain.setPixels({0, 255});
+    CHECK(doc.addResource(std::move(grain)));
+    CHECK(doc.addComponent(std::move(mask)));
+    doc.components.front().maskComponentId = doc.components.back().id;
+    CHECK(drawing::digitalBrushIssue(doc).empty());
+
+    const auto masked = paintNative(doc);
+    CHECK(at(masked, 42, 48) == 0U);       // left half is gated out by the mask
+    CHECK(at(masked, 53, 48) != 0U);       // right half survives
+
+    // Texture offset shifts the grain inside the tip, not the tip itself.
+    auto shifted = doc;
+    CHECK(shifted.setParameter("texture-offset-x", -100));
+    const auto shiftedPixels = paintNative(shifted);
+    CHECK(at(shiftedPixels, 53, 48) == 0U);
+
+    // A mask is a real image, not a hidden second tip: it contributes no dab
+    // of its own.
+    SparseTileStore onlyMaskStore(kWidth, kHeight);
+    BrushDocument onlyMask;
+    onlyMask.addComponent(doc.components.back());
+    onlyMask.addGenerator({}); // a root generator with no visible mark
+    CHECK(paintNative(onlyMask).size() == std::size_t(kWidth * kHeight));
+    int inked = 0;
+    for (auto pixel : paintNative(onlyMask)) inked += pixel != 0U ? 1 : 0;
+    CHECK(inked == 0);
+
+    // Multiply blends the source colour into existing paint. Opaque 0xffff8000
+    // times 0xff808080 is 0xff804000 at the centre.
+    SparseTileStore store(kWidth, kHeight);
+    CHECK(store.setPixel({48, 48}, 0xffff8000U) == SparseTileStore::WriteResult::Changed);
+    BrushDefinition dabBrush;
+    dabBrush.size = 8.0;
+    dabBrush.opacity = 1.0;
+    dabBrush.flow = 1.0;
+    dabBrush.hardness = 1.0;
+    dabBrush.color = 0xff808080U;
+    dabBrush.blend = ComponentBlend::Multiply;
+    CHECK(BrushRasterizer::dab(store, dabBrush, {48.5, 48.5, 1.0}) ==
+          SparseTileStore::WriteResult::Changed);
+    CHECK(store.pixel({48, 48}).value_or(0U) == 0xff804000U);
+}
+
 void testUnsupportedAndBadAssetsAreDiagnosed() {
     const auto bitmap = bitmapDocument(ResourceKind::Alpha8, {0, 255});
     auto broken = bitmap;
@@ -643,11 +700,11 @@ void testUnsupportedAndBadAssetsAreDiagnosed() {
     CHECK(changedPixels(pixelsOf(store)) == 0);
 
     auto unsupported = bitmap;
-    unsupported.components[0].blend = ComponentBlend::Multiply;
+    unsupported.components[0].blend = ComponentBlend::Height;
     CHECK(drawing::digitalBrushIssue(unsupported).find("blend") != std::string::npos);
     unsupported = bitmap;
-    unsupported.setParameter("taper-out", 20);
-    CHECK(drawing::digitalBrushIssue(unsupported).find("Taper out") != std::string::npos);
+    unsupported.setParameter("stroke-delay", 20);
+    CHECK(drawing::digitalBrushIssue(unsupported).find("Stroke delay") != std::string::npos);
     unsupported = bitmap;
     unsupported.opaqueChunks.push_back({"FUTR", "retained"});
     CHECK(drawing::digitalBrushIssue(unsupported).find("extensions") != std::string::npos);
@@ -692,6 +749,58 @@ void testDocumentBrushKeepsItsSpacingThroughLowPressure() {
     }
 }
 
+void testTaperAndSpacingVariationReachPixels() {
+    LegacyBrush legacy;
+    legacy.size = 32.0;
+    legacy.opacity = 100.0;
+    legacy.flow = 100.0;
+    legacy.spacing = 20.0;
+    legacy.hardness = 100.0;
+    auto document = BrushDocument::fromLegacy(legacy, "brush-taper", "Taper");
+    document.setParameter("taper-in", 100.0);
+    document.setParameter("taper-out", 100.0);
+    StrokeRuntime runtime;
+    runtime.color = 0xff000000;
+    auto paintLine = [&](std::uint32_t seed) {
+        SparseTileStore store(420, 320);
+        drawing::DocumentStroke stroke(store, document,
+                                       drawing::digitalDefinition(document, runtime), seed);
+        CHECK(stroke.begin({20, 160, 1}));
+        for (int x = 21; x <= 380; ++x) CHECK(stroke.extend({double(x), 160, 1}));
+        CHECK(stroke.end({380, 160, 1}));
+        CHECK(!stroke.failed());
+        return pixelsOf(store);
+    };
+    auto plainDoc = document;
+    plainDoc.setParameter("taper-in", 0);
+    plainDoc.setParameter("taper-out", 0);
+    const auto tapered = paintLine(9u);
+    const auto alphaAt = [&](int x) { return int(tapered[std::size_t(160) * 420u + std::size_t(x)] >> 24); };
+    CHECK(alphaAt(22) == 0);
+    CHECK(alphaAt(100) > 0);
+    // Taper is a width change, not just a lighter centre: the same off-centre
+    // row is inked in the full-width middle and clear at the tapered tail.
+    CHECK(tapered[std::size_t(156) * 420u + 300u] > 0);
+    CHECK(tapered[std::size_t(156) * 420u + 378u] == 0);
+
+    auto jittered = document;
+    CHECK(jittered.setParameter("taper-in", 0));
+    CHECK(jittered.setParameter("taper-out", 0));
+    CHECK(jittered.setParameter("spacing-jitter", 80));
+    auto paintJitter = [&](std::uint32_t seed) {
+        SparseTileStore store(420, 320);
+        drawing::DocumentStroke stroke(store, jittered,
+                                       drawing::digitalDefinition(jittered, runtime), seed);
+        CHECK(stroke.begin({20, 160, 1}));
+        for (int x = 21; x <= 380; ++x) CHECK(stroke.extend({double(x), 160, 1}));
+        CHECK(stroke.end({380, 160, 1}));
+        CHECK(!stroke.failed());
+        return hashOf(pixelsOf(store));
+    };
+    CHECK(paintJitter(31u) == paintJitter(31u));
+    CHECK(paintJitter(31u) != paintJitter(32u));
+}
+
 void testInvalidStrokeIsReportedNotSilent() {
     // A size below the engine's minimum must fail loudly, exactly as the flat
     // path does, rather than painting nothing.
@@ -721,8 +830,10 @@ int main() {
     testHiddenComponentsDoNotPaint();
     testRandomizationReachesThePixels();
     testDocumentBrushKeepsItsSpacingThroughLowPressure();
+    testTaperAndSpacingVariationReachPixels();
     testInvalidStrokeIsReportedNotSilent();
     testBitmapTipPaintsActualPixels();
+    testMasksAndComponentBlendsReachPixels();
     testColourPixelsAndNativeRoundTrip();
     testUnsupportedAndBadAssetsAreDiagnosed();
 

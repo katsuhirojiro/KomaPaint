@@ -36,9 +36,10 @@ int main()
     // Static vocabulary: every registry setting has an explicit answer.
     for (const auto& info : brush::parameterRegistry()) {
         const bool supported = drawing::digitalSupportsParameter(info.name);
-        if (info.name == std::string("taper-in") || info.name == std::string("taper-out"))
-            CHECK(!supported);
-        if (info.name == std::string("texture-strength") || info.name == std::string("bristle-count") ||
+        if (info.name == std::string("taper-in") || info.name == std::string("taper-out") ||
+            info.name == std::string("spacing-jitter"))
+            CHECK(supported);
+        if (info.name == std::string("bristle-count") ||
             info.name == std::string("stroke-delay") || info.name == std::string("accumulate") ||
             info.name == std::string("particle-count") || info.name == std::string("antialias"))
             CHECK(!supported);
@@ -51,17 +52,17 @@ int main()
     }
 
     for (const auto kind : {brush::ComponentKind::ProceduralShape, brush::ComponentKind::Tip,
-                            brush::ComponentKind::Image, brush::ComponentKind::ColourImage})
+                            brush::ComponentKind::Image, brush::ComponentKind::ColourImage,
+                            brush::ComponentKind::Texture, brush::ComponentKind::AlphaMask,
+                            brush::ComponentKind::GrayscaleMask})
         CHECK(drawing::digitalSupportsComponentKind(kind));
-    for (const auto kind : {brush::ComponentKind::Texture, brush::ComponentKind::AlphaMask,
-                            brush::ComponentKind::GrayscaleMask, brush::ComponentKind::Particle,
-                            brush::ComponentKind::BristleGroup, brush::ComponentKind::Pattern,
-                            brush::ComponentKind::Sequence})
+    for (const auto kind : {brush::ComponentKind::Particle, brush::ComponentKind::BristleGroup,
+                            brush::ComponentKind::Pattern, brush::ComponentKind::Sequence})
         CHECK(!drawing::digitalSupportsComponentKind(kind));
-    CHECK(drawing::digitalSupportsBlend(brush::ComponentBlend::Normal));
-    for (const auto blend : {brush::ComponentBlend::Multiply, brush::ComponentBlend::Screen,
-                             brush::ComponentBlend::Overlay, brush::ComponentBlend::Height,
-                             brush::ComponentBlend::Mask})
+    for (const auto blend : {brush::ComponentBlend::Normal, brush::ComponentBlend::Multiply,
+                             brush::ComponentBlend::Screen, brush::ComponentBlend::Overlay})
+        CHECK(drawing::digitalSupportsBlend(blend));
+    for (const auto blend : {brush::ComponentBlend::Height, brush::ComponentBlend::Mask})
         CHECK(!drawing::digitalSupportsBlend(blend));
 
     // Every brush-scope setting is either consumed or refused. This is the
@@ -90,20 +91,15 @@ int main()
     CHECK(drawing::inspectDigitalBrush(doc).supported);
     CHECK(drawing::inspectDigitalBrush(doc).summary().empty());
 
-    // Unsupported stored data is reported, never silently dropped.
+    // Texture controls are consumed by a real mask image. Without one the
+    // value is harmless, but the renderer still has a path for it.
     CHECK(doc.setParameter("texture-strength", 42));
-    const auto texture = drawing::inspectDigitalBrush(doc);
-    CHECK(!texture.supported);
-    CHECK(texture.find("parameter:texture-strength"));
-    CHECK(!texture.summary().empty());
-
-    // The same document after removing the unsupported value is renderable.
-    doc.parameters.erase("texture-strength");
     CHECK(drawing::inspectDigitalBrush(doc).supported);
 
-    // Taper is special: the registry default (20) is not a Digital feature.
+    // Taper, spacing variation and texture controls all have a real
+    // production path now.
     CHECK(doc.setParameter("taper-in", 20));
-    CHECK(!drawing::inspectDigitalBrush(doc).supported);
+    CHECK(drawing::inspectDigitalBrush(doc).supported);
     doc.parameters.set("taper-in", 0);
     CHECK(drawing::inspectDigitalBrush(doc).supported);
 
@@ -121,14 +117,22 @@ int main()
     textureComponent.resourceId = texturePixels.id;
     CHECK(doc.addResource(texturePixels));
     CHECK(doc.addComponent(textureComponent));
+    CHECK(drawing::inspectDigitalBrush(doc).supported);
+    // Attaching it to the tip makes a real texture mark; a missing source is
+    // reported instead of silently painting an untextured tip.
+    doc.components.front().maskComponentId = "texture";
+    CHECK(drawing::inspectDigitalBrush(doc).supported);
+    doc.components.front().maskComponentId = "missing";
     CHECK(!drawing::inspectDigitalBrush(doc).supported);
-    CHECK(drawing::inspectDigitalBrush(doc).find("component:texture"));
 
     doc = baseDocument();
     doc.components.front().blend = brush::ComponentBlend::Multiply;
+    CHECK(drawing::inspectDigitalBrush(doc).supported);
+    CHECK(drawing::digitalBlendReason(brush::ComponentBlend::Multiply).empty());
+    doc.components.front().blend = brush::ComponentBlend::Height;
     const auto blend = drawing::inspectDigitalBrush(doc);
     CHECK(!blend.supported && blend.find("component:" + doc.components.front().id));
-    CHECK(drawing::digitalBlendReason(brush::ComponentBlend::Multiply).find("Normal") != std::string::npos);
+    CHECK(drawing::digitalBlendReason(brush::ComponentBlend::Height).find("Overlay") != std::string::npos);
 
     // Bitmap tips own their edge; stored Hardness is not silently applied.
     auto bitmap = baseDocument();

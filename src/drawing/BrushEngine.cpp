@@ -202,6 +202,42 @@ std::uint32_t BrushRasterizer::erase(std::uint32_t dst, double amount)
     return (channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0);
 }
 
+namespace {
+// Source-over with a per-channel blend of the source colour into the existing
+// paint. The source alpha still controls coverage, so a multiply component is
+// a translucent multiply stamp rather than a fully opaque replacement.
+std::uint32_t blendColour(std::uint32_t dst, std::uint32_t src, double amount,
+                          brush::ComponentBlend mode) noexcept
+{
+    const auto alpha = roundHalfUpNonNegative(clamp01(amount) * ((src >> 24) & 255U));
+    if (alpha == 0U) return dst;
+    const unsigned dstA = (dst >> 24) & 255U;
+    const unsigned inv = 255U - alpha;
+    auto blended = [&](unsigned shift) -> unsigned {
+        const double s = ((src >> shift) & 255U) / 255.0;
+        const double d = ((dst >> shift) & 255U) / 255.0;
+        double b = s;
+        switch (mode) {
+        case brush::ComponentBlend::Multiply: b = s * d; break;
+        case brush::ComponentBlend::Screen: b = 1.0 - (1.0 - s) * (1.0 - d); break;
+        case brush::ComponentBlend::Overlay:
+            b = d < 0.5 ? 2.0 * s * d : 1.0 - 2.0 * (1.0 - s) * (1.0 - d);
+            break;
+        case brush::ComponentBlend::Normal:
+        case brush::ComponentBlend::Height:
+        case brush::ComponentBlend::Mask:
+            b = s;
+            break;
+        }
+        const double out = (b * 255.0 * alpha + d * 255.0 * inv) / 255.0;
+        return static_cast<unsigned>(std::clamp(std::lround(out), 0L, 255L));
+    };
+    const unsigned outA = std::min(255U, alpha + scale(dstA, inv));
+    return (outA << 24) | (std::min(outA, blended(16)) << 16) |
+           (std::min(outA, blended(8)) << 8) | std::min(outA, blended(0));
+}
+} // namespace
+
 double BrushRasterizer::effectiveDiameter(const BrushDefinition& brush, const InputSample& sample) noexcept
 {
     return effectiveDiameterFor(brush, sample);
@@ -243,6 +279,12 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const auto* bitmap = b.bitmapTip;
     if (bitmap && (!bitmap->expectedBytes() || bitmap->pixels().size() != bitmap->expectedBytes() ||
                    (b.bitmapColour && bitmap->kind != brush::ResourceKind::Rgba8))) return R::InvalidPixel;
+    if (b.maskTip && (!b.maskTip->expectedBytes() || b.maskTip->pixels().size() != b.maskTip->expectedBytes()))
+        return R::InvalidPixel;
+    if (!std::isfinite(b.maskScale) || b.maskScale <= 0.0 || !std::isfinite(b.maskRotationRadians) ||
+        !std::isfinite(b.maskOffsetX) || !std::isfinite(b.maskOffsetY) || !std::isfinite(b.maskStrength) ||
+        !std::isfinite(b.maskContrast) || !std::isfinite(b.maskDepth))
+        return R::InvalidPixel;
     const double reach = bitmap ? radius * std::sqrt(2.0) : radius;
     if (!std::isfinite((reach + 0.5) * (reach + 0.5))) return R::InvalidPixel;
     const auto docBounds = g.rasterBounds(p.x - reach - 1, p.y - reach - 1,
@@ -409,6 +451,28 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
                         coverage = computeCoverage(dx, dy, x, y);
                     }
                     if (coverage <= 0.0) continue;
+                    if (b.maskTip) {
+                        // The authored mask lives in the same local tip space.
+                        // Its own scale/rotation/offset are applied here, not by
+                        // moving the mark: a grain stays over the tip even when
+                        // the component itself is scattered.
+                        const double c = std::cos(-b.maskRotationRadians);
+                        const double s = std::sin(-b.maskRotationRadians);
+                        const double localX = dx - b.maskOffsetX * radius;
+                        const double localY = dy - b.maskOffsetY * radius;
+                        const double mx = (localX * c - localY * s) / (radius * b.maskScale);
+                        const double my = (localX * s + localY * c) / (radius * b.maskScale);
+                        double gate = clamp01(sampleBitmap(*b.maskTip, mx, my, false).coverage);
+                        if (b.maskInvert) gate = 1.0 - gate;
+                        // Contrast hardens or softens the grain around mid-grey;
+                        // depth decides how fully dark grain removes paint.
+                        const double contrast = std::clamp(b.maskContrast, 0.0, 2.0);
+                        gate = clamp01(0.5 + (gate - 0.5) * contrast);
+                        gate = 1.0 - clamp01(b.maskDepth) * (1.0 - gate);
+                        gate = 1.0 - clamp01(b.maskStrength) * (1.0 - gate);
+                        coverage *= clamp01(gate);
+                        if (coverage <= 0.0) continue;
+                    }
                     if (b.pixelMask) {
                         coverage *= clamp01(b.pixelMask(b.pixelMaskContext, x, y));
                         if (coverage <= 0.0) continue;
@@ -421,7 +485,11 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
                         if (old == 0U) continue;
                         next = erase(old, amount);
                     } else if (bitmap && b.bitmapColour) {
-                        next = deposit(old, bitmapSample.colour, amount);
+                        next = b.blend == brush::ComponentBlend::Normal
+                            ? deposit(old, bitmapSample.colour, amount)
+                            : blendColour(old, bitmapSample.colour, amount, b.blend);
+                    } else if (b.blend != brush::ComponentBlend::Normal) {
+                        next = blendColour(old, b.color, amount, b.blend);
                     } else if (blending) {
                         const double mixAmt = clamp01(amount * blendFactor);
                         next = blend(old, effectiveCarry, mixAmt);
@@ -470,6 +538,7 @@ BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush)
         m_failed = true;
         m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
     }
+    m_randomState = brush.randomSeed ? brush.randomSeed : 1u;
 }
 
 BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush, StampSink sink,
@@ -481,6 +550,7 @@ BrushStroke::BrushStroke(SparseTileStore& store, BrushDefinition brush, StampSin
         m_failed = true;
         m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
     }
+    m_randomState = brush.randomSeed ? brush.randomSeed : 1u;
 }
 
 double BrushStroke::spacingFor(const InputSample& sample) const
@@ -530,16 +600,63 @@ void BrushStroke::updateCarry(InputSample p)
     }
 }
 
-bool BrushStroke::stamp(InputSample p) {
+bool BrushStroke::stamp(InputSample p, double taper) {
+    if (taper <= 0.01) return true;   // the very tip of a taper paints nothing
     updateCarry(p);
-    auto result = m_sink
-        ? m_sink(m_store, m_brush, p, m_strokeAngle, m_carryPremul, m_hasCarry, m_sinkContext)
-        : BrushRasterizer::dab(m_store, m_brush, p, m_strokeAngle, m_carryPremul, m_hasCarry);
+    BrushDefinition placed = m_brush;
+    if (taper < 1.0) placed.size = std::max(1.0, m_brush.size * taper);
+    const auto result = m_sink
+        ? m_sink(m_store, placed, p, m_strokeAngle, m_carryPremul, m_hasCarry, m_sinkContext)
+        : BrushRasterizer::dab(m_store, placed, p, m_strokeAngle, m_carryPremul, m_hasCarry);
     if (result != SparseTileStore::WriteResult::Changed && result != SparseTileStore::WriteResult::Unchanged) {
         m_failed = true;
         m_failureReason = result;
     }
     return !m_failed;
+}
+
+double BrushStroke::taperInAt(double travelled) const {
+    if (!(m_taperDistanceIn > 0.0)) return 1.0;
+    const double t = std::clamp(travelled / m_taperDistanceIn, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+double BrushStroke::randomUnit() {
+    // splitmix32: small, deterministic and independent of the standard
+    // library's distribution implementation.
+    m_randomState += 0x9e3779b9u;
+    std::uint32_t z = m_randomState;
+    z = (z ^ (z >> 16)) * 0x85ebca6bu;
+    z = (z ^ (z >> 13)) * 0xc2b2ae35u;
+    z ^= z >> 16;
+    return double(z >> 8) * (1.0 / 16777216.0);
+}
+
+void BrushStroke::place(InputSample p, double travelled) {
+    if (m_taperDistanceOut > 0.0) {
+        m_pending.push_back({p, travelled});
+        return;
+    }
+    stamp(p, taperInAt(travelled));
+}
+
+bool BrushStroke::flushPending(bool final) {
+    while (!m_pending.empty()) {
+        if (!final && m_travelled - m_pending.front().travelled <= m_taperDistanceOut + 1.0e-9)
+            break;
+        const PendingStamp next = m_pending.front();
+        m_pending.pop_front();
+        double taper = taperInAt(next.travelled);
+        if (final && m_taperDistanceOut > 0.0) {
+            const double remaining = std::max(0.0, m_travelled - next.travelled);
+            double out = remaining >= m_taperDistanceOut
+                ? 1.0 : std::clamp(remaining / m_taperDistanceOut, 0.0, 1.0);
+            out = out * out * (3.0 - 2.0 * out);
+            taper = std::min(taper, out);
+        }
+        if (!stamp(next.sample, taper)) return false;
+    }
+    return true;
 }
 
 bool BrushStroke::begin(InputSample p) {
@@ -550,6 +667,14 @@ bool BrushStroke::begin(InputSample p) {
     m_started = true;
     m_previous = p;
     m_remaining = spacingFor(p);
+    if (m_brush.spacingJitter > 0.0) {
+        m_remaining = std::max(0.25, m_remaining *
+            (1.0 + std::clamp(m_brush.spacingJitter, 0.0, 1.0) * (randomUnit() * 2.0 - 1.0)));
+    }
+    m_travelled = 0.0;
+    m_taperDistanceIn = std::max(0.0, std::min(1.0, m_brush.taperIn)) * m_brush.size * 4.0;
+    m_taperDistanceOut = std::max(0.0, std::min(1.0, m_brush.taperOut)) * m_brush.size * 4.0;
+    m_pending.clear();
     m_hasAngle = false;
     m_hasCarry = false;
     m_endpointStamped = false;
@@ -559,7 +684,8 @@ bool BrushStroke::begin(InputSample p) {
         m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
         return false;
     }
-    return stamp(p);
+    place(p, 0.0);
+    return !m_failed;
 }
 
 bool BrushStroke::extend(InputSample p) {
@@ -571,6 +697,7 @@ bool BrushStroke::extend(InputSample p) {
     const double distance = std::hypot(dx, dy);
     if (!std::isfinite(distance)) { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; return false; }
     if (distance == 0) { m_previous = p; return true; }
+    const double segmentStart = m_travelled;
 
     if (m_brush.followDirection && distance >= 0.5) {
         const double targetAngle = std::atan2(dy, dx);
@@ -601,6 +728,7 @@ bool BrushStroke::extend(InputSample p) {
         // next visible segment starts with a dab on its first pixel rather than
         // inheriting an unknowable number of off-canvas steps.
         m_remaining = 0.0;
+        m_travelled = segmentStart + distance;
         m_previous = p;
         return true;
     }
@@ -627,13 +755,18 @@ bool BrushStroke::extend(InputSample p) {
         interp.tangentialPressure = m_previous.tangentialPressure + (p.tangentialPressure - m_previous.tangentialPressure) * t;
         interp.hasTilt = m_previous.hasTilt || p.hasTilt;
         interp.hasRotation = m_previous.hasRotation || p.hasRotation;
-        if (!stamp(interp)) return false;
+        place(interp, segmentStart + at);
+        if (m_failed) return false;
         if (at >= distance - 1.0e-9) m_endpointStamped = true;
         if (at >= last) break;
 
         // The next step is decided by the dab just placed, which is what keeps
         // the spacing/diameter ratio constant through a pressure transition.
-        const double step = spacingFor(interp);
+        double step = spacingFor(interp);
+        if (m_brush.spacingJitter > 0.0) {
+            step = std::max(0.25, step *
+                (1.0 + std::clamp(m_brush.spacingJitter, 0.0, 1.0) * (randomUnit() * 2.0 - 1.0)));
+        }
         if (!(step > 0.0) || !std::isfinite(step)) {
             m_failed = true;
             m_failureReason = SparseTileStore::WriteResult::InvalidPixel;
@@ -652,7 +785,9 @@ bool BrushStroke::extend(InputSample p) {
     // outside the document; reset it for the next entry. If the whole segment
     // was visible, keep the exact distance to the next stamp.
     m_remaining = (last >= distance - 1.0e-9) ? at - distance : 0.0;
+    m_travelled = segmentStart + distance;
     m_previous = p;
+    if (!flushPending(false)) return false;
     return true;
 }
 
@@ -662,7 +797,8 @@ bool BrushStroke::end(InputSample p) {
     // Finish the tail with the pointer's final sample unless the last extend
     // already placed a stamp there. This preserves the old "no duplicate dab"
     // behaviour for stationary strokes.
-    if (m_moved && !m_endpointStamped && m_remaining > 1.0e-9) return stamp(p);
+    if (m_moved && !m_endpointStamped && m_remaining > 1.0e-9) place(p, m_travelled);
+    if (m_taperDistanceOut > 0.0) return flushPending(true);
     return true;
 }
 } // namespace komapaint

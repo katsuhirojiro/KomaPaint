@@ -15,7 +15,10 @@ constexpr std::string_view kBrushValues[] = {
     "size", "opacity", "flow", "spacing", "hardness", "aspect", "tip-angle",
     "pressure-size", "pressure-opacity", "pressure-flow", "pressure-gamma", "min-size-ratio",
     "tilt-size", "tilt-angle", "follow-rotation", "follow-direction", "blend-strength", "color-mix",
-    "stabilization", "rotation-offset", "scatter-x", "scatter-y", "scatter-count", "cluster", "sequence-step"
+    "stabilization", "rotation-offset", "scatter-x", "scatter-y", "scatter-count", "cluster", "sequence-step",
+    "taper-in", "taper-out", "spacing-jitter",
+    "texture-strength", "texture-scale", "texture-rotation", "texture-offset-x", "texture-offset-y",
+    "texture-contrast", "texture-depth"
 };
 
 constexpr std::string_view kRandomValues[] = {
@@ -33,6 +36,11 @@ std::string parameterLabel(std::string_view name) {
 
 std::string componentLabel(const brush::BrushComponent& component) {
     return component.name.empty() ? component.id : component.name;
+}
+
+bool maskSourceKind(ComponentKind kind) noexcept {
+    return kind == ComponentKind::Texture || kind == ComponentKind::AlphaMask ||
+           kind == ComponentKind::GrayscaleMask;
 }
 
 DigitalCapabilityIssue issue(std::string feature, std::string message) {
@@ -66,6 +74,9 @@ bool digitalSupportsComponentKind(brush::ComponentKind kind) {
     case ComponentKind::Tip:
     case ComponentKind::Image:
     case ComponentKind::ColourImage:
+    case ComponentKind::Texture:
+    case ComponentKind::AlphaMask:
+    case ComponentKind::GrayscaleMask:
         return true;
     default:
         return false;
@@ -73,7 +84,15 @@ bool digitalSupportsComponentKind(brush::ComponentKind kind) {
 }
 
 bool digitalSupportsBlend(brush::ComponentBlend blend) {
-    return blend == brush::ComponentBlend::Normal;
+    switch (blend) {
+    case brush::ComponentBlend::Normal:
+    case brush::ComponentBlend::Multiply:
+    case brush::ComponentBlend::Screen:
+    case brush::ComponentBlend::Overlay:
+        return true;
+    default:
+        return false;
+    }
 }
 
 std::vector<std::string_view> recommendedDigitalControls() {
@@ -82,7 +101,7 @@ std::vector<std::string_view> recommendedDigitalControls() {
 
 std::string digitalBlendReason(brush::ComponentBlend blend) {
     if (digitalSupportsBlend(blend)) return {};
-    return "Digital painting only supports Normal component blending. This blend is kept in the brush file.";
+    return "Digital painting supports Normal, Multiply, Screen and Overlay component blending. This blend is kept in the brush file.";
 }
 
 std::string digitalParameterReason(const brush::BrushDocument& document, std::string_view name) {
@@ -129,9 +148,7 @@ DigitalCapabilityReport inspectDigitalBrush(const brush::BrushDocument& doc) {
 
     for (const auto& [name, value] : doc.parameters.entries()) {
         const auto* info = brush::findParameter(name);
-        const bool taper = name == "taper-in" || name == "taper-out";
-        if ((!digitalSupportsParameter(name) && (!info || value != (taper ? 0.0 : info->defaultValue))) ||
-            (taper && value != 0.0)) {
+        if (!digitalSupportsParameter(name) && (!info || value != info->defaultValue)) {
             add("parameter:" + name, parameterLabel(name) +
                 " is not supported by Digital painting. The stored value is kept in the brush file.");
         }
@@ -186,6 +203,13 @@ DigitalCapabilityReport inspectDigitalBrush(const brush::BrushDocument& doc) {
     bool hasTip = false;
     for (const auto& component : doc.components) {
         if (!component.visible) continue;
+        if (maskSourceKind(component.kind)) {
+            if (component.resourceId.empty() || !doc.resource(component.resourceId)) {
+                add("component:" + component.id, "Component '" + componentLabel(component) +
+                    "' is a texture or mask source and needs image pixels.");
+            }
+            continue;
+        }
         bool connected = hasGenerator(component.groupId);
         for (const auto* group = doc.group(component.groupId);
              group && !connected && !group->parentGroupId.empty();
@@ -201,13 +225,19 @@ DigitalCapabilityReport inspectDigitalBrush(const brush::BrushDocument& doc) {
                 " components. '" + label + "' is kept in the brush file.");
             continue;
         }
-        if (!digitalSupportsBlend(component.blend) || !component.maskComponentId.empty()) {
-            add(componentFeature, "Component '" + label + "' uses a blend or mask not yet supported in Digital painting.");
-            if (!digitalSupportsBlend(component.blend)) {
-                add("blend", "Digital painting only supports Normal component blending. The stored blend on '" +
-                    label + "' is kept in the brush file.");
-            }
+        if (!digitalSupportsBlend(component.blend)) {
+            add(componentFeature, "Component '" + label + "' uses a blend mode Digital painting cannot render.");
+            add("blend", "Digital painting supports Normal, Multiply, Screen and Overlay component blending. "
+                "The stored blend on '" + label + "' is kept in the brush file.");
             continue;
+        }
+        if (!component.maskComponentId.empty()) {
+            const auto* mask = doc.component(component.maskComponentId);
+            if (!mask || !maskSourceKind(mask->kind) || mask->resourceId.empty() ||
+                !doc.resource(mask->resourceId)) {
+                add(componentFeature, "Component '" + label + "' is gated by a texture or mask that is missing or has no pixels.");
+                continue;
+            }
         }
         if (component.kind == ComponentKind::ProceduralShape && component.resourceId.empty()) {
             for (const auto& [key, value] : component.parameters.entries()) {

@@ -71,6 +71,9 @@ struct ResolvedValues {
     bool stylusRotation;
     double blendStrength;
     double colorMix;
+    double taperIn;
+    double taperOut;
+    double spacingJitter;
     bool followDirection;
     bool erase;
     bool texturedTip;
@@ -109,6 +112,9 @@ ResolvedValues resolve(const brush::LegacyBrush& b) {
     v.stylusRotation = b.stylusRotation;
     v.blendStrength = b.blendStrength;
     v.colorMix = b.colorMix;
+    v.taperIn = 0.0;
+    v.taperOut = 0.0;
+    v.spacingJitter = 0.0;
     v.followDirection = b.followDirection;
     v.erase = b.erase;
     v.texturedTip = b.tipStyle != "round";
@@ -179,6 +185,9 @@ ResolvedValues resolve(const brush::BrushDocument& doc) {
     v.stylusRotation = stored(doc, "follow-rotation") >= 0.5;
     v.blendStrength = stored(doc, "blend-strength");
     v.colorMix = stored(doc, "color-mix");
+    v.taperIn = stored(doc, "taper-in");
+    v.taperOut = stored(doc, "taper-out");
+    v.spacingJitter = stored(doc, "spacing-jitter");
     v.followDirection = stored(doc, "follow-direction") >= 0.5;
     v.erase = false;   // the tool decides; a component's own eraser is a request
     v.texturedTip = static_cast<int>(std::lround(tipShape(doc))) != 0;
@@ -220,6 +229,9 @@ BrushDefinition digitalFrom(const ResolvedValues& v, double tipShapeValue,
     definition.stylusRotation = v.stylusRotation;
     definition.blendStrength = v.blendStrength / 100.0;
     definition.colorMix = v.colorMix / 100.0;
+    definition.taperIn = std::clamp(v.taperIn / 100.0, 0.0, 1.0);
+    definition.taperOut = std::clamp(v.taperOut / 100.0, 0.0, 1.0);
+    definition.spacingJitter = std::clamp(v.spacingJitter / 100.0, 0.0, 1.0);
     definition.erase = erase;
     definition.color = runtime.color;
     return definition;
@@ -375,6 +387,7 @@ DocumentStroke::DocumentStroke(SparseTileStore& store, std::shared_ptr<const bru
         m_base.stampReach = std::max(m_base.stampReach, offset + scatter + extent);
     }
     if (!std::isfinite(m_base.stampReach)) { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; return; }
+    m_base.randomSeed = m_strokeSeed;
     m_stroke = std::make_unique<BrushStroke>(store, m_base, &DocumentStroke::sink, this);
     if (m_stroke->failed()) {
         m_failed = true;
@@ -449,10 +462,10 @@ SparseTileStore::WriteResult DocumentStroke::paintStamp(SparseTileStore& store,
     SparseTileStore::WriteResult combined = SparseTileStore::WriteResult::Unchanged;
     for (const brush::DrawRequest& request : requests) {
         const auto* component = m_document->component(request.componentId);
-        if (!component || request.blend != brush::ComponentBlend::Normal || !component->maskComponentId.empty())
-            return SparseTileStore::WriteResult::InvalidPixel;
+        if (!component) return SparseTileStore::WriteResult::InvalidPixel;
         BrushDefinition dabBrush = brush;
         dabBrush.nativeAspect = m_native;
+        dabBrush.blend = request.blend;
         if (component->kind == brush::ComponentKind::ProceduralShape) {
             dabBrush.tip = digitalTipForShape(component->parameters.value("tip-shape", 0.0));
         } else if (component->kind == brush::ComponentKind::Tip || component->kind == brush::ComponentKind::Image ||
@@ -463,6 +476,38 @@ SparseTileStore::WriteResult DocumentStroke::paintStamp(SparseTileStore& store,
         } else {
             return SparseTileStore::WriteResult::InvalidPixel;
         }
+
+        if (!component->maskComponentId.empty()) {
+            const auto* mask = m_document->component(component->maskComponentId);
+            if (!mask || mask->resourceId.empty()) return SparseTileStore::WriteResult::InvalidPixel;
+            dabBrush.maskTip = m_document->resource(mask->resourceId);
+            if (!dabBrush.maskTip) return SparseTileStore::WriteResult::InvalidPixel;
+            const double textureScale = m_document->parameters.contains("texture-scale")
+                ? stored(*m_document, "texture-scale") / 100.0 : 1.0;
+            const double textureRotation = m_document->parameters.contains("texture-rotation")
+                ? stored(*m_document, "texture-rotation") : 0.0;
+            dabBrush.maskScale = std::clamp(mask->transform.scale * textureScale, 0.05, 8.0);
+            dabBrush.maskRotationRadians =
+                (mask->transform.rotationDegrees + textureRotation) * (kPi / 180.0);
+            dabBrush.maskOffsetX =
+                mask->transform.offsetX / 100.0 +
+                (m_document->parameters.contains("texture-offset-x")
+                     ? stored(*m_document, "texture-offset-x") / 100.0 : 0.0);
+            dabBrush.maskOffsetY =
+                mask->transform.offsetY / 100.0 +
+                (m_document->parameters.contains("texture-offset-y")
+                     ? stored(*m_document, "texture-offset-y") / 100.0 : 0.0);
+            dabBrush.maskContrast = m_document->parameters.contains("texture-contrast")
+                ? std::clamp(stored(*m_document, "texture-contrast") / 100.0, 0.0, 2.0) : 1.0;
+            dabBrush.maskDepth = m_document->parameters.contains("texture-depth")
+                ? std::clamp(stored(*m_document, "texture-depth") / 100.0, 0.0, 1.0) : 1.0;
+            // A mask is authoritative when the brush has no texture strength
+            // yet; an explicit 0 is still a deliberate "mask off".
+            dabBrush.maskStrength = m_document->parameters.contains("texture-strength")
+                ? std::clamp(stored(*m_document, "texture-strength") / 100.0, 0.0, 1.0)
+                : 1.0;
+        }
+
         InputSample dabSample = sample;
         dabBrush.size *= request.scale;
         dabBrush.opacity *= request.opacity;

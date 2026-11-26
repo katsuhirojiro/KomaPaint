@@ -79,6 +79,11 @@ void testRangesAreCoherent() {
     for (const ParameterInfo& info : parameterRegistry()) {
         CHECK(info.label != nullptr && info.label[0] != '\0');
         CHECK(info.description != nullptr && info.description[0] != '\0');
+        // A description has to say what the control does, not repeat its name.
+        const std::string description = info.description ? info.description : "";
+        CHECK(description.size() >= 30);
+        CHECK(description != info.label);
+        CHECK(description.find(' ') != std::string::npos);
         CHECK(info.minimum < info.maximum);
         CHECK(std::isfinite(info.minimum));
         CHECK(std::isfinite(info.maximum));
