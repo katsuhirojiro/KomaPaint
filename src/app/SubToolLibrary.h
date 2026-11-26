@@ -48,6 +48,8 @@ class SubToolLibrary : public QObject {
     Q_PROPERTY(bool currentBrushBuiltIn READ currentBrushBuiltIn NOTIFY currentChanged)
     Q_PROPERTY(bool currentRequiresRealistic READ currentRequiresRealistic NOTIFY currentChanged)
     Q_PROPERTY(bool modified READ isModified NOTIFY subToolsChanged)
+    Q_PROPERTY(QVariantList nativeControls READ nativeControls NOTIFY currentChanged)
+    Q_PROPERTY(bool currentNativeModified READ currentNativeModified NOTIFY currentChanged)
 public:
     using Values = BrushPresetValues;
     explicit SubToolLibrary(BrushSettings* brush, QObject* parent = nullptr);
@@ -82,6 +84,8 @@ public:
     bool currentBrushBuiltIn() const;
     bool currentRequiresRealistic() const;
     bool isModified() const;
+    QVariantList nativeControls() const;
+    bool currentNativeModified() const;
 
     // `paints(tool)` stays true strictly for stroke-painting tools (pen, pencil,
     // brush, airbrush, eraser). `usesSubTools(tool)` is true for ALL tools
@@ -99,11 +103,21 @@ public:
 
     Q_INVOKABLE void select(int index);
     Q_INVOKABLE void selectById(const QString& brushId);
-    // Installs an exact local .kb snapshot in Brush → Digital, without
-    // switching tool or selection. Empty result means lastError has details.
+    // Installs an exact local .kb snapshot in Brush → Digital. The map is the
+    // complete outcome: installed, supported, id, name, tabId, tabName, error.
+    // `installNativeBrushInTab` is used by Brush Studio when it knows the
+    // artist's current Digital tab. An empty target chooses the current Digital
+    // tab when the brush tool is active, otherwise the default tab.
+    Q_INVOKABLE QVariantMap installNativeBrush(const QUrl& file);
+    Q_INVOKABLE QVariantMap installNativeBrushInTab(const QUrl& file, const QString& targetTabId);
+    // Legacy id-returning wrapper for the Sub-Tool importer.
     Q_INVOKABLE QString registerNativeBrush(const QUrl& file);
     Q_INVOKABLE void resetCurrent();
     Q_INVOKABLE void resetBrush(const QString& brushId);
+    // Per-install adjustments for a native brush. They are persisted with the
+    // library entry and never written back into the immutable .kb asset.
+    Q_INVOKABLE bool setNativeControl(const QString& key, double value);
+    Q_INVOKABLE bool resetCurrentNativeOverrides();
 
     // Persistent tab CRUD within the active tool/engine collection.
     Q_INVOKABLE void selectTab(int index);
@@ -165,6 +179,7 @@ private:
     const EngineCollectionData* activeCollectionPtr() const;
     int findTabIndex(const EngineCollectionData& col, const QString& tabId) const;
     BrushTabData* currentTabPtr();
+    const BrushEntryData* currentNativeEntry() const;
     const BrushTabData* currentTabPtr() const;
     int currentBrushIndexInTab(const BrushTabData* tab) const;
     void apply();

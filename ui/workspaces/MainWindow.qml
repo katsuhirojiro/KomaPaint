@@ -59,6 +59,7 @@ ApplicationWindow {
         onLoaded: {
             item.transientParent = root
             item.brushLibrary = Workspace.subTools
+            item.workspace = Workspace
             item.tabletSettings = Workspace.inputSettings
             item.previewInk = Qt.binding(function() { return Workspace.colors.foreground })
             item.present()

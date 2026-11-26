@@ -31,23 +31,49 @@ Window {
     readonly property bool previewExpanded: previewPreference < 0 ? height >= 660 : previewPreference === 1
     property string fileNotice: ""
     property string libraryNotice: ""
+    property string saveOutcome: ""   // savedInstalled, savedNotInstalled, savedUnsupported, savedOnly, saveFailed
     property var brushLibrary: null
+    property var workspace: null
     property var tabletSettings: null
     property color previewInk: "black"
 
     function saveDraftToLibrary(url) {
         libraryNotice = ""
-        if (!brushDraft.saveDraft(url)) return false
-        if (!brushLibrary) {
-            fileNotice = qsTr("Brush file saved")
+        fileNotice = ""
+        saveOutcome = ""
+        if (!brushDraft.saveDraft(url)) {
+            saveOutcome = "saveFailed"
+            libraryNotice = qsTr("Brush file was not saved: %1").arg(brushDraft.error)
+            return false
+        }
+        if (brushDraft.engine === "realistic") {
+            saveOutcome = "savedOnly"
+            fileNotice = qsTr("Brush file saved · Realistic is save-only; it was not installed")
             return true
         }
-        const installed = brushLibrary.registerNativeBrush(url)
-        if (installed.length > 0) {
-            fileNotice = qsTr("Saved · Sub Tool → Brush → Digital")
+        if (!brushLibrary) {
+            saveOutcome = "savedOnly"
+            fileNotice = qsTr("Brush file saved · install it into Brush → Digital from the Sub-Tool panel")
+            return true
+        }
+        if (workspace) workspace.activeTool = "brush"
+        const result = brushLibrary.installNativeBrush(url)
+        if (result.installed) {
+            saveOutcome = "savedInstalled"
+            fileNotice = qsTr("Saved and installed “%1” in Brush → Digital → %2")
+                .arg(result.name).arg(result.tabName)
+            // The install already selects the entry; repeat the explicit switch
+            // so a just-changed tool/collection cannot leave another tab open.
+            brushLibrary.selectTabById(result.tabId)
+            brushLibrary.selectById(result.id)
+        } else if (result.supported) {
+            saveOutcome = "savedNotInstalled"
+            fileNotice = qsTr("Brush file saved, but installation failed")
+            libraryNotice = qsTr("Nothing was installed: %1").arg(result.error)
         } else {
-            fileNotice = qsTr("Brush file saved")
-            libraryNotice = qsTr("Saved to file, not installed: %1").arg(brushLibrary.lastError)
+            saveOutcome = "savedUnsupported"
+            fileNotice = qsTr("Brush file saved · the Digital renderer does not support this brush")
+            libraryNotice = qsTr("Nothing was installed: %1").arg(result.error)
         }
         return true
     }
@@ -55,7 +81,7 @@ Window {
     BrushStudioModel {
         id: brushDraft
         objectName: "brushStudioModel"
-        onDocumentChanged: { studio.fileNotice = ""; studio.libraryNotice = "" }
+        onDocumentChanged: { studio.fileNotice = ""; studio.libraryNotice = ""; studio.saveOutcome = "" }
     }
 
     function present() {
@@ -92,7 +118,7 @@ Window {
         parentWindow: studio
         modality: Qt.WindowModal
         objectName: "brushStudioSaveDialog"
-        title: qsTr("Save brush to a file")
+        title: qsTr("Save and install brush")
         fileMode: FileDialog.SaveFile
         defaultSuffix: "kb"
         nameFilters: [qsTr("KomaPaint brushes (*.kb)")]
@@ -181,6 +207,20 @@ Window {
                 draft: brushDraft
                 textureMode: editor.mode === "texture"
             }
+        }
+        Text {
+            objectName: "brushStudioRealisticNotice"
+            visible: brushDraft.engine === "realistic"
+            Layout.fillWidth: true
+            Layout.leftMargin: KP.panelInset
+            Layout.rightMargin: KP.panelInset
+            Layout.topMargin: visible ? KP.gapS : 0
+            text: qsTr("Realistic is save-only in this Studio. A saved .kb is not previewable or installable here; the Digital renderer does not paint it.")
+            textFormat: Text.PlainText
+            color: KP.warning
+            font.family: KP.fontUi
+            font.pixelSize: KP.fontS
+            wrapMode: Text.Wrap
         }
         Text {
             objectName: "brushStudioError"

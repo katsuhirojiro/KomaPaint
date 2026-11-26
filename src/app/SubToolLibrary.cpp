@@ -2,6 +2,7 @@
 #include "BrushSettings.h"
 #include "ToolSettings.h"
 #include "drawing/BrushDocumentAdapter.h"
+#include "drawing/DigitalBrushCapabilities.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -14,6 +15,8 @@
 #include <algorithm>
 #include <new>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 
 static void initializeBrushPresetResources()
 {
@@ -47,6 +50,80 @@ bool isShapeTool(const QString& t)
 {
     return t == QStringLiteral("line") || t == QStringLiteral("curveline") ||
            t == QStringLiteral("rectangle") || t == QStringLiteral("circle");
+}
+
+QString parameterUnitName(brush::ParameterUnit unit)
+{
+    switch (unit) {
+    case brush::ParameterUnit::Percent: return QStringLiteral("%");
+    case brush::ParameterUnit::Pixels: return QStringLiteral("px");
+    case brush::ParameterUnit::Degrees: return QStringLiteral("°");
+    case brush::ParameterUnit::Ratio: return QStringLiteral("%");
+    case brush::ParameterUnit::Unit: break;
+    }
+    return {};
+}
+
+// The compact native Sub-Tool surface. It follows the brush's creator
+// exposure, then adds the controls that define a chisel-like tip when the
+// document actually uses them. Anything the Digital renderer does not consume
+// is omitted rather than presented as an editable lie.
+QVariantList nativeControlRows(const brush::BrushDocument& doc,
+                               const QMap<QString, double>& overrides)
+{
+    QVariantList rows;
+    QStringList included;
+    auto append = [&](const QString& key, const QString& label, double min, double max,
+                      const QString& unit, const QString& control, double value) {
+        if (included.contains(key)) return;
+        included.append(key);
+        rows.append(QVariantMap{
+            {QStringLiteral("key"), key},
+            {QStringLiteral("label"), label},
+            {QStringLiteral("minimum"), min},
+            {QStringLiteral("maximum"), max},
+            {QStringLiteral("unit"), unit},
+            {QStringLiteral("control"), control},
+            {QStringLiteral("value"), value},
+        });
+    };
+    for (const auto* property : doc.visibleExposed()) {
+        const auto* info = brush::findParameter(property->parameter);
+        if (!info || info->scope != brush::ParameterScope::Brush ||
+            !drawing::digitalSupportsParameter(info->name)) continue;
+        const QString key = QString::fromStdString(property->parameter);
+        const QString label = property->label.empty() ? QString::fromUtf8(info->label)
+                                                       : QString::fromStdString(property->label);
+        const double minimum = property->hasRangeOverride ? property->minimumOverride : info->minimum;
+        const double maximum = property->hasRangeOverride ? property->maximumOverride : info->maximum;
+        QString control = QString::fromUtf8(brush::toString(property->control));
+        if (control == QStringLiteral("choice") || control == QStringLiteral("curve")) control = QStringLiteral("slider");
+        append(key, label, minimum, maximum, parameterUnitName(info->unit), control,
+               overrides.value(key, doc.parameters.value(info->name, info->defaultValue)));
+    }
+    const double aspect = doc.parameters.value("aspect", 100.0);
+    const double tipAngle = doc.parameters.value("tip-angle", 0.0);
+    const bool chisel = aspect != 100.0 || tipAngle != 0.0;
+    auto addDefault = [&](std::string_view key) {
+        const auto* info = brush::findParameter(key);
+        const QString name = QString::fromStdString(std::string(key));
+        if (!info || included.contains(name) || !drawing::digitalSupportsParameter(key)) return;
+        const QString control = (info->minimum == 0.0 && info->maximum == 1.0)
+            ? QStringLiteral("toggle") : QStringLiteral("slider");
+        append(name, QString::fromUtf8(info->label), info->minimum, info->maximum,
+               parameterUnitName(info->unit), control,
+               overrides.value(name, doc.parameters.value(key, info->defaultValue)));
+    };
+    if (rows.isEmpty()) {
+        for (const std::string_view key : drawing::recommendedDigitalControls())
+            addDefault(key);
+    }
+    if (chisel) {
+        addDefault("aspect");
+        addDefault("tip-angle");
+        addDefault("follow-direction");
+    }
+    return rows;
 }
 
 } // namespace
@@ -674,55 +751,86 @@ void SubToolLibrary::selectById(const QString& brushId)
     }
 }
 
-QString SubToolLibrary::registerNativeBrush(const QUrl& file) try
+QVariantMap SubToolLibrary::installNativeBrush(const QUrl& file)
 {
-    if (m_persistenceLoadFailed || m_persistencePath.isEmpty()) {
-        setLastError(tr("The brush library is not available for writing."));
-        return {};
-    }
-    if (!file.isLocalFile() || file.toLocalFile().isEmpty()) {
-        setLastError(tr("Choose a local .kb brush file to install."));
-        return {};
-    }
+    return installNativeBrushInTab(file, QString());
+}
+
+QVariantMap SubToolLibrary::installNativeBrushInTab(const QUrl& file, const QString& targetTabId) try
+{
+    QVariantMap outcome{
+        {QStringLiteral("installed"), false},
+        {QStringLiteral("supported"), false},
+        {QStringLiteral("id"), QString()},
+        {QStringLiteral("name"), QString()},
+        {QStringLiteral("tabId"), QString()},
+        {QStringLiteral("tabName"), QString()},
+        {QStringLiteral("error"), QString()},
+    };
+    auto failOutcome = [&](const QString& message) {
+        outcome.insert(QStringLiteral("error"), message);
+        setLastError(message);
+        return outcome;
+    };
+    if (!file.isLocalFile() || file.toLocalFile().isEmpty())
+        return failOutcome(tr("Choose a local .kb brush file to install."));
+
     brush::BrushDocument doc;
     QByteArray original;
     QString error;
     if (!BrushLibraryStore::readNativeFile(file.toLocalFile(), {}, &doc, &original, &error)) {
-        setLastError(error);
-        return {};
+        // The file itself could not be read. That is an installation failure,
+        // not a statement that the renderer rejects an unsupported brush.
+        outcome.insert(QStringLiteral("supported"), true);
+        return failOutcome(error);
     }
-    const auto issue = drawing::digitalBrushIssue(doc);
-    if (!issue.empty()) {
-        setLastError(QString::fromStdString(issue));
-        return {};
+    const auto capability = drawing::inspectDigitalBrush(doc);
+    outcome.insert(QStringLiteral("supported"), capability.supported);
+    if (!capability.supported) {
+        // The caller may already have saved this file. Do not copy an
+        // unrenderable document into the library, and do not imply it was.
+        return failOutcome(QString::fromStdString(capability.summary()));
     }
+    // From here on the document is renderable; any failure is a library
+    // failure, not a renderer-support failure.
+    if (m_persistenceLoadFailed || m_persistencePath.isEmpty())
+        return failOutcome(tr("The brush library is not available for writing."));
+
     auto next = m_collections;
     auto& collection = next.digital;
-    const int defaultIndex = findTabIndex(collection, collection.defaultTabId);
-    if (defaultIndex < 0) {
-        setLastError(tr("The Digital brush collection has no default tab."));
-        return {};
+    QString target = targetTabId;
+    if (target.isEmpty()) {
+        const QString current = collection.currentTabId;
+        target = (m_tool == QStringLiteral("brush") && activeEngine() == QStringLiteral("digital") &&
+                  findTabIndex(collection, current) >= 0)
+            ? current : collection.defaultTabId;
     }
+    int targetIndex = findTabIndex(collection, target);
+    if (targetIndex < 0)
+        return failOutcome(tr("The target Digital brush tab no longer exists."));
+
     const QString name = QString::fromStdString(doc.name).trimmed();
     const QString updateId = QString::fromStdString(doc.id);
-    const QString key = BrushLibraryStore::installNativeFile(m_persistencePath, original, &error);
-    if (key.isEmpty()) {
-        setLastError(error);
-        return {};
-    }
+    // A reinstall updates the exact entry in place. A new brush is installed
+    // into the requested/current tab, never silently into Default.
     BrushEntryData* installed = nullptr;
     for (auto& tab : collection.tabs) {
         for (auto& entry : tab.brushes) {
-            if (entry.isNative() && ((!updateId.isEmpty() && entry.nativeUpdateId == updateId) ||
-                                     (updateId.isEmpty() && entry.nativeAssetKey == key))) {
+            if (entry.isNative() && !updateId.isEmpty() && entry.nativeUpdateId == updateId) {
                 installed = &entry;
+                target = tab.id;
+                targetIndex = findTabIndex(collection, target);
                 break;
             }
         }
         if (installed) break;
     }
+    if (targetIndex < 0) return failOutcome(tr("The target Digital brush tab no longer exists."));
+
+    const QString key = BrushLibraryStore::installNativeFile(m_persistencePath, original, &error);
+    if (key.isEmpty()) return failOutcome(error);
     if (!installed) {
-        auto& tab = collection.tabs[defaultIndex];
+        auto& tab = collection.tabs[targetIndex];
         BrushEntryData entry;
         entry.id = makeId(QStringLiteral("native"));
         entry.name = uniqueBrushName(tab, name.isEmpty() ? tr("Native brush") : name);
@@ -735,24 +843,52 @@ QString SubToolLibrary::registerNativeBrush(const QUrl& file) try
         installed = &tab.brushes.last();
     }
     installed->nativeAssetKey = key;
-    const QString id = installed->id;
-    if (!BrushLibraryStore::save(m_persistencePath, next, &error)) {
-        setLastError(error);
-        return {};
+    installed->nativeUpdateId = updateId;
+    // Keep only overrides the production renderer still consumes.
+    for (auto it = installed->nativeOverrides.begin(); it != installed->nativeOverrides.end();) {
+        const auto* info = brush::findParameter(it.key().toStdString());
+        if (!info || info->scope != brush::ParameterScope::Brush ||
+            !drawing::digitalSupportsParameter(info->name)) {
+            it = installed->nativeOverrides.erase(it);
+        } else {
+            ++it;
+        }
     }
+    const QString id = installed->id;
+    const QString installedName = installed->name;
+    const QString installedTabName = collection.tabs[targetIndex].name;
+    collection.currentTabId = target;
+    collection.tabs[targetIndex].currentBrushId = id;
+
+    if (!BrushLibraryStore::save(m_persistencePath, next, &error))
+        return failOutcome(error);
     m_collections = std::move(next);
     setLastError({});
-    if (isBrushTool() && activeEngine() == QStringLiteral("digital") && currentBrushId() == id) apply();
+    if (isBrushTool() && activeEngine() == QStringLiteral("digital")) apply();
     emit tabsChanged();
     emit subToolsChanged();
     emit currentChanged();
-    return id;
+    outcome.insert(QStringLiteral("installed"), true);
+    outcome.insert(QStringLiteral("id"), id);
+    outcome.insert(QStringLiteral("name"), installedName);
+    outcome.insert(QStringLiteral("tabId"), target);
+    outcome.insert(QStringLiteral("tabName"), installedTabName);
+    return outcome;
 } catch (const std::bad_alloc&) {
     setLastError(tr("Not enough memory to install the native brush."));
-    return {};
+    return {{QStringLiteral("installed"), false}, {QStringLiteral("supported"), false},
+            {QStringLiteral("error"), lastError()}};
 } catch (const std::length_error&) {
     setLastError(tr("The native brush is too large to install on this system."));
-    return {};
+    return {{QStringLiteral("installed"), false}, {QStringLiteral("supported"), false},
+            {QStringLiteral("error"), lastError()}};
+}
+
+QString SubToolLibrary::registerNativeBrush(const QUrl& file)
+{
+    const auto result = installNativeBrush(file);
+    return result.value(QStringLiteral("installed")).toBool()
+        ? result.value(QStringLiteral("id")).toString() : QString();
 }
 
 void SubToolLibrary::resetCurrent()
@@ -768,8 +904,23 @@ void SubToolLibrary::resetBrush(const QString& brushId)
     for (auto& tab : col->tabs) {
         for (int i = 0; i < tab.brushes.size(); ++i) {
             if (tab.brushes[i].id == brushId) {
-                if (tab.brushes[i].current == tab.brushes[i].defaults) return;
-                tab.brushes[i].current = tab.brushes[i].defaults;
+                auto& entry = tab.brushes[i];
+                if (entry.isNative()) {
+                    if (entry.nativeOverrides.isEmpty()) return;
+                    const auto previous = entry.nativeOverrides;
+                    entry.nativeOverrides.clear();
+                    if (!persist()) {
+                        entry.nativeOverrides = previous;
+                        return;
+                    }
+                    if (tab.id == currentTabId() && tab.currentBrushId == brushId)
+                        apply();
+                    emit subToolsChanged();
+                    emit currentChanged();
+                    return;
+                }
+                if (entry.current == entry.defaults) return;
+                entry.current = entry.defaults;
                 persist();
                 if (tab.id == currentTabId() && tab.currentBrushId == brushId)
                     apply();
@@ -779,6 +930,102 @@ void SubToolLibrary::resetBrush(const QString& brushId)
             }
         }
     }
+}
+
+const BrushEntryData* SubToolLibrary::currentNativeEntry() const
+{
+    const auto* tab = currentTabPtr();
+    const int idx = currentBrushIndexInTab(tab);
+    if (!tab || idx < 0 || idx >= tab->brushes.size()) return nullptr;
+    return tab->brushes[idx].isNative() ? &tab->brushes[idx] : nullptr;
+}
+
+QVariantList SubToolLibrary::nativeControls() const
+{
+    const auto* entry = currentNativeEntry();
+    if (!entry || !m_brush) return {};
+    const auto document = m_brush->nativeBrushDocument();
+    if (!document) return {};
+    return nativeControlRows(*document, entry->nativeOverrides);
+}
+
+bool SubToolLibrary::currentNativeModified() const
+{
+    const auto* entry = currentNativeEntry();
+    return entry && !entry->nativeOverrides.isEmpty();
+}
+
+bool SubToolLibrary::setNativeControl(const QString& key, double value) try
+{
+    auto* tab = currentTabPtr();
+    const int idx = currentBrushIndexInTab(tab);
+    if (!tab || idx < 0 || idx >= tab->brushes.size() || !tab->brushes[idx].isNative()) {
+        setLastError(tr("Select an installed native brush first."));
+        return false;
+    }
+    const auto* info = brush::findParameter(key.toStdString());
+    if (!info || info->scope != brush::ParameterScope::Brush ||
+        !drawing::digitalSupportsParameter(info->name) || !brush::parameterInRange(*info, value)) {
+        setLastError(tr("'%1' is not a supported native brush control.").arg(key));
+        return false;
+    }
+    bool offered = false;
+    for (const auto& row : nativeControls()) {
+        if (row.toMap().value(QStringLiteral("key")).toString() == key) { offered = true; break; }
+    }
+    if (!offered) {
+        setLastError(tr("'%1' is not exposed for this brush.").arg(key));
+        return false;
+    }
+    const auto document = m_brush ? m_brush->nativeBrushDocument() : nullptr;
+    if (!document) {
+        setLastError(tr("The native brush document is not available."));
+        return false;
+    }
+    brush::BrushDocument candidate = *document;
+    candidate.setParameter(info->name, value);
+    const auto issue = drawing::digitalBrushIssue(candidate);
+    if (!issue.empty()) {
+        setLastError(QString::fromStdString(issue));
+        return false;
+    }
+    auto& entry = tab->brushes[idx];
+    const auto previous = entry.nativeOverrides;
+    entry.nativeOverrides.insert(key, value);
+    if (!persist()) {
+        entry.nativeOverrides = previous;
+        return false;
+    }
+    apply();
+    setLastError({});
+    emit subToolsChanged();
+    emit currentChanged();
+    return true;
+} catch (const std::bad_alloc&) {
+    setLastError(tr("Not enough memory to adjust the native brush."));
+    return false;
+} catch (const std::length_error&) {
+    setLastError(tr("The native brush adjustment is too large."));
+    return false;
+}
+
+bool SubToolLibrary::resetCurrentNativeOverrides()
+{
+    auto* tab = currentTabPtr();
+    const int idx = currentBrushIndexInTab(tab);
+    if (!tab || idx < 0 || idx >= tab->brushes.size() || !tab->brushes[idx].isNative()) return false;
+    auto& entry = tab->brushes[idx];
+    if (entry.nativeOverrides.isEmpty()) return true;
+    const auto previous = entry.nativeOverrides;
+    entry.nativeOverrides.clear();
+    if (!persist()) {
+        entry.nativeOverrides = previous;
+        return false;
+    }
+    apply();
+    emit subToolsChanged();
+    emit currentChanged();
+    return true;
 }
 
 QString SubToolLibrary::uniqueBrushName(const BrushTabData& tab, const QString& baseName) const
@@ -1147,6 +1394,14 @@ void SubToolLibrary::apply()
                 brush::BrushDocument doc;
                 const QString path = BrushLibraryStore::nativeFilePath(m_persistencePath, entry->nativeAssetKey);
                 if (BrushLibraryStore::readNativeFile(path, entry->nativeAssetKey, &doc, nullptr, &issue)) {
+                    for (auto it = entry->nativeOverrides.cbegin(); it != entry->nativeOverrides.cend(); ++it) {
+                        const auto* info = brush::findParameter(it.key().toStdString());
+                        if (info && info->scope == brush::ParameterScope::Brush &&
+                            drawing::digitalSupportsParameter(info->name) &&
+                            brush::parameterInRange(*info, it.value())) {
+                            doc.setParameter(info->name, it.value());
+                        }
+                    }
                     issue = QString::fromStdString(drawing::digitalBrushIssue(doc));
                     if (issue.isEmpty()) native = std::make_shared<const brush::BrushDocument>(std::move(doc));
                 }
@@ -1238,7 +1493,9 @@ QVariantList SubToolLibrary::subTools() const
         item.insert(QStringLiteral("realisticOnly"), def.traditionalMedia);
         item.insert(QStringLiteral("mediumId"), cur.mediumId);
         item.insert(QStringLiteral("toolParams"), cur.toolParams);
-        item.insert(QStringLiteral("modified"), !(cur == def));
+        item.insert(QStringLiteral("modified"), entry.isNative() ? !entry.nativeOverrides.isEmpty()
+                                                                 : !(cur == def));
+        item.insert(QStringLiteral("nativeModified"), entry.isNative() && !entry.nativeOverrides.isEmpty());
         list.push_back(item);
     }
     return list;

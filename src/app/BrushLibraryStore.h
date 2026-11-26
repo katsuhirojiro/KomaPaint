@@ -69,6 +69,9 @@ struct BrushEntryData {
     // identity belongs to the installed original, not to duplicate aliases.
     QString nativeAssetKey;
     QString nativeUpdateId;
+    // Per-install adjustments made in the Sub-Tool panel. These never edit the
+    // immutable .kb asset: Apply overlays them on a runtime copy.
+    QMap<QString, double> nativeOverrides;
     bool isNative() const { return !nativeAssetKey.isEmpty(); }
 };
 

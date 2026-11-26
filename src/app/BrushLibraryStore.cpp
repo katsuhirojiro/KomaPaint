@@ -101,6 +101,12 @@ QJsonObject entryToJson(const BrushEntryData& entry)
         QJsonObject ref{{QStringLiteral("sha256"), entry.nativeAssetKey}};
         if (!entry.nativeUpdateId.isEmpty()) ref.insert(QStringLiteral("updateId"), entry.nativeUpdateId);
         obj.insert(QStringLiteral("nativeBrush"), ref);
+        if (!entry.nativeOverrides.isEmpty()) {
+            QJsonObject overrides;
+            for (auto it = entry.nativeOverrides.cbegin(); it != entry.nativeOverrides.cend(); ++it)
+                overrides.insert(it.key(), it.value());
+            obj.insert(QStringLiteral("nativeOverrides"), overrides);
+        }
     } else {
         obj.insert(QStringLiteral("defaults"), BrushLibraryStore::valuesToJson(entry.defaults));
         obj.insert(QStringLiteral("current"), BrushLibraryStore::valuesToJson(entry.current));
@@ -128,6 +134,15 @@ bool entryFromJson(const QJsonObject& obj, BrushEntryData* out, bool allowNative
         const auto updateId = ref.value(QStringLiteral("updateId"));
         if (!updateId.isUndefined() && !updateId.isString()) return false;
         out->nativeUpdateId = updateId.toString();
+        const auto overrides = obj.value(QStringLiteral("nativeOverrides"));
+        if (!overrides.isUndefined()) {
+            if (!overrides.isObject()) return false;
+            const auto object = overrides.toObject();
+            for (auto it = object.constBegin(); it != object.constEnd(); ++it) {
+                if (!it.value().isDouble() || !std::isfinite(it.value().toDouble())) return false;
+                out->nativeOverrides.insert(it.key(), it.value().toDouble());
+            }
+        }
         out->defaults.executableTool = QStringLiteral("brush");
         out->current = out->defaults;
     } else {

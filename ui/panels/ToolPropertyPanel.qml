@@ -23,6 +23,7 @@ Rectangle {
     readonly property bool painting: library.paintTool
     readonly property bool hasSubToolProps: library.hasCollections && !painting
     readonly property bool realisticEngine: Workspace.realisticEngine
+    readonly property var nativeControls: library.nativeControls
     function hint(tool) {
         if (tool === "zoom") return qsTr("Click to zoom in. Alt-click or right-click to zoom out.")
         if (tool === "hand") return qsTr("Drag to move the view.")
@@ -88,7 +89,9 @@ Rectangle {
                         iconSize: 12
                         cell: 18
                         tooltip: qsTr("Return this preset to its default settings")
-                        enabled: panel.library.modified && (!panel.library.brushTool || panel.library.currentBrushBuiltIn)
+                        enabled: panel.library.modified &&
+                                 (!panel.library.brushTool || panel.library.currentBrushBuiltIn ||
+                                  panel.library.currentNativeModified)
                         onActivated: panel.library.resetCurrent()
                     }
                 }
@@ -100,13 +103,85 @@ Rectangle {
             Layout.fillWidth: true
             Layout.margins: KP.panelInset
             text: panel.brush.nativeBrushIssue.length > 0 ? panel.brush.nativeBrushIssue
-                : qsTr("Native .kb brush · Edit its settings in Brush Studio.")
+                : qsTr("Native .kb brush · the controls below adjust this copy without changing the brush file.")
             textFormat: Text.PlainText
             wrapMode: Text.Wrap
             color: panel.brush.nativeBrushIssue.length > 0 ? KP.error : KP.textMuted
             font.pixelSize: KP.fontS
         }
-        Item { Layout.fillHeight: true; visible: panel.painting && panel.brush.nativeBrush }
+        Flickable {
+            id: nativeScroll
+            objectName: "nativeBrushPropertyScroll"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: panel.painting && panel.brush.nativeBrush
+            clip: true
+            contentWidth: width
+            contentHeight: nativeProperties.height + 2 * KP.gapM
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: KpScrollBar {
+                policy: nativeScroll.contentHeight > nativeScroll.height ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+            }
+
+            ColumnLayout {
+                id: nativeProperties
+                x: KP.panelInset
+                y: KP.gapS
+                width: nativeScroll.width - 2 * KP.panelInset
+                spacing: KP.gapS
+                PanelSection {
+                    Layout.fillWidth: true
+                    title: qsTr("Brush controls")
+                    hint: panel.library.currentName
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+                    ColumnLayout {
+                        width: parent.width
+                        spacing: KP.gapS
+                        Repeater {
+                            model: panel.nativeControls
+                            delegate: ColumnLayout {
+                                required property var modelData
+                                objectName: "nativeControl_" + modelData.key
+                                Layout.fillWidth: true
+                                spacing: KP.gapXS
+                                PropertySlider {
+                                    Layout.fillWidth: true
+                                    visible: modelData.control !== "toggle"
+                                    label: modelData.label
+                                    unit: modelData.unit
+                                    from: modelData.minimum
+                                    to: modelData.maximum
+                                    value: modelData.value
+                                    onEdited: function(v) { panel.library.setNativeControl(modelData.key, v) }
+                                }
+                                CheckBox {
+                                    visible: modelData.control === "toggle"
+                                    text: modelData.label
+                                    checked: modelData.value >= 0.5
+                                    onToggled: panel.library.setNativeControl(modelData.key, checked ? 1 : 0)
+                                }
+                            }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            visible: panel.nativeControls.length === 0
+                            text: qsTr("This brush has no exposed controls. Edit it in Brush Studio.")
+                            color: KP.textSubtle
+                            font.pixelSize: KP.fontS
+                            wrapMode: Text.WordWrap
+                        }
+                        KpButton {
+                            objectName: "nativeControlsReset"
+                            small: true
+                            label: qsTr("Reset adjustments")
+                            enabled: panel.library.currentNativeModified
+                            onClicked: panel.library.resetCurrentNativeOverrides()
+                        }
+                    }
+                }
+            }
+        }
 
         Flickable {
             id: scroll
@@ -657,7 +732,7 @@ Rectangle {
                             PropertySlider {
                                 objectName: "brushAspectSlider"
                                 width: parent.width
-                                label: qsTr("Aspect")
+                                label: qsTr("Tip Shape")
                                 unit: "%"
                                 from: 100
                                 to: 400
