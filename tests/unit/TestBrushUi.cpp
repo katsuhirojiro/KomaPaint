@@ -1401,8 +1401,11 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
     QVERIFY(draft->document().parameter("texture-scale") == 0.0); // no silent write
     // Texture mode may already have collapsed the Brush Tip section. Open it
     // only when its form is not mounted, rather than toggling it closed.
-    if (!control("brushStudioValue_tip-shape"))
+    for (int attempt = 0;
+         attempt < 2 && !control("brushStudioValue_tip-shape"); ++attempt) {
         QVERIFY(press("brushStudioSection_Brush TipToggle"));
+        QCoreApplication::processEvents();
+    }
     auto* tipShapeControl = control("brushStudioValue_tip-shape");
     QVERIFY2(tipShapeControl, "The Tip Shape control is missing after opening the Brush Tip section");
     const auto tipShapeState = draft->settingState().value(QStringLiteral("values")).toMap()
