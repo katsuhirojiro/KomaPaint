@@ -141,6 +141,10 @@ jobs:
           # These interfaces deliberately customize Controls 2 primitives;
           # the Basic style supports that consistently on the Windows runner.
           $env:QT_QUICK_CONTROLS_STYLE = "Basic"
+          # The integrated artist check writes one sheet from the real canvas.
+          $env:KOMAPAINT_ARTIST_SHEET = Join-Path "${{ github.workspace }}" 'brush-artist-verification.png'
+          $env:KOMAPAINT_ARTIST_REPORT = Join-Path "${{ github.workspace }}" 'brush-artist-verification.txt'
+          Remove-Item $env:KOMAPAINT_ARTIST_SHEET, $env:KOMAPAINT_ARTIST_REPORT -ErrorAction SilentlyContinue
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
           $failed = 0
@@ -218,6 +222,30 @@ jobs:
             if ($measureLine.Length -gt 3800) { $measureLine = $measureLine.Substring(0, 3800) + ' ...' }
             Write-Host "::notice title=QML responsiveness (ms)::$measureLine"
           }
+
+      - name: Verify the integrated Brush Studio artist check
+        shell: pwsh
+        run: |
+          $sheet = Join-Path "${{ github.workspace }}" 'brush-artist-verification.png'
+          $report = Join-Path "${{ github.workspace }}" 'brush-artist-verification.txt'
+          if (!(Test-Path $report)) {
+            Write-Host "::error title=Brush Studio artist check::the metrics report was not written"
+            exit 1
+          }
+          $lines = @(Get-Content $report | Where-Object { $_.Trim().Length -gt 0 })
+          if ($lines.Count -ne 7) {
+            Write-Host "::error title=Brush Studio artist check::expected 7 ARTIST rows, got $($lines.Count)"
+            exit 1
+          }
+          $metrics = ($lines -join ' ; ').Replace('%', '%25')
+          if ($metrics.Length -gt 3800) { $metrics = $metrics.Substring(0, 3800) + ' ...' }
+          Write-Host "::notice title=Brush Studio artist check::$metrics"
+          if (!(Test-Path $sheet)) {
+            Write-Host "::error title=Brush Studio artist check::the artist sheet was not written"
+            exit 1
+          }
+          $artistBytes = (Get-Item $sheet).Length
+          Write-Host "::notice title=Brush Studio artist sheet::$artistBytes bytes; seven rows from the integrated canvas."
 
       - name: Render brush continuity proof
         shell: pwsh
@@ -411,6 +439,17 @@ jobs:
         shell: pwsh
         run: |
           Copy-Item "${{ github.workspace }}\packaging\Register_koma_file_association.cmd" "${{ env.STAGE_DIR }}\Register_koma_file_association.cmd" -Force
+          $human = Join-Path "${{ env.STAGE_DIR }}" 'Human-Test'
+          New-Item -ItemType Directory -Force -Path (Join-Path $human 'Brushes') | Out-Null
+          Copy-Item "${{ github.workspace }}\docs\testing\brush-studio-artist-verification.md" (Join-Path $human 'README.md') -Force
+          Copy-Item "${{ github.workspace }}\docs\testing\brushes\*.kb" (Join-Path $human 'Brushes') -Force
+          Copy-Item "${{ github.workspace }}\brush-continuity.png" (Join-Path $human 'continuity-proof.png') -Force
+          if (Test-Path "${{ github.workspace }}\brush-artist-verification.png") {
+            Copy-Item "${{ github.workspace }}\brush-artist-verification.png" (Join-Path $human 'artist-check.png') -Force
+          }
+          if (Test-Path "${{ github.workspace }}\brush-artist-verification.txt") {
+            Copy-Item "${{ github.workspace }}\brush-artist-verification.txt" (Join-Path $human 'artist-check.txt') -Force
+          }
           $zip = "${{ github.workspace }}\KomaPaint-Windows-x64-Human-Test.zip"
           if (Test-Path $zip) { Remove-Item $zip -Force }
           Compress-Archive -Path "${{ env.STAGE_DIR }}" -DestinationPath $zip -CompressionLevel Optimal
@@ -639,5 +678,7 @@ jobs:
           path: |
             KomaPaint-Windows-x64-Human-Test.zip
             brush-continuity.png
+            brush-artist-verification.png
+            brush-artist-verification.txt
           if-no-files-found: error
           retention-days: 30

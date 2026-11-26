@@ -14,6 +14,8 @@
 #include <QGuiApplication>
 #include <QColor>
 #include <QImage>
+#include <QPainter>
+#include <QFileInfo>
 #include <QInputMethodEvent>
 #include <QLocale>
 #include <QPointer>
@@ -27,10 +29,12 @@
 #include <QWheelEvent>
 #include <QSGRendererInterface>
 #include <QTemporaryDir>
+#include <QFont>
 
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 #include "app/BrushLibraryStore.h"
 #include "app/BrushSettings.h"
@@ -52,6 +56,10 @@
 #include "history/UndoStack.h"
 #include "layers/Layer.h"
 #include "layers/LayerModel.h"
+
+#ifndef KOMAPAINT_ARTIST_BRUSH_DIR
+#define KOMAPAINT_ARTIST_BRUSH_DIR "docs/testing/brushes"
+#endif
 
 using namespace komapaint;
 
@@ -198,6 +206,121 @@ void captureStudio(QQuickWindow* studio, const QString& name)
     studio->grabWindow().save(QDir(directory).filePath(name + QStringLiteral(".png")));
 }
 
+// ---- Brush Studio artist check ------------------------------------------------
+//
+// The seven .kb fixtures beside this test are the same files shipped in
+// Human-Test/Brushes in the Windows ZIP. The test opens each one in the real
+// Brush Studio window, draws with its private pad, saves it into the Sub-Tool
+// library, selects the installed entry, paints on the artwork, and finally
+// saves and reopens the project. The sheet it writes is evidence for a human:
+// the test can prove pixels, spacing and persistence; only a person can judge
+// whether the brush feels pleasant in the hand.
+
+struct ArtistMetrics {
+    int row = 0;
+    int firstInk = -1;
+    int lastInk = -1;
+    int gaps = 0;
+    int width = 0;
+    int maxAlpha = 0;
+    int centerAlpha = 0;
+    int rimAlpha = 0;
+    double rimRatio = 0.0;
+    double grain = 0.0;
+};
+
+int artistAlpha(const SparseTileStore& tiles, int x, int y)
+{
+    const auto pixel = tiles.pixel({static_cast<std::int64_t>(x), static_cast<std::int64_t>(y)});
+    return pixel ? int((*pixel >> 24) & 255U) : 0;
+}
+
+// A pressure path a person can repeat with a stylus: light ends, firm middle.
+// The low-pressure and airbrush fixtures use a constant sample so their named
+// condition is actually exercised rather than being an average of a ramp.
+double artistPressure(const QString& name, double t)
+{
+    if (name.contains(QStringLiteral("small-low-pressure"))) return 0.20;
+    if (name.contains(QStringLiteral("soft-airbrush"))) return 0.60;
+    if (name.contains(QStringLiteral("round-ink")) || name.contains(QStringLiteral("high-spacing"))) return 1.0;
+    const double shape = 1.0 - std::abs(2.0 * t - 1.0);
+    if (name.contains(QStringLiteral("changing-pressure"))) return 0.05 + 0.95 * shape;
+    if (name.contains(QStringLiteral("pressure-pencil")) || name.contains(QStringLiteral("large-varying")))
+        return 0.15 + 0.85 * shape;
+    return 1.0;
+}
+
+ArtistMetrics measureArtistRow(const SparseTileStore& tiles, int row)
+{
+    ArtistMetrics result;
+    result.row = row;
+    // Measure the centreline, not a tall band: the seven rows are deliberately
+    // close enough to fit one canvas, so a band would pick up the neighbouring
+    // 160 px wash. The centreline is the stroke; the width is found from the
+    // connected run through that same pixel.
+    for (int x = 40; x <= 960; ++x) {
+        const int alpha = artistAlpha(tiles, x, row);
+        if (alpha > 8) {
+            if (result.firstInk < 0) result.firstInk = x;
+            result.lastInk = x;
+        }
+        result.maxAlpha = std::max(result.maxAlpha, alpha);
+    }
+    if (result.firstInk >= 0 && result.lastInk >= result.firstInk) {
+        for (int x = result.firstInk; x <= result.lastInk; ++x)
+            if (artistAlpha(tiles, x, row) <= 8) ++result.gaps;
+    }
+    constexpr int cx = 500;
+    int cy = row;
+    if (artistAlpha(tiles, cx, cy) <= 8) {
+        int best = cy;
+        for (int y = row - 20; y <= row + 20; ++y)
+            if (artistAlpha(tiles, cx, y) > artistAlpha(tiles, cx, best)) best = y;
+        cy = best;
+    }
+    int top = cy;
+    while (top > row - 100 && artistAlpha(tiles, cx, top - 1) > 8) --top;
+    int bottom = cy;
+    while (bottom < row + 100 && artistAlpha(tiles, cx, bottom + 1) > 8) ++bottom;
+    result.width = bottom - top + 1;
+    result.centerAlpha = artistAlpha(tiles, cx, cy);
+    const int offset = std::max(1, int(std::lround(result.width * 0.45)));
+    result.rimAlpha = artistAlpha(tiles, cx, cy - offset);
+    result.rimRatio = result.centerAlpha > 0 ? double(result.rimAlpha) / double(result.centerAlpha) : 0.0;
+    const int half = std::max(1, result.width / 6);
+    double n = 0.0, sum = 0.0, sum2 = 0.0;
+    for (int x = 450; x <= 550; ++x) {
+        for (int y = cy - half; y <= cy + half; ++y) {
+            const double a = artistAlpha(tiles, x, y);
+            sum += a;
+            sum2 += a * a;
+            n += 1.0;
+        }
+    }
+    const double mean = n > 0.0 ? sum / n : 0.0;
+    result.grain = std::sqrt(std::max(0.0, sum2 / n - mean * mean));
+    return result;
+}
+
+QImage artistCanvasImage(const SparseTileStore& tiles, int width, int height)
+{
+    QImage image(width, height, QImage::Format_RGB32);
+    image.fill(Qt::white);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const auto pixel = tiles.pixel({static_cast<std::int64_t>(x), static_cast<std::int64_t>(y)});
+            if (!pixel || (*pixel >> 24) == 0U) continue;
+            const int alpha = int((*pixel >> 24) & 255U);
+            const int inverse = 255 - alpha;
+            const int r = int((*pixel >> 16) & 255U) + inverse;
+            const int g = int((*pixel >> 8) & 255U) + inverse;
+            const int b = int(*pixel & 255U) + inverse;
+            image.setPixel(x, y, qRgb(std::min(255, r), std::min(255, g), std::min(255, b)));
+        }
+    }
+    return image;
+}
+
 bool chooseHardness(Running& app, int choice)
 {
     auto* target = item(app, QStringLiteral("brushHardnessChoice"));
@@ -338,6 +461,7 @@ private slots:
     void brushStudioWindowIsIndependentAndReusable();
     void brushStudioCommandsAndCompactLayout();
     void nativeBrushStudioPadToArtwork();
+    void artistVerificationSevenBrushes();
     void brushStudioComponentsAndReadOnlyEditor();
     void brushStudioRegistryInspectorAndCreatorExposure();
     void brushSizeGridSetsTheRealSize();
@@ -770,6 +894,237 @@ void TestBrushUi::nativeBrushStudioPadToArtwork()
     WorkspaceState reopened;
     QVERIFY(reopened.openFromPath(koma));
     QCOMPARE(artworkPixels(reopened.layers()->layerAt(0)->tiles()), expected);
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(u'\n')));
+}
+
+void TestBrushUi::artistVerificationSevenBrushes()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiArtistVerification")));
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    QVERIFY(app.workspace.initializeSession(files.filePath(QStringLiteral("session.json"))));
+    app.workspace.setActiveTool(QStringLiteral("brush"));
+    auto* library = app.workspace.subTools();
+    QVERIFY(library);
+    QVERIFY(library->initializePersistence(files.filePath(QStringLiteral("artist-library.json"))));
+    library->selectTabById(library->defaultTabId());
+    auto* settings = app.workspace.brush();
+    QVERIFY(settings);
+
+    // A 1000 px square gives the 160 px wash a clean row without touching its
+    // neighbours, and leaves the seven rows inside the saved document.
+    QVERIFY(app.workspace.newProject(QStringLiteral("Brush Studio artist verification"),
+                                     1000, 1000, false, QStringLiteral("white"), 72));
+    QTest::qWait(50);
+    app.canvas->refreshNow();
+    auto* artwork = qobject_cast<CanvasDocument*>(app.canvas->document());
+    QVERIFY(artwork && artwork->layers() && artwork->layers()->layerAt(0));
+    auto* layer = artwork->layers()->layerAt(0);
+
+    QVERIFY(QMetaObject::invokeMethod(app.root.get(), "openBrushStudio"));
+    QPointer<QQuickWindow> studio;
+    QTRY_VERIFY((studio = studioWindow()) && studio->isVisible());
+    studio->resize(1240, 780);
+    auto* draft = studio->findChild<BrushStudioModel*>();
+    auto* pad = qobject_cast<BrushStudioPad*>(studioControl(studio.data(), "brushStudioPad"));
+    QTRY_VERIFY(draft && pad && pad->isVisible() && pad->height() >= 80);
+    pad->restoreView(100, 500, 200);
+
+    const QDir brushDir(QStringLiteral(KOMAPAINT_ARTIST_BRUSH_DIR));
+    QVERIFY2(brushDir.exists(), qPrintable(brushDir.absolutePath()));
+    const QStringList brushFiles = brushDir.entryList({QStringLiteral("*.kb")}, QDir::Files, QDir::Name);
+    QCOMPARE(brushFiles.size(), 7);
+
+    const auto drawStroke = [](CanvasViewport* view, QObject* brush, const QColor& color,
+                               double x0, double x1, double y, const QString& key) {
+        const auto at = view->documentToViewport(x0, y);
+        if (!view->beginStroke(at.x(), at.y(), artistPressure(key, 0.0), brush, color)) return false;
+        constexpr int samples = 380;
+        for (int i = 1; i <= samples; ++i) {
+            const double t = double(i) / samples;
+            const auto point = view->documentToViewport(x0 + (x1 - x0) * t, y);
+            view->continueStroke(point.x(), point.y(), artistPressure(key, t));
+        }
+        const auto end = view->documentToViewport(x1, y);
+        view->endStroke(end.x(), end.y(), artistPressure(key, 1.0));
+        return true;
+    };
+
+    struct Authored {
+        brush::BrushDocument document;
+        QString name;
+        QString key;
+    };
+    std::vector<Authored> authored;
+    authored.reserve(std::size_t(brushFiles.size()));
+
+    for (const QString& file : brushFiles) {
+        const QString path = brushDir.filePath(file);
+        brush::BrushDocument document;
+        brush::DecodeResult decoded;
+        std::string error;
+        QVERIFY2(brush::loadBrushFile(QFileInfo(path).filesystemAbsoluteFilePath(), &document, &decoded, &error),
+                 qPrintable(QString::fromStdString(error)));
+        const QString key = QFileInfo(file).completeBaseName();
+        const auto issue = drawing::digitalBrushIssue(document);
+        QVERIFY2(issue.empty(), qPrintable(QString::fromStdString(issue)));
+        QVERIFY(draft->setDocument(document));
+        QVERIFY2(draft->error().isEmpty(), qPrintable(draft->error()));
+        QVERIFY2(pad->renderIssue().isEmpty(), qPrintable(pad->renderIssue()));
+        QVERIFY(pad->clearPad());
+        QVERIFY(!pad->canUndoPad());
+        QVERIFY2(drawStroke(pad, pad->brushSettings(), Qt::black, 400, 600, 200, key),
+                 qPrintable(key + QStringLiteral(": pad stroke failed")));
+        QVERIFY2(pad->canUndoPad(), qPrintable(key + QStringLiteral(": pad stroke left no pixels")));
+        auto* padDocument = qobject_cast<CanvasDocument*>(pad->document());
+        QVERIFY(padDocument && padDocument->layers() && padDocument->layers()->layerAt(0));
+        QVERIFY2(padDocument->layers()->layerAt(0)->tiles().allocatedTiles() > 0,
+                 qPrintable(key + QStringLiteral(": pad allocated no tiles")));
+
+        const QString nativeFile = files.filePath(key + QStringLiteral(".kb"));
+        QVariant saved;
+        QVERIFY(QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
+                                          Q_ARG(QVariant, QVariant::fromValue(QUrl::fromLocalFile(nativeFile)))));
+        QVERIFY(saved.toBool());
+        QVERIFY2(draft->error().isEmpty(), qPrintable(draft->error()));
+        const QString notice = studio->property("libraryNotice").toString();
+        QVERIFY2(notice.isEmpty(), qPrintable(key + QStringLiteral(": ") + notice));
+        QVERIFY(QFile::exists(nativeFile));
+        QString installed;
+        for (const QVariant& row : library->subTools()) {
+            const auto map = row.toMap();
+            if (map.value(QStringLiteral("nativeBrush")).toBool() &&
+                map.value(QStringLiteral("name")).toString() == QString::fromStdString(document.name)) {
+                installed = map.value(QStringLiteral("id")).toString();
+                break;
+            }
+        }
+        QVERIFY2(!installed.isEmpty(), qPrintable(QString::fromStdString(document.name) + QStringLiteral(" was not installed")));
+        authored.push_back({document, QString::fromStdString(document.name), key});
+    }
+
+    QVERIFY(studio->close());
+    QTRY_VERIFY(!studio->isVisible());
+    // The human test installs several brushes and may relaunch before drawing.
+    // Reload the library here so the same persistence path is exercised.
+    QVERIFY(library->initializePersistence(library->persistencePath()));
+
+    struct RowResult {
+        ArtistMetrics metrics;
+        QString name;
+    };
+    std::vector<RowResult> rows;
+    rows.reserve(authored.size());
+    QStringList artistReport;
+    const QColor colors[] = {
+        QColor(20, 20, 20), QColor(70, 50, 35), QColor(35, 90, 170), QColor(175, 35, 35),
+        QColor(25, 115, 80), QColor(105, 45, 145), QColor(200, 90, 20)
+    };
+    for (std::size_t i = 0; i < authored.size(); ++i) {
+        const auto& brush = authored[i];
+        QString installed;
+        for (const QVariant& row : library->subTools()) {
+            const auto map = row.toMap();
+            if (map.value(QStringLiteral("nativeBrush")).toBool() &&
+                map.value(QStringLiteral("name")).toString() == brush.name) {
+                installed = map.value(QStringLiteral("id")).toString();
+                break;
+            }
+        }
+        QVERIFY2(!installed.isEmpty(), qPrintable(brush.name + QStringLiteral(" disappeared after library reload")));
+        library->selectById(installed);
+        QVERIFY(library->currentBrushId() == installed);
+        const auto selected = settings->nativeBrushDocument();
+        QVERIFY2(selected && *selected == brush.document, qPrintable(brush.name + QStringLiteral(" changed on install")));
+        const int row = 120 + 120 * int(i);
+        QVERIFY2(drawStroke(app.canvas, settings, colors[i], 150, 850, row, brush.key),
+                 qPrintable(brush.name + QStringLiteral(": artwork stroke failed")));
+        const auto metrics = measureArtistRow(layer->tiles(), row);
+        QVERIFY2(metrics.maxAlpha > 0, qPrintable(brush.name + QStringLiteral(": no artwork pixels")));
+        QVERIFY2(metrics.gaps == 0, qPrintable(QStringLiteral("%1: %2 unpainted columns").arg(brush.name).arg(metrics.gaps)));
+        rows.push_back({metrics, brush.name});
+        const QString line = QStringLiteral("ARTIST %1 row=%2 gaps=%3 width=%4 maxAlpha=%5 rimRatio=%6 grain=%7")
+                                 .arg(brush.key).arg(row).arg(metrics.gaps).arg(metrics.width)
+                                 .arg(metrics.maxAlpha).arg(metrics.rimRatio, 0, 'f', 3)
+                                 .arg(metrics.grain, 0, 'f', 2);
+        qInfo().noquote() << line;
+        artistReport << line;
+    }
+
+    const auto byKey = [&](const QString& key) -> const ArtistMetrics& {
+        for (std::size_t i = 0; i < authored.size(); ++i)
+            if (authored[i].key == key) return rows[i].metrics;
+        return rows.front().metrics;
+    };
+    const auto& ink = byKey(QStringLiteral("01-round-ink"));
+    const auto& pencil = byKey(QStringLiteral("02-pressure-pencil"));
+    const auto& airbrush = byKey(QStringLiteral("03-soft-airbrush"));
+    const auto& small = byKey(QStringLiteral("04-small-low-pressure"));
+    const auto& large = byKey(QStringLiteral("05-large-varying-pressure"));
+    const auto& highSpacing = byKey(QStringLiteral("06-high-spacing"));
+    QVERIFY2(ink.rimRatio > 0.90, qPrintable(QStringLiteral("round ink is not crisp: rim ratio %1").arg(ink.rimRatio)));
+    QVERIFY2(pencil.grain > ink.grain + 2.0,
+             qPrintable(QStringLiteral("pencil grain %1 is not distinct from ink %2").arg(pencil.grain).arg(ink.grain)));
+    QVERIFY2(airbrush.rimRatio < 0.55 && airbrush.maxAlpha < 160 && airbrush.width > 50,
+             qPrintable(QStringLiteral("airbrush is not soft/low-flow: rim %1 max %2 width %3")
+                            .arg(airbrush.rimRatio).arg(airbrush.maxAlpha).arg(airbrush.width)));
+    QVERIFY2(small.width <= 8 && small.maxAlpha > 0,
+             qPrintable(QStringLiteral("small low-pressure nib is too wide: %1 px").arg(small.width)));
+    QVERIFY2(large.width >= 150, qPrintable(QStringLiteral("large wash is too narrow: %1 px").arg(large.width)));
+    QVERIFY2(highSpacing.gaps == 0 && highSpacing.width <= 46,
+             qPrintable(QStringLiteral("50% spacing did not meet: gaps %1 width %2")
+                            .arg(highSpacing.gaps).arg(highSpacing.width)));
+
+    const QString koma = files.filePath(QStringLiteral("artist-verification.koma"));
+    QVERIFY(app.workspace.saveToPath(koma));
+    QVERIFY(app.workspace.closeTab(0, true));
+    QVERIFY(app.workspace.openFromPath(koma));
+    auto* reopened = qobject_cast<CanvasDocument*>(app.workspace.document());
+    QVERIFY(reopened && reopened->layers() && reopened->layers()->layerAt(0));
+    const auto& reopenedTiles = reopened->layers()->layerAt(0)->tiles();
+    for (const auto& row : rows) {
+        const auto again = measureArtistRow(reopenedTiles, row.metrics.row);
+        QVERIFY2(again.maxAlpha == row.metrics.maxAlpha && again.gaps == row.metrics.gaps,
+                 qPrintable(QStringLiteral("%1 changed across save/reopen").arg(row.name)));
+    }
+
+    const QString reportPath = qEnvironmentVariable("KOMAPAINT_ARTIST_REPORT");
+    if (!reportPath.isEmpty()) {
+        QFile report(reportPath);
+        QVERIFY2(report.open(QIODevice::WriteOnly | QIODevice::Truncate), qPrintable(reportPath));
+        report.write((artistReport.join(u'\n') + u'\n').toUtf8());
+        report.close();
+    }
+
+    const QString sheetPath = qEnvironmentVariable("KOMAPAINT_ARTIST_SHEET");
+    if (!sheetPath.isEmpty()) {
+        const QImage canvasImage = artistCanvasImage(reopenedTiles, reopened->width(), reopened->height());
+        QImage sheet(1340, 1080, QImage::Format_RGB32);
+        sheet.fill(Qt::white);
+        QPainter painter(&sheet);
+        QFont font = painter.font();
+        font.setPointSize(10);
+        painter.setFont(font);
+        painter.setPen(Qt::black);
+        painter.drawText(20, 28, QStringLiteral("KomaPaint - integrated Brush Studio artist check (actual artwork canvas)"));
+        painter.drawImage(0, 50, canvasImage);
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            const auto& metrics = rows[i].metrics;
+            painter.drawText(1015, 50 + metrics.row - 8, authored[i].name);
+            painter.drawText(1015, 50 + metrics.row + 10,
+                             QStringLiteral("width %1 px | max alpha %2 | rim %3 | grain %4")
+                                 .arg(metrics.width).arg(metrics.maxAlpha)
+                                 .arg(metrics.rimRatio, 0, 'f', 2).arg(metrics.grain, 0, 'f', 1));
+        }
+        QStringList rowNames;
+        for (const auto& row : rows) rowNames << row.name;
+        painter.drawText(20, 1070,
+                         QStringLiteral("Rows, top to bottom: %1").arg(rowNames.join(QStringLiteral(" | "))));
+        painter.end();
+        QVERIFY2(sheet.save(sheetPath), qPrintable(sheetPath));
+    }
+
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(u'\n')));
 }
 

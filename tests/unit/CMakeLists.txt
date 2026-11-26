@@ -218,6 +218,9 @@ komapaint_add_test(test_native_brush_library TestNativeBrushLibrary.cpp)
 target_link_libraries(test_native_brush_library PRIVATE komapaint::app)
 komapaint_add_test(test_brush_ui TestBrushUi.cpp)
 target_sources(test_brush_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+# The human artist check opens the same .kb fixtures that ship in the ZIP.
+target_compile_definitions(test_brush_ui PRIVATE
+    KOMAPAINT_ARTIST_BRUSH_DIR="${CMAKE_SOURCE_DIR}/docs/testing/brushes")
 target_link_libraries(test_brush_ui PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
 
 # TEMPORARY: visual capture harness for the design pass (removed afterwards).
