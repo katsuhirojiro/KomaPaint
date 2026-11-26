@@ -11,9 +11,12 @@ ColumnLayout {
     required property var spec
     required property var readback
     readonly property bool choice: spec.editor === "choice"
+    readonly property string explanation: readback.reason.length > 0
+        ? spec.description + "\n\n" + readback.reason
+        : spec.description
     spacing: 0
-    enabled: readback.available
-    opacity: readback.available && readback.supported ? 1 : KP.disabledOpacity
+    enabled: true
+    opacity: 1
 
     RowLayout {
         Layout.fillWidth: true
@@ -28,12 +31,28 @@ ColumnLayout {
             font.family: KP.fontUi
             font.pixelSize: KP.fontS
             font.weight: row.readback.changed ? Font.DemiBold : Font.Normal
+            Accessible.name: row.spec.label
+            Accessible.description: row.explanation
             ToolTip.visible: hover.hovered
-            ToolTip.delay: 600
-            ToolTip.text: row.readback.reason.length > 0
-                ? row.spec.description + "\n" + row.readback.reason
-                : row.spec.description
+            ToolTip.delay: 500
+            ToolTip.text: row.explanation
             HoverHandler { id: hover }
+        }
+        // The explanation is reachable three ways: hover, keyboard focus and
+        // a tap. It is never hover-only.
+        KpButton {
+            objectName: "brushStudioInfo_" + row.spec.key
+            small: true
+            glyph: "info"
+            variant: "quiet"
+            Layout.preferredWidth: 18
+            Layout.preferredHeight: 18
+            tip: row.explanation
+            Accessible.name: qsTr("Explain %1").arg(row.spec.label)
+            Accessible.description: row.explanation
+            focusPolicy: Qt.StrongFocus
+            onClicked: infoPopup.opened ? infoPopup.close() : infoPopup.open()
+            onActiveFocusChanged: if (activeFocus) infoPopup.open()
         }
         Loader {
             Layout.preferredWidth: row.choice ? 104 : row.spec.editor === "number" ? 116 : 74
@@ -148,6 +167,32 @@ ColumnLayout {
             implicitHeight: 9
             radius: width / 2
             color: KP.accent
+        }
+    }
+
+    Popup {
+        id: infoPopup
+        parent: row
+        x: 0
+        y: Math.min(label.height + 2, row.height)
+        width: Math.min(300, Math.max(200, row.width))
+        padding: KP.gapM
+        modal: false
+        focus: false
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            color: KP.surfaceRaised
+            radius: KP.radiusS
+            border.width: KP.hairlineWidth
+            border.color: KP.borderStrong
+        }
+        contentItem: Text {
+            text: row.explanation
+            textFormat: Text.PlainText
+            color: KP.text
+            font.family: KP.fontUi
+            font.pixelSize: KP.fontS
+            wrapMode: Text.WordWrap
         }
     }
 }

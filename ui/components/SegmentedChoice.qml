@@ -6,6 +6,7 @@ import "../themes"
 Row {
     id: root
     property var options: []      // list of labels
+    property var explanations: [] // one sentence per label, shown on hover, focus and press
     property int currentIndex: 0
     signal chosen(int index)
     spacing: KP.gapXS
@@ -22,6 +23,12 @@ Row {
             height: KP.controlHeight
             hoverEnabled: true
             focusPolicy: Qt.TabFocus
+            readonly property string explanation: index < root.explanations.length ? root.explanations[index] : ""
+            Accessible.name: modelData
+            Accessible.description: explanation
+            ToolTip.text: explanation
+            ToolTip.visible: explanation.length > 0 && (hovered || activeFocus || pressed)
+            ToolTip.delay: 400
             onClicked: if (!current) root.chosen(index)
             background: Rectangle {
                 color: segment.current ? KP.accentWash

@@ -16,6 +16,10 @@ MenuItem {
     readonly property string labelText: parts[0].replace(/&&/g, "\u0000").replace(/&/g, "").replace(/\u0000/g, "&")
     readonly property string shortcutText: parts.length > 1 ? parts[1] : ""
     readonly property bool destructive: /delete|clear|remove|discard|reset/i.test(labelText)
+    property string explanation: ""
+    ToolTip.text: explanation.length > 0 ? explanation : labelText
+    ToolTip.visible: explanation.length > 0 && (hovered || highlighted || activeFocus)
+    ToolTip.delay: 500
 
     implicitHeight: KP.controlHeight + 2
     padding: 0

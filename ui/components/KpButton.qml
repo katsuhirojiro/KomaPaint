@@ -50,9 +50,11 @@ AbstractButton {
     Accessible.name: label.length > 0 ? label : tip
     Accessible.description: tip
 
+    // Explanations must not depend on a mouse: focus and press expose the same
+    // text for keyboard and touch users.
     ToolTip.text: tip
-    ToolTip.visible: hovered && tip.length > 0
-    ToolTip.delay: 500
+    ToolTip.visible: (hovered || activeFocus || pressed) && tip.length > 0
+    ToolTip.delay: hovered ? 500 : 0
 
     TextMetrics {
         id: metrics

@@ -10,6 +10,7 @@ KpMenu {
         delegate: KpMenuItem {
             required property var modelData
             text: modelData.label
+            explanation: modelData.description || ""
             objectName: "brushStudioAdd_" + modelData.name
             onTriggered: {
                 const kind = modelData.value

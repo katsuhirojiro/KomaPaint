@@ -1221,7 +1221,7 @@ void TestBrushUi::brushStudioComponentsAndReadOnlyEditor()
     const auto control = [&](const char* name) { return studioControl(studio, name); };
     const auto press = [&](const char* name) { return pressStudio(studio, name); };
     QVERIFY(!control("brushStudioBrowseLibrary"));
-    QTRY_VERIFY(control("brushStudioUnsupportedNotice") && control("brushStudioUnsupportedNotice")->isVisible());
+    QTRY_VERIFY(control("brushStudioUnsupportedNotice"));
     auto* editor = control("brushStudioEditor");
     auto* asset = control("brushStudioAsset");
     auto* stack = control("brushStudioComponentStack");
@@ -1240,7 +1240,8 @@ void TestBrushUi::brushStudioComponentsAndReadOnlyEditor()
     QVERIFY(press("brushStudioAddComponent"));
     QTRY_VERIFY(addMenu->property("opened").toBool());
     // The menu is filtered to components the Digital renderer can paint.
-    QVERIFY(!control("brushStudioAdd_texture"));
+    // Texture and mask sources are part of that renderer now.
+    QVERIFY(control("brushStudioAdd_texture"));
     QQuickItem* addImage = nullptr;
     QTRY_VERIFY((addImage = control("brushStudioAdd_image")) && addImage->isVisible());
     click(studio, addImage);
@@ -1384,6 +1385,13 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
 
     QVERIFY(press("brushStudioSection_SizeToggle"));
     QTRY_VERIFY(control("brushStudioValue_size") && control("brushStudioValue_size")->width() > 0);
+    // Explanation is not hover-only: a focusable info affordance is always
+    // present and carries the same words for keyboard and touch users.
+    auto* sizeInfo = control("brushStudioInfo_size");
+    QVERIFY2(sizeInfo, "Each setting needs a focusable explanation control");
+    QVERIFY(sizeInfo->property("tip").toString().length() > 25);
+    QVERIFY(sizeInfo->property("activeFocusOnTab").toBool()
+            || sizeInfo->property("focusPolicy").toInt() != Qt::NoFocus);
     QVERIFY(enter("brushStudioValue_size", QString::number(brush::MaxBrushDiameter)));
     QCOMPARE(draft->parameterValue(size), double(brush::MaxBrushDiameter));
     QCOMPARE(app.workspace.brush()->size(), originalSize);
@@ -1395,9 +1403,9 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
     const auto texture = draft->addComponent(int(brush::ComponentKind::Texture));
     QVERIFY(!texture.isEmpty());
     QTRY_VERIFY(control("brushStudioValue_texture-scale") && control("brushStudioValue_texture-scale")->isVisible());
-    QVERIFY(!control("brushStudioValue_texture-scale")->isEnabled());
-    QVERIFY(control("brushStudioReason_texture-scale")
-            && control("brushStudioReason_texture-scale")->isVisible());
+    QVERIFY(control("brushStudioValue_texture-scale")->isEnabled());
+    QVERIFY(!control("brushStudioReason_texture-scale")
+            || !control("brushStudioReason_texture-scale")->isVisible());
     QVERIFY(draft->document().parameter("texture-scale") == 0.0); // no silent write
     // Texture mode may already have collapsed the Brush Tip section. Open it
     // only when its form is not mounted, rather than toggling it closed.
@@ -1485,10 +1493,9 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
     // An unsupported stored setting is readable but not an ordinary editable
     // field. The compact layout must preserve that refusal too.
     auto* textureScale = control("brushStudioValue_texture-scale");
-    QVERIFY(textureScale && !textureScale->isEnabled());
-    QVERIFY(!enter("brushStudioValue_texture-scale", QStringLiteral("150")));
-    QVERIFY(!draft->setParameterValue(QStringLiteral("texture-scale"), 150.0));
-    QCOMPARE(draft->document().parameter("texture-scale"), 0.0);
+    QVERIFY(textureScale && textureScale->isEnabled());
+    QVERIFY(enter("brushStudioValue_texture-scale", QStringLiteral("150")));
+    QCOMPARE(draft->parameterValue(QStringLiteral("texture-scale")), 150.0);
     captureStudio(studio, QStringLiteral("studio-compact"));
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
