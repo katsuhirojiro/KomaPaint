@@ -125,7 +125,8 @@ double BrushRasterizer::shapedPressure(double pressure, double gamma)
 
 double BrushRasterizer::tipCoverage(BrushTip tip, double dx, double dy, double radius,
                                     std::int64_t x, std::int64_t y, double hardness,
-                                    double aspectRatio, double angleRadians)
+                                    double aspectRatio, double angleRadians,
+                                    int bristleCount, double bristleSpread)
 {
     const double aspect = std::clamp(aspectRatio, 1.0, 4.0);
     double lx = dx;
@@ -155,10 +156,12 @@ double BrushRasterizer::tipCoverage(BrushTip tip, double dx, double dy, double r
     case BrushTip::Bristle: {
         // Multi-tuft bristle profile across the brush width (lx) with organic taper.
         const double normX = radius > 0.0 ? std::clamp(lx / radius, -1.0, 1.0) : 0.0;
-        const double tuftWave = 0.5 + 0.5 * std::cos(normX * 3.14159265358979323846 * 9.0);
+        const int count = bristleCount > 0 ? std::min(bristleCount, 512) : 9;
+        const double tuftWave = 0.5 + 0.5 * std::cos(normX * 3.14159265358979323846 * count);
         const std::uint32_t n = hash2d(x, y, 17U);
         const double micro = 0.55 + 0.45 * ((n & 255U) / 255.0);
-        const double bristleMask = std::clamp(0.32 + 0.68 * std::pow(tuftWave, 0.7) * micro, 0.0, 1.0);
+        const double depth = std::clamp(0.68 + 0.22 * clamp01(bristleSpread), 0.0, 1.0);
+        const double bristleMask = std::clamp(1.0 - depth * (1.0 - std::pow(tuftWave, 0.7) * micro), 0.0, 1.0);
         return coverage * bristleMask;
     }
     case BrushTip::Graphite: {
@@ -370,10 +373,12 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
         }
         case BrushTip::Bristle: {
             const double normX = radius > 0.0 ? std::clamp(lx / radius, -1.0, 1.0) : 0.0;
-            const double tuftWave = 0.5 + 0.5 * std::cos(normX * 3.14159265358979323846 * 9.0);
+            const int count = b.bristleCount > 0 ? std::min(b.bristleCount, 512) : 9;
+            const double tuftWave = 0.5 + 0.5 * std::cos(normX * 3.14159265358979323846 * count);
             const std::uint32_t n = hash2d(x, y, 17U);
             const double micro = 0.55 + 0.45 * ((n & 255U) / 255.0);
-            const double bristleMask = std::clamp(0.32 + 0.68 * std::pow(tuftWave, 0.7) * micro, 0.0, 1.0);
+            const double depth = std::clamp(0.68 + 0.22 * clamp01(b.bristleSpread), 0.0, 1.0);
+            const double bristleMask = std::clamp(1.0 - depth * (1.0 - std::pow(tuftWave, 0.7) * micro), 0.0, 1.0);
             return coverage * bristleMask;
         }
         case BrushTip::Graphite: {

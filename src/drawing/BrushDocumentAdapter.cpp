@@ -141,6 +141,8 @@ struct ResolvedValues {
     double strokeDelay;
     bool followDirection;
     bool antialias;
+    int bristleCount;
+    double bristleSpread;
     bool erase;
     bool texturedTip;
     bool persistentReservoir;
@@ -184,6 +186,8 @@ ResolvedValues resolve(const brush::LegacyBrush& b) {
     v.strokeDelay = 0.0;
     v.followDirection = b.followDirection;
     v.antialias = true;
+    v.bristleCount = 0;
+    v.bristleSpread = 0.0;
     v.erase = b.erase;
     v.texturedTip = b.tipStyle != "round";
     v.persistentReservoir = b.persistentReservoir;
@@ -259,6 +263,8 @@ ResolvedValues resolve(const brush::BrushDocument& doc) {
     v.strokeDelay = stored(doc, "stroke-delay");
     v.followDirection = stored(doc, "follow-direction") >= 0.5;
     v.antialias = stored(doc, "antialias") >= 0.5;
+    v.bristleCount = static_cast<int>(std::lround(stored(doc, "bristle-count")));
+    v.bristleSpread = stored(doc, "bristle-spread") / 100.0;
     v.erase = false;   // the tool decides; a component's own eraser is a request
     v.texturedTip = static_cast<int>(std::lround(tipShape(doc))) != 0;
     v.persistentReservoir = stored(doc, "persistent-reservoir") >= 0.5;
@@ -304,6 +310,8 @@ BrushDefinition digitalFrom(const ResolvedValues& v, double tipShapeValue,
     definition.spacingJitter = std::clamp(v.spacingJitter / 100.0, 0.0, 1.0);
     definition.strokeDelay = std::clamp(v.strokeDelay / 100.0, 0.0, 1.0);
     definition.antialias = v.antialias;
+    definition.bristleCount = std::clamp(v.bristleCount, 0, 512);
+    definition.bristleSpread = std::clamp(v.bristleSpread, 0.0, 1.0);
     definition.erase = erase;
     definition.color = runtime.color;
     return definition;
@@ -337,7 +345,14 @@ material::BrushDefinition materialFrom(material::BrushDefinition preset,
     preset.releaseRate *= v.flow / 100.0;
     preset.contactTransfer *= v.opacity / 100.0 * (erase ? v.flow / 100.0 : 1.0);
     preset.autoReloadOnStroke = !v.persistentReservoir;
-    if (v.texturedTip && wasRound) {
+    if (v.bristleCount > 0) {
+        // An explicit bristle bundle wins over the preset's tip geometry, so the
+        // same authored count reaches both renderers.
+        preset.tip = material::TipGeometry::Bristle;
+        preset.bristleCount = static_cast<std::uint32_t>(std::clamp(v.bristleCount, 1, 512));
+        preset.bristleSpread = std::clamp(v.bristleSpread, 0.0, 1.0);
+        preset.textureStrength = std::max(preset.textureStrength, 0.25);
+    } else if (v.texturedTip && wasRound) {
         preset.tip = material::TipGeometry::Bristle;
         preset.bristleCount = 13;
         preset.bristleSpread = 0.55;

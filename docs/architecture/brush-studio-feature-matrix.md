@@ -90,8 +90,8 @@ whereas taper, delay, masking and bitmap grain belong to Digital.
 | `pressure-amount` | Pressure to load | no | yes |
 | `pressure-contact` | Pressure to contact | no | yes |
 | `persistent-reservoir` | Keep the reservoir | no | yes |
-| `bristle-count` | Bristle count | no | no |
-| `bristle-spread` | Bristle spread | no | no |
+| `bristle-count` | Bristle count | yes | yes |
+| `bristle-spread` | Bristle spread | yes | yes |
 | `particle-count` | Particles | no | no |
 | `particle-spread` | Particle spread | no | no |
 | `sequence-step` | Sequence step | yes | no |
@@ -163,7 +163,8 @@ randomization run per stamp through `BrushEvaluator`.
 | Stabilisation | yes | native document value feeds `StrokeStabilizer`; quick setting is the fallback |
 | Accumulation off | no | repeated dabs always build up |
 | Hue / saturation / brightness variation | yes | deterministic per-stamp HSV shift; seeded with the stroke |
-| Bristle count/spread, particle count/spread | no | stored only |
+| Bristle count/spread | yes | shapes the procedural Bristle tip |
+| Particle count/spread | no | stored only |
 
 ## Studio and library behaviour
 
@@ -189,7 +190,7 @@ These are refused or reported, never guessed at:
 - dynamics and randomization the stroke loop cannot reproduce;
 - generators other than `Continuous` and their overrides;
 - Height and Mask component blends;
-- accumulation off, bristle and particle parameter families.
+- accumulation off, particle count/spread, and particle generators.
 
 The values are retained on save so a later build can implement them without a
 format migration, and the Studio inspector marks each one unavailable rather

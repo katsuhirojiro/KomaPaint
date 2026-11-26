@@ -565,7 +565,10 @@ itself native. The Studio window's save result distinguishes saved-and-installed
 saved-with-install-failure, saved-but-unsupported and save-only, and no longer
 reports Realistic as inherently save-only.
 
-Three more Digital settings now reach pixels. **Hue**, **saturation** and
+Five more Digital settings now reach pixels. **Bristle count** and **bristle
+spread** shape the procedural Bristle tip: the count changes the number of tufts
+across the width and the spread deepens their separation, with the legacy
+nine-tuft profile preserved at count 0. **Hue**, **saturation** and
 **brightness variation** shift the foreground colour deterministically from
 mark to mark, seeded from the same stroke seed as spacing and scatter, so a
 replayed stroke reproduces the same colours. **Stroke delay** holds stamps until

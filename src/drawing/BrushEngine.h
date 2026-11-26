@@ -17,6 +17,8 @@ struct BrushDefinition {
     double spacing = 0.15;        // fraction of diameter
     std::uint32_t color = 0xff000000; // straight ARGB
     BrushTip tip = BrushTip::Round;
+    int bristleCount = 0;         // 0 = the built-in nine-tuft profile
+    double bristleSpread = 0.0;   // 0..1 how deeply the tufts separate
     double hardness = 1;          // 1 = crisp edge; 0 = fades from the centre to the rim
     bool antialias = true;        // false = hard one-bit coverage on the tip rim
     bool erase = false;           // remove paint from the layer instead of depositing colour
@@ -94,7 +96,8 @@ public:
     static double shapedPressure(double pressure, double gamma);
     static double tipCoverage(BrushTip tip, double dx, double dy, double radius,
                               std::int64_t x, std::int64_t y, double hardness = 1,
-                              double aspectRatio = 1.0, double angleRadians = 0.0);
+                              double aspectRatio = 1.0, double angleRadians = 0.0,
+                              int bristleCount = 0, double bristleSpread = 0.0);
     static std::uint32_t deposit(std::uint32_t destination, std::uint32_t color, double amount);
     // Blends a premultiplied destination pixel toward a carried/mixed premultiplied sample.
     static std::uint32_t blend(std::uint32_t destination, std::uint32_t carryPremul, double amount);

@@ -39,8 +39,7 @@ int main()
         if (info.name == std::string("taper-in") || info.name == std::string("taper-out") ||
             info.name == std::string("spacing-jitter") || info.name == std::string("stroke-delay"))
             CHECK(supported);
-        if (info.name == std::string("bristle-count") ||
-            info.name == std::string("accumulate") ||
+        if (info.name == std::string("accumulate") ||
             info.name == std::string("particle-count"))
             CHECK(!supported);
         // Realistic reads the procedural component's tip shape, but not the
@@ -50,7 +49,8 @@ int main()
             info.name == std::string("tip-angle") || info.name == std::string("follow-direction") ||
             info.name == std::string("hardness") || info.name == std::string("stabilization") ||
             info.name == std::string("scatter-x") || info.name == std::string("rotation-offset") ||
-            info.name == std::string("tip-shape"))
+            info.name == std::string("tip-shape") || info.name == std::string("bristle-count") ||
+            info.name == std::string("bristle-spread"))
             CHECK(supported);
     }
 

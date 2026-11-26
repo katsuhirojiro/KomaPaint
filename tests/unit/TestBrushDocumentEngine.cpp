@@ -803,6 +803,36 @@ void testTaperAndSpacingVariationReachPixels() {
     CHECK(paintJitter(31u) != paintJitter(32u));
 }
 
+void testBristleCountAndSpreadShapeTheTip() {
+    LegacyBrush legacy;
+    legacy.size = 32.0;
+    legacy.opacity = 100.0;
+    legacy.flow = 100.0;
+    legacy.spacing = 20.0;
+    legacy.hardness = 100.0;
+    legacy.tipStyle = "bristle";
+    auto document = BrushDocument::fromLegacy(legacy, "brush-bristle", "Bristle");
+    StrokeRuntime runtime;
+    runtime.color = 0xff000000;
+    auto render = [&](double count, double spread) {
+        CHECK(document.setParameter("bristle-count", count));
+        CHECK(document.setParameter("bristle-spread", spread));
+        SparseTileStore store(48, 48);
+        CHECK(BrushRasterizer::dab(store, drawing::digitalDefinition(document, runtime),
+                                   {24.0, 24.0, 1.0}) == SparseTileStore::WriteResult::Changed);
+        std::uint64_t hash = 1469598103934665603ull;
+        for (int y = 0; y < 48; ++y)
+            for (int x = 0; x < 48; ++x) {
+                hash ^= store.pixel({x, y}).value_or(0U);
+                hash *= 1099511628211ull;
+            }
+        return hash;
+    };
+    CHECK(render(4.0, 0.0) != render(40.0, 0.0));
+    CHECK(render(12.0, 0.0) != render(12.0, 100.0));
+    CHECK(render(0.0, 0.0) == render(0.0, 0.0));
+}
+
 void testColourVariationChangesEachMark() {
     LegacyBrush legacy;
     legacy.size = 10.0;
@@ -955,6 +985,7 @@ int main() {
     testRandomizationReachesThePixels();
     testDocumentBrushKeepsItsSpacingThroughLowPressure();
     testTaperAndSpacingVariationReachPixels();
+    testBristleCountAndSpreadShapeTheTip();
     testColourVariationChangesEachMark();
     testAntialiasingCanBeDisabled();
     testStrokeDelayTrailsThePointer();

@@ -19,7 +19,8 @@ constexpr std::string_view kBrushValues[] = {
     "taper-in", "taper-out", "spacing-jitter", "stroke-delay", "antialias",
     "texture-strength", "texture-scale", "texture-rotation", "texture-offset-x", "texture-offset-y",
     "texture-contrast", "texture-depth",
-    "hue-variation", "saturation-variation", "brightness-variation"
+    "hue-variation", "saturation-variation", "brightness-variation",
+    "bristle-count", "bristle-spread"
 };
 
 constexpr std::string_view kRandomValues[] = {
@@ -108,7 +109,7 @@ std::string digitalBlendReason(brush::ComponentBlend blend) {
 bool realisticSupportsParameter(std::string_view name) {
     constexpr std::string_view values[] = {
         "size", "opacity", "flow", "spacing", "hardness", "aspect", "tip-angle", "tip-shape",
-        "stabilization", "follow-direction", "paint-load", "pigment-concentration", "water-amount",
+        "stabilization", "follow-direction", "bristle-count", "bristle-spread", "paint-load", "pigment-concentration", "water-amount",
         "paint-body", "pickup", "depletion", "wetness", "drying-speed", "tooth-response",
         "granulation", "edge-accumulation", "pressure-amount", "pressure-contact",
         "persistent-reservoir"
