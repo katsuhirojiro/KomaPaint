@@ -49,6 +49,7 @@ private slots:
     void componentOrderAndSelectionFollowTheDocument();
     void componentModesDescribeRealResources();
     void importsTipPixelsAsOneUndoableEdit();
+    void paintsPixelsAndLinksMasks();
     void groupsPickModeAndMembers();
     void regroupedComponentsStayConsistentThroughSave();
     void settingsComeFromTheRegistry();
@@ -81,13 +82,14 @@ void TestBrushStudioModel::newBrushIsPaintable() {
     QCOMPARE(model.selectedIndex(), 0);
     QCOMPARE(model.selectedId(), QStringLiteral("c1"));
     // The authoring menus offer only combinations the Digital renderer paints.
-    QCOMPARE(int(model.componentKinds().size()), 4);
+    QCOMPARE(int(model.componentKinds().size()), 7);
     for (const auto& kind : model.componentKinds()) {
         const auto name = kind.toMap().value(QStringLiteral("name")).toString();
-        QVERIFY(name != QStringLiteral("texture") && name != QStringLiteral("particle") &&
-                name != QStringLiteral("bristle") && name != QStringLiteral("mask"));
+        QVERIFY(name != QStringLiteral("particle") && name != QStringLiteral("bristle-group") &&
+                name != QStringLiteral("pattern") && name != QStringLiteral("sequence"));
+        QVERIFY(!kind.toMap().value(QStringLiteral("description")).toString().isEmpty());
     }
-    QCOMPARE(int(model.componentBlends().size()), 1);
+    QCOMPARE(int(model.componentBlends().size()), 4);
     QCOMPARE(model.componentBlends().front().toMap().value(QStringLiteral("label")).toString(),
              QStringLiteral("Normal"));
     QVERIFY(!model.canUndo());
@@ -288,6 +290,42 @@ void TestBrushStudioModel::importsTipPixelsAsOneUndoableEdit() {
     BrushStudioModel reloaded;
     QVERIFY(reloaded.openDraft(saved));
     QVERIFY(reloaded.document() == after);
+}
+
+void TestBrushStudioModel::paintsPixelsAndLinksMasks() {
+    BrushStudioModel model;
+    const auto before = model.document();
+    // Luminance on an opaque canvas is coverage for a grayscale tip.
+    const QVariantList painted{0xff000000u, 0xffffffffu, 0xffffffffu, 0xff000000u};
+    QVERIFY2(model.setTipPixels(painted, 2, 2), qPrintable(model.error()));
+    QVERIFY(model.selectedResource());
+    QCOMPARE(model.selectedResource()->kind, brush::ResourceKind::Grayscale8);
+    QCOMPARE(model.selectedResource()->pixels(), (std::vector<std::uint8_t>{0, 255, 255, 0}));
+    QVERIFY(model.canUndo());
+    model.undo();
+    QVERIFY(model.document() == before);
+    model.redo();
+    QVERIFY(model.selectedResource()->pixels() == (std::vector<std::uint8_t>{0, 255, 255, 0}));
+    QVERIFY(!model.setTipPixels({0xffffffffu}, 2, 2)); // wrong count is refused
+    QVERIFY(!model.error().isEmpty());
+
+    const auto texture = model.addComponent(int(brush::ComponentKind::GrayscaleMask));
+    QVERIFY(!texture.isEmpty());
+    const QString tip = QStringLiteral("c1");
+    QVERIFY(model.setComponentMask(tip, texture));
+    QCOMPARE(QString::fromStdString(model.document().component(tip.toStdString())->maskComponentId),
+             texture);
+    QVERIFY(!model.setComponentMask(tip, tip)); // a mark cannot mask itself
+    QVERIFY(model.maskCandidates().size() >= 1);
+    model.setSelectedIndex(0);
+    QVERIFY(!model.loadSelectedPixels().value(QStringLiteral("rgba")).toList().isEmpty());
+
+    const auto outer = model.createGroupInParent(QStringLiteral("Leaves"), QString());
+    const auto inner = model.createGroupInParent(QStringLiteral("Leaf detail"), outer);
+    QVERIFY(!outer.isEmpty() && !inner.isEmpty());
+    QVERIFY(model.setGroupParent(inner, outer));
+    QVERIFY(!model.setGroupParent(outer, inner)); // no group cycles
+    QCOMPARE(int(model.groups().size()), 2);
 }
 
 void TestBrushStudioModel::groupsPickModeAndMembers() {

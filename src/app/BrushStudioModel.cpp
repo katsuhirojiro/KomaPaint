@@ -118,6 +118,47 @@ QString componentKindLabel(ComponentKind kind) {
     return {};
 }
 
+QString componentKindDescription(ComponentKind kind) {
+    switch (kind) {
+    case ComponentKind::Tip:             return BrushStudioModel::tr("A grayscale shape that controls the outline of the mark.");
+    case ComponentKind::Image:           return BrushStudioModel::tr("A grayscale image used as the body of a mark, such as a scanned texture or drawn tip.");
+    case ComponentKind::Texture:         return BrushStudioModel::tr("A reusable grain or pattern. Attach it as a mask to break up marks or use it as a texture source.");
+    case ComponentKind::AlphaMask:       return BrushStudioModel::tr("A transparent-to-opaque image that hides parts of another mark.");
+    case ComponentKind::GrayscaleMask:   return BrushStudioModel::tr("A grayscale image whose light values keep paint and dark values hide it.");
+    case ComponentKind::ColourImage:     return BrushStudioModel::tr("A full-colour stamp, such as a leaf, petal or painted dab.");
+    case ComponentKind::ProceduralShape: return BrushStudioModel::tr("A ready-made tip shape drawn by the engine instead of a stored image.");
+    case ComponentKind::Particle:        return BrushStudioModel::tr("A mark emitted as separate particles for spray, smoke or debris.");
+    case ComponentKind::BristleGroup:    return BrushStudioModel::tr("A bundle of bristle marks that separates and spreads under pressure.");
+    case ComponentKind::Pattern:         return BrushStudioModel::tr("A repeating tile used as texture across the mark.");
+    case ComponentKind::Sequence:        return BrushStudioModel::tr("A series of images advanced along a stroke, like an animated stamp.");
+    }
+    return {};
+}
+
+QString selectionModeDescription(SelectionMode mode) {
+    switch (mode) {
+    case SelectionMode::All:         return BrushStudioModel::tr("Every mark in the group is drawn at each stamp.");
+    case SelectionMode::Random:      return BrushStudioModel::tr("One mark is chosen at random for each stamp.");
+    case SelectionMode::Weighted:    return BrushStudioModel::tr("One mark is chosen at random, with heavier marks appearing more often.");
+    case SelectionMode::Sequence:    return BrushStudioModel::tr("Marks are drawn in order, advancing along the stroke.");
+    case SelectionMode::Alternating: return BrushStudioModel::tr("Marks take turns from stamp to stamp.");
+    case SelectionMode::Combination: return BrushStudioModel::tr("A requested number of different marks is chosen together at each stamp.");
+    }
+    return {};
+}
+
+QString blendDescription(ComponentBlend blend) {
+    switch (blend) {
+    case ComponentBlend::Normal:  return BrushStudioModel::tr("Place this mark over the paint below it.");
+    case ComponentBlend::Multiply:return BrushStudioModel::tr("Darken by multiplying the mark with the paint below, like coloured glass.");
+    case ComponentBlend::Screen:  return BrushStudioModel::tr("Lighten by screening the mark over the paint below.");
+    case ComponentBlend::Overlay: return BrushStudioModel::tr("Increase contrast by mixing multiply and screen according to the paint below.");
+    case ComponentBlend::Height:  return BrushStudioModel::tr("Apply the mark height to realistic paint. Available in the Realistic renderer only.");
+    case ComponentBlend::Mask:    return BrushStudioModel::tr("Use the mark only as a mask. Available in the Realistic renderer only.");
+    }
+    return {};
+}
+
 bool isTexture(ComponentKind kind) {
     return kind == ComponentKind::Texture || kind == ComponentKind::Pattern;
 }
@@ -278,6 +319,7 @@ QVariantMap BrushStudioModel::componentRow(int index) const {
     map.insert(QStringLiteral("kindName"), QString::fromUtf8(brush::toString(component.kind)));
     map.insert(QStringLiteral("kindLabel"), componentKindLabel(component.kind));
     map.insert(QStringLiteral("texture"), isTexture(component.kind));
+    map.insert(QStringLiteral("colour"), component.kind == ComponentKind::ColourImage);
     const auto* resource = m_document.resource(component.resourceId);
     map.insert(QStringLiteral("resourceWidth"), resource ? resource->width : 0);
     map.insert(QStringLiteral("resourceHeight"), resource ? resource->height : 0);
@@ -361,6 +403,19 @@ QVariantList BrushStudioModel::groups() const {
     return list;
 }
 
+QVariantList BrushStudioModel::maskCandidates() const {
+    QVariantList list;
+    for (const auto& component : m_document.components) {
+        if (!isMaskSource(component.kind)) continue;
+        list.append(QVariantMap{
+            {QStringLiteral("id"), QString::fromStdString(component.id)},
+            {QStringLiteral("name"), QString::fromStdString(component.name)},
+            {QStringLiteral("kindLabel"), componentKindLabel(component.kind)},
+        });
+    }
+    return list;
+}
+
 QVariantList BrushStudioModel::componentKinds() const {
     QVariantList list;
     for (ComponentKind kind : kComponentKinds) {
@@ -371,6 +426,7 @@ QVariantList BrushStudioModel::componentKinds() const {
         map.insert(QStringLiteral("value"), kindIndex(kind));
         map.insert(QStringLiteral("name"), QString::fromUtf8(brush::toString(kind)));
         map.insert(QStringLiteral("label"), componentKindLabel(kind));
+        map.insert(QStringLiteral("description"), componentKindDescription(kind));
         list.append(map);
     }
     return list;
@@ -385,7 +441,9 @@ QVariantList BrushStudioModel::componentBlends() const {
         if (!drawing::digitalSupportsBlend(blend)) continue;
         QString label = blendName(blend);
         if (!label.isEmpty()) label[0] = label[0].toUpper();
-        list.append(QVariantMap{{QStringLiteral("value"), int(blend)}, {QStringLiteral("label"), label}});
+        list.append(QVariantMap{{QStringLiteral("value"), int(blend)},
+                                {QStringLiteral("label"), label},
+                                {QStringLiteral("description"), blendDescription(blend)}});
     }
     return list;
 }
@@ -396,6 +454,10 @@ QVariantList BrushStudioModel::selectionModes() const {
         QVariantMap map;
         map.insert(QStringLiteral("value"), int(mode));
         map.insert(QStringLiteral("name"), QString::fromUtf8(brush::toString(mode)));
+        QString label = QString::fromUtf8(brush::toString(mode));
+        if (!label.isEmpty()) label[0] = label[0].toUpper();
+        map.insert(QStringLiteral("label"), label);
+        map.insert(QStringLiteral("description"), selectionModeDescription(mode));
         list.append(map);
     }
     return list;
@@ -439,6 +501,11 @@ bool isColourStamp(ComponentKind kind) {
     return kind == ComponentKind::Image || kind == ComponentKind::ColourImage;
 }
 
+bool isMaskSource(ComponentKind kind) {
+    return kind == ComponentKind::Texture || kind == ComponentKind::AlphaMask ||
+           kind == ComponentKind::GrayscaleMask;
+}
+
 brush::BrushResource makeDotResource(const QString& name, bool colour) {
     brush::BrushResource resource;
     resource.name = name.toStdString();
@@ -466,7 +533,7 @@ brush::BrushResource makeDotResource(const QString& name, bool colour) {
 bool BrushStudioModel::canImportTipImage() const {
     if (m_selectedIndex < 0 || std::size_t(m_selectedIndex) >= m_document.components.size()) return false;
     const auto kind = m_document.components[std::size_t(m_selectedIndex)].kind;
-    return kind == ComponentKind::Tip || isColourStamp(kind);
+    return kind == ComponentKind::Tip || isColourStamp(kind) || isMaskSource(kind);
 }
 
 bool BrushStudioModel::importTipImage(const QUrl& url) try {
@@ -520,6 +587,94 @@ bool BrushStudioModel::importTipImage(const QUrl& url) try {
     return fail(tr("Not enough memory to import the tip image."));
 } catch (const std::length_error&) {
     return fail(tr("This tip image is too large to import on this system."));
+}
+
+QVariantMap BrushStudioModel::loadSelectedPixels() const {
+    const auto* resource = selectedResource();
+    if (!resource || resource->pixels.empty() || resource->width <= 0 || resource->height <= 0) return {};
+    const auto count = std::size_t(resource->width) * std::size_t(resource->height);
+    QVariantList rgba;
+    rgba.reserve(qsizetype(count));
+    const auto* data = resource->pixels.data();
+    for (std::size_t i = 0; i < count; ++i) {
+        std::uint32_t r = 255, g = 255, b = 255, a = 255;
+        if (resource->kind == brush::ResourceKind::Grayscale8) {
+            a = data[i];
+        } else {
+            r = data[i * 4];
+            g = data[i * 4 + 1];
+            b = data[i * 4 + 2];
+            a = data[i * 4 + 3];
+        }
+        rgba.append((a << 24) | (r << 16) | (g << 8) | b);
+    }
+    return QVariantMap{{QStringLiteral("width"), resource->width},
+                       {QStringLiteral("height"), resource->height},
+                       {QStringLiteral("rgba"), rgba}};
+}
+
+bool BrushStudioModel::setTipPixels(const QVariantList& rgba, int width, int height) try {
+    if (m_selectedIndex < 0 || std::size_t(m_selectedIndex) >= m_document.components.size())
+        return fail(tr("Select a tip, image or mask component before painting its pixels."));
+    if (width <= 0 || height <= 0 || rgba.size() != qsizetype(width) * qsizetype(height))
+        return fail(tr("The painted tip has an invalid size."));
+    const auto& component = m_document.components[std::size_t(m_selectedIndex)];
+    const bool colour = isColourStamp(component.kind) && !isMaskSource(component.kind);
+    brush::BrushResource resource;
+    resource.name = "Painted tip";
+    resource.kind = colour ? brush::ResourceKind::Rgba8 : brush::ResourceKind::Grayscale8;
+    resource.width = width;
+    resource.height = height;
+    const auto bytes = resource.expectedBytes();
+    if (!bytes || bytes > std::numeric_limits<std::uint32_t>::max())
+        return fail(tr("The painted tip does not fit the .kb pixel representation."));
+    if (std::uint64_t(width) * std::uint64_t(height) > std::numeric_limits<std::size_t>::max() / 16 ||
+        !systemMemoryAvailable(static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 16))
+        return fail(tr("Not enough memory for the painted tip."));
+    std::vector<std::uint8_t> buffer(bytes);
+    bool hasAlpha = false;
+    for (const auto& value : rgba) {
+        bool ok = false;
+        const auto packed = value.toUInt(&ok);
+        if (!ok) return fail(tr("The painted tip contains an invalid pixel."));
+        hasAlpha = hasAlpha || ((packed >> 24) & 255U) != 255U;
+    }
+    for (qsizetype i = 0; i < rgba.size(); ++i) {
+        bool ok = false;
+        const auto packed = rgba.at(i).toUInt(&ok);
+        const auto r = (packed >> 16) & 255U;
+        const auto g = (packed >> 8) & 255U;
+        const auto b = packed & 255U;
+        const auto a = (packed >> 24) & 255U;
+        if (colour) {
+            const auto offset = std::size_t(i) * 4u;
+            buffer[offset] = static_cast<std::uint8_t>(r);
+            buffer[offset + 1] = static_cast<std::uint8_t>(g);
+            buffer[offset + 2] = static_cast<std::uint8_t>(b);
+            buffer[offset + 3] = static_cast<std::uint8_t>(a);
+        } else {
+            // A painted coverage mask can be transparent-on-black or a grey
+            // canvas. Alpha wins when present; otherwise luminance is the
+            // coverage the artist sees.
+            const auto luminance = static_cast<unsigned>(std::lround(0.2126 * r + 0.7152 * g + 0.0722 * b));
+            buffer[std::size_t(i)] = static_cast<std::uint8_t>(hasAlpha ? a : std::min(255U, luminance));
+        }
+    }
+    resource.setPixels(std::move(buffer));
+    return edit("Paint tip", [&] {
+        auto& selected = m_document.components[std::size_t(m_selectedIndex)];
+        const auto oldResource = selected.resourceId;
+        resource.id = m_document.allocateId("r");
+        selected.resourceId = resource.id;
+        if (!m_document.addResource(resource)) return false;
+        if (!oldResource.empty() && m_document.resourceUsage(oldResource) == 0)
+            std::erase_if(m_document.resources, [&](const auto& asset) { return asset.id == oldResource; });
+        return true;
+    });
+} catch (const std::bad_alloc&) {
+    return fail(tr("Not enough memory to store the painted tip."));
+} catch (const std::length_error&) {
+    return fail(tr("This painted tip is too large for this system."));
 }
 
 QString BrushStudioModel::addComponent(int kind) {
@@ -673,17 +828,62 @@ bool BrushStudioModel::setComponentWeight(const QString& id, double weight) {
     return changeSetting("Component weight", component->weight, weight);
 }
 
+bool BrushStudioModel::setComponentMask(const QString& id, const QString& maskId) {
+    auto* component = editableComponent(id);
+    if (!component) return false;
+    const std::string mask = maskId.toStdString();
+    if (!mask.empty()) {
+        if (mask == component->id) return fail(tr("A component cannot use itself as its mask."));
+        const auto* source = m_document.component(mask);
+        if (!source || !isMaskSource(source->kind))
+            return fail(tr("Choose a texture or mask component for this mark."));
+        if (source->resourceId.empty() || !m_document.resource(source->resourceId))
+            return fail(tr("The chosen texture or mask has no pixels."));
+    }
+    return changeSetting("Component mask", component->maskComponentId, mask);
+}
+
 QString BrushStudioModel::createGroup(const QString& name) {
+    return createGroupInParent(name, {});
+}
+
+QString BrushStudioModel::createGroupInParent(const QString& name, const QString& parentId) {
+    if (!parentId.isEmpty() && !m_document.group(parentId.toStdString())) {
+        fail(tr("There is no parent group with that id."));
+        return {};
+    }
     QString id;
-    const bool added = edit("Add group", [this, &name, &id] {
+    const bool added = edit("Add group", [this, &name, &parentId, &id] {
         brush::ComponentGroup group;
         group.id = m_document.allocateId("g");
         group.name = name.isEmpty() ? "Group " + group.id : name.toStdString();
         group.mode = SelectionMode::All;
+        group.parentGroupId = parentId.toStdString();
         id = QString::fromStdString(group.id);
         return m_document.addGroup(std::move(group));
     });
     return added ? id : QString{};
+}
+
+bool BrushStudioModel::setGroupName(const QString& groupId, const QString& name) {
+    auto* group = m_document.group(groupId.toStdString());
+    if (!group) return fail(tr("There is no group with that id."));
+    if (name.trimmed().isEmpty()) return fail(tr("A group needs a name."));
+    return changeSetting("Rename group", group->name, name.toStdString());
+}
+
+bool BrushStudioModel::setGroupParent(const QString& groupId, const QString& parentId) {
+    auto* group = m_document.group(groupId.toStdString());
+    if (!group) return fail(tr("There is no group with that id."));
+    const std::string parent = parentId.toStdString();
+    if (!parent.empty()) {
+        if (!m_document.group(parent)) return fail(tr("There is no parent group with that id."));
+        for (const brush::ComponentGroup* cursor = m_document.group(parent); cursor;
+             cursor = cursor->parentGroupId.empty() ? nullptr : m_document.group(cursor->parentGroupId)) {
+            if (cursor->id == group->id) return fail(tr("A group cannot be placed inside itself."));
+        }
+    }
+    return changeSetting("Group parent", group->parentGroupId, parent);
 }
 
 bool BrushStudioModel::assignToGroup(const QString& componentId, const QString& groupId) {

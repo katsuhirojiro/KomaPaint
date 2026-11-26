@@ -115,11 +115,20 @@ Rectangle {
                                     font.pixelSize: KP.fontS
                                     text: qsTr("Blend")
                                 }
+                                KpButton {
+                                    small: true
+                                    glyph: "info"
+                                    variant: "quiet"
+                                    Layout.preferredWidth: 18
+                                    Layout.preferredHeight: 18
+                                    tip: qsTr("How this mark combines with paint already on the layer. Normal lays new colour over the old; Multiply, Screen and Overlay mix the colours like a layer blend mode.")
+                                }
                                 StudioChoice {
                                     id: blendChoice
                                     Layout.fillWidth: true
                                     objectName: "brushStudioComponentBlend"
                                     Accessible.name: qsTr("Component blend mode")
+                                    Accessible.description: qsTr("How this mark combines with paint already on the layer.")
                                     model: inspector.draft.componentBlends
                                     textRole: "label"
                                     valueRole: "value"
@@ -131,6 +140,82 @@ Rectangle {
                                     onActivated: function(index) {
                                         inspector.draft.setComponentBlend(inspector.draft.selectedId, valueAt(index))
                                         currentIndex = Qt.binding(function() { return blendChoice.fromSelection() })
+                                    }
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    color: KP.textMuted
+                                    font.family: KP.fontUi
+                                    font.pixelSize: KP.fontS
+                                    text: qsTr("Mask")
+                                }
+                                KpButton {
+                                    small: true
+                                    glyph: "info"
+                                    variant: "quiet"
+                                    Layout.preferredWidth: 18
+                                    Layout.preferredHeight: 18
+                                    tip: qsTr("A texture, pattern or grayscale image that hides parts of this mark. The mask is sampled inside the tip, so texture scale and rotation change the grain without moving the mark.")
+                                }
+                                StudioChoice {
+                                    id: maskChoice
+                                    Layout.fillWidth: true
+                                    objectName: "brushStudioComponentMask"
+                                    Accessible.name: qsTr("Component mask")
+                                    Accessible.description: qsTr("Choose a texture or grayscale image that hides parts of this mark.")
+                                    model: [{ id: "", name: qsTr("None") }].concat(inspector.draft.maskCandidates)
+                                    textRole: "name"
+                                    valueRole: "id"
+                                    enabled: inspector.draft.selectedIndex >= 0
+                                    currentIndex: {
+                                        const id = inspector.draft.selectedComponent.maskId || ""
+                                        if (!id) return 0
+                                        const at = inspector.draft.maskCandidates.findIndex(entry => entry.id === id)
+                                        return at < 0 ? 0 : at + 1
+                                    }
+                                    onActivated: function(index) {
+                                        inspector.draft.setComponentMask(inspector.draft.selectedId,
+                                                                         index === 0 ? "" : model[index].id)
+                                    }
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Text {
+                                    color: KP.textMuted
+                                    font.family: KP.fontUi
+                                    font.pixelSize: KP.fontS
+                                    text: qsTr("Group")
+                                }
+                                KpButton {
+                                    small: true
+                                    glyph: "info"
+                                    variant: "quiet"
+                                    Layout.preferredWidth: 18
+                                    Layout.preferredHeight: 18
+                                    tip: qsTr("The reusable group this mark belongs to. A group can choose one mark, a random mark, a weighted mix, a sequence or all of them for each stamp.")
+                                }
+                                StudioChoice {
+                                    id: groupChoice
+                                    Layout.fillWidth: true
+                                    objectName: "brushStudioComponentGroup"
+                                    Accessible.name: qsTr("Component group")
+                                    Accessible.description: qsTr("Choose the group this mark belongs to.")
+                                    model: [{ id: "", name: qsTr("No group") }].concat(inspector.draft.groups)
+                                    textRole: "name"
+                                    valueRole: "id"
+                                    enabled: inspector.draft.selectedIndex >= 0
+                                    currentIndex: {
+                                        const id = inspector.draft.selectedComponent.groupId || ""
+                                        if (!id) return 0
+                                        const at = inspector.draft.groups.findIndex(entry => entry.id === id)
+                                        return at < 0 ? 0 : at + 1
+                                    }
+                                    onActivated: function(index) {
+                                        inspector.draft.assignToGroup(inspector.draft.selectedId,
+                                                                      index === 0 ? "" : model[index].id)
                                     }
                                 }
                             }
@@ -147,6 +232,148 @@ Rectangle {
                                 font.family: KP.fontUi
                                 font.pixelSize: KP.fontXS
                                 wrapMode: Text.WordWrap
+                            }
+                            Item { Layout.preferredHeight: KP.gapS }
+                        }
+                    }
+                    PanelSection {
+                        id: groupsSection
+                        objectName: "brushStudioGroupsSection"
+                        Layout.fillWidth: true
+                        title: qsTr("Marks and groups")
+                        hint: qsTr("%1 groups").arg(inspector.draft.groups.length)
+                        headerHeight: KP.controlHeight
+                        collapsible: true
+                        expanded: false
+                        animateExpansion: false
+                        contentHeight: groupsForm.implicitHeight
+                        ColumnLayout {
+                            id: groupsForm
+                            width: parent.width
+                            height: implicitHeight
+                            spacing: KP.gapS
+                            Text {
+                                Layout.fillWidth: true
+                                text: qsTr("Groups reuse marks and choose how many marks one stamp draws.")
+                                color: KP.textSubtle
+                                font.family: KP.fontUi
+                                font.pixelSize: KP.fontXS
+                                wrapMode: Text.WordWrap
+                                Accessible.description: text
+                            }
+                            Repeater {
+                                model: inspector.draft.groups
+                                delegate: ColumnLayout {
+                                    id: groupRow
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    spacing: KP.gapXS
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: KP.gapS
+                                        KpTextField {
+                                            Layout.fillWidth: true
+                                            objectName: "brushStudioGroupName_" + groupRow.modelData.id
+                                            text: groupRow.modelData.name
+                                            Accessible.name: qsTr("Group name")
+                                            Accessible.description: qsTr("A reusable name for this collection of marks.")
+                                            onSubmitted: function(typed) {
+                                                if (typed.length > 0 && typed !== groupRow.modelData.name)
+                                                    inspector.draft.setGroupName(groupRow.modelData.id, typed)
+                                            }
+                                        }
+                                        Text {
+                                            text: qsTr("%1 marks").arg(groupRow.modelData.memberCount)
+                                            color: KP.textSubtle
+                                            font.family: KP.fontUi
+                                            font.pixelSize: KP.fontXS
+                                        }
+                                        KpButton {
+                                            small: true
+                                            glyph: "trash"
+                                            variant: "danger"
+                                            tip: qsTr("Remove this group; its marks stay in the brush")
+                                            onClicked: inspector.draft.removeGroup(groupRow.modelData.id)
+                                        }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: KP.gapS
+                                        Text {
+                                            text: qsTr("Choice")
+                                            color: KP.textMuted
+                                            font.family: KP.fontUi
+                                            font.pixelSize: KP.fontXS
+                                        }
+                                        KpButton {
+                                            small: true
+                                            glyph: "info"
+                                            variant: "quiet"
+                                            Layout.preferredWidth: 18
+                                            Layout.preferredHeight: 18
+                                            tip: qsTr("How a stamp chooses from this group: all marks, one random mark, a weighted pick, a repeating sequence, alternating marks or a combination.")
+                                        }
+                                        StudioChoice {
+                                            Layout.fillWidth: true
+                                            objectName: "brushStudioGroupMode_" + groupRow.modelData.id
+                                            Accessible.name: qsTr("Group choice")
+                                            Accessible.description: qsTr("How a stamp chooses marks from this group.")
+                                            model: inspector.draft.selectionModes
+                                            textRole: "label"
+                                            valueRole: "value"
+                                            currentIndex: model.findIndex(entry => entry.value === groupRow.modelData.mode)
+                                            onActivated: function(index) {
+                                                inspector.draft.setGroupMode(groupRow.modelData.id, valueAt(index))
+                                            }
+                                        }
+                                    }
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: KP.gapS
+                                        Text {
+                                            text: qsTr("Inside")
+                                            color: KP.textMuted
+                                            font.family: KP.fontUi
+                                            font.pixelSize: KP.fontXS
+                                        }
+                                        KpButton {
+                                            small: true
+                                            glyph: "info"
+                                            variant: "quiet"
+                                            Layout.preferredWidth: 18
+                                            Layout.preferredHeight: 18
+                                            tip: qsTr("Place this group inside another group. Nested groups can choose marks in layers, like branches made of leaf groups.")
+                                        }
+                                        StudioChoice {
+                                            Layout.fillWidth: true
+                                            objectName: "brushStudioGroupParent_" + groupRow.modelData.id
+                                            Accessible.name: qsTr("Parent group")
+                                            Accessible.description: qsTr("Place this group inside another group.")
+                                            model: [{ id: "", name: qsTr("Top level") }].concat(
+                                                inspector.draft.groups.filter(entry => entry.id !== groupRow.modelData.id))
+                                            textRole: "name"
+                                            valueRole: "id"
+                                            currentIndex: {
+                                                const id = groupRow.modelData.parentId || ""
+                                                if (!id) return 0
+                                                const at = model.findIndex(entry => entry.id === id)
+                                                return at < 0 ? 0 : at
+                                            }
+                                            onActivated: function(index) {
+                                                inspector.draft.setGroupParent(groupRow.modelData.id,
+                                                                               index === 0 ? "" : model[index].id)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            KpButton {
+                                objectName: "brushStudioNewGroup"
+                                small: true
+                                glyph: "plus"
+                                label: qsTr("New group")
+                                tip: qsTr("Create a reusable group. Select a mark afterwards to place it inside.")
+                                onClicked: inspector.draft.createGroupInParent(qsTr("New group"), "")
                             }
                             Item { Layout.preferredHeight: KP.gapS }
                         }

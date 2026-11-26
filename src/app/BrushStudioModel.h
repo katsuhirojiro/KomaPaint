@@ -39,6 +39,7 @@ class BrushStudioModel : public QObject {
     Q_PROPERTY(int componentCount READ componentCount NOTIFY componentsChanged)
     Q_PROPERTY(int hiddenComponentCount READ hiddenComponentCount NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList groups READ groups NOTIFY componentsChanged)
+    Q_PROPERTY(QVariantList maskCandidates READ maskCandidates NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList parameters READ parameters NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList settingSections READ settingSections CONSTANT)
     Q_PROPERTY(QVariantMap settingState READ settingState NOTIFY componentsChanged)
@@ -87,10 +88,16 @@ public:
     const brush::BrushResource* selectedResource() const;
     bool canImportTipImage() const;
     Q_INVOKABLE bool importTipImage(const QUrl& url);
+    // Replaces the selected component's resource with pixels painted in Studio.
+    // The list is flat RGBA8888 (r,g,b,a per pixel), row-major. Coverage kinds
+    // read alpha, or luminance when the canvas is opaque.
+    Q_INVOKABLE bool setTipPixels(const QVariantList& rgba, int width, int height);
+    Q_INVOKABLE QVariantMap loadSelectedPixels() const;
     int componentCount() const { return static_cast<int>(m_document.components.size()); }
     int hiddenComponentCount() const;
     Q_INVOKABLE bool selectComponentInMode(const QString& mode);
     QVariantList groups() const;
+    QVariantList maskCandidates() const;
     QVariantList componentKinds() const;
     QVariantList componentBlends() const;
     QVariantList selectionModes() const;
@@ -109,9 +116,13 @@ public:
     Q_INVOKABLE bool setComponentErases(const QString& id, bool erases);
     Q_INVOKABLE bool setComponentTransform(const QString& id, const QString& key, double value);
     Q_INVOKABLE bool setComponentWeight(const QString& id, double weight);
+    Q_INVOKABLE bool setComponentMask(const QString& id, const QString& maskId);
     Q_INVOKABLE QString createGroup(const QString& name);
+    Q_INVOKABLE QString createGroupInParent(const QString& name, const QString& parentId);
     Q_INVOKABLE bool assignToGroup(const QString& componentId, const QString& groupId);
     Q_INVOKABLE bool setGroupMode(const QString& groupId, int mode);
+    Q_INVOKABLE bool setGroupName(const QString& groupId, const QString& name);
+    Q_INVOKABLE bool setGroupParent(const QString& groupId, const QString& parentId);
     Q_INVOKABLE bool setGroupMembersPerStamp(const QString& groupId, int count);
     Q_INVOKABLE bool removeGroup(const QString& groupId);
 

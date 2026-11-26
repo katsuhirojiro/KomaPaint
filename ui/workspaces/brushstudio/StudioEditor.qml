@@ -15,12 +15,13 @@ Rectangle {
     readonly property bool matching: draft.selectedIndex >= 0 && (mode === "texture" ? !!selected.texture : mode === "tip" && !selected.texture)
     readonly property bool showZoom: width >= 350
     property real magnification: 1
+    property bool editingPixels: false
     color: KP.canvasBg
     clip: true
 
     Connections {
         target: editor.draft
-        function onSelectionChanged() { editor.modeOverride = ""; editor.magnification = 1 }
+        function onSelectionChanged() { editor.modeOverride = ""; editor.magnification = 1; editor.editingPixels = false }
     }
 
     function selectMode(next) {
@@ -145,6 +146,11 @@ Rectangle {
                         objectName: "brushStudioEditorModes"
                         Layout.preferredWidth: 152
                         options: [qsTr("Tip"), qsTr("Texture"), qsTr("Nodes")]
+                        explanations: [
+                            qsTr("Edit the marks that make the shape of the brush."),
+                            qsTr("Edit the reusable grain and pattern resources used by masks."),
+                            qsTr("Work with the structure of the brush: groups, selection and dynamics.")
+                        ]
                         currentIndex: editor.mode === "texture" ? 1 : editor.mode === "nodes" ? 2 : 0
                         onChosen: function(index) { editor.selectMode(["tip", "texture", "nodes"][index]) }
                     }
@@ -208,7 +214,15 @@ Rectangle {
                     magnification: editor.magnification
                     checkerLight: KP.transparencyLight
                     checkerDark: KP.transparencyDark
-                    visible: hasImage && editor.matching
+                    visible: hasImage && editor.matching && !editor.editingPixels
+                }
+                StudioTipEditor {
+                    objectName: "brushStudioTipEditor"
+                    anchors.fill: parent
+                    anchors.topMargin: KP.panelHeaderH
+                    draft: editor.draft
+                    visible: editor.editingPixels && editor.matching
+                    onImportImageRequested: editor.importImageRequested()
                 }
                 Text {
                     anchors.left: parent.left
@@ -255,8 +269,9 @@ Rectangle {
                     anchors.rightMargin: KP.gapS
                     Text {
                         Layout.fillWidth: true
-                        text: asset.visible ? (editor.mode === "texture" ? qsTr("Stored resource · repeated tiles · read-only") : qsTr("Stored resource · read-only"))
-                              : qsTr("Pixel and node tools unavailable")
+                        text: editor.editingPixels ? qsTr("Direct pixel painting · Save writes a .kb resource")
+                          : asset.visible ? (editor.mode === "texture" ? qsTr("Stored resource · repeated tiles") : qsTr("Stored resource"))
+                          : qsTr("Pixel and node tools unavailable")
                         elide: Text.ElideRight
                         verticalAlignment: Text.AlignVCenter
                         color: KP.textSubtle
@@ -264,11 +279,20 @@ Rectangle {
                         font.pixelSize: KP.fontXS
                     }
                     KpButton {
+                        objectName: "brushStudioPaintPixels"
+                        visible: editor.matching && editor.draft.selectedIndex >= 0
+                        small: true
+                        label: editor.editingPixels ? qsTr("View sample") : qsTr("Paint pixels")
+                        tip: editor.editingPixels ? qsTr("Return to the stored resource sample")
+                             : qsTr("Draw the tip or mask pixels directly with mouse, pen or touch")
+                        onClicked: editor.editingPixels = !editor.editingPixels
+                    }
+                    KpButton {
                         objectName: "brushStudioLoadTipImage"
                         visible: editor.matching && editor.draft.canImportTipImage
                         small: true
-                        label: qsTr("Load image…")
-                        tip: qsTr("Replace this component’s stored tip pixels")
+                        label: qsTr("Load image...")
+                        tip: qsTr("Replace this component's stored tip pixels with an image file")
                         onClicked: editor.importImageRequested()
                     }
                 }
