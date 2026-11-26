@@ -565,6 +565,12 @@ itself native. The Studio window's save result distinguishes saved-and-installed
 saved-with-install-failure, saved-but-unsupported and save-only, and no longer
 reports Realistic as inherently save-only.
 
+Authored **pressure response curves** now reach Digital size, opacity and flow:
+any point set is evaluated in place of `pressure-gamma` while the matching
+`pressure-size`/`pressure-opacity`/`pressure-flow` strength still scales the
+result. A strength that disagrees with the binding is reported instead of
+silently interpreted.
+
 Five more Digital settings now reach pixels. **Bristle count** and **bristle
 spread** shape the procedural Bristle tip: the count changes the number of tufts
 across the width and the spread deepens their separation, with the legacy

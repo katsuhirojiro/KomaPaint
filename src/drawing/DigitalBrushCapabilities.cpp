@@ -237,8 +237,10 @@ DigitalCapabilityReport inspectDigitalBrush(const brush::BrushDocument& doc) {
         }
         double amount = binding.amount * 100;
         if (binding.parameter == "opacity") amount = 100 - amount;
+        // A curve replaces the pressure-gamma shape, so any authored response
+        // works as long as the explicit strength agrees with the binding and
+        // the stroke loop can evaluate it per stamp.
         const bool supported = explicitKey && binding.perStamp && binding.amount <= 1.0 &&
-            binding.curve == brush::ResponseCurve::linear() &&
             (!doc.parameters.contains(explicitKey) ||
              std::abs(doc.parameters.value(explicitKey, 0.0) - amount) <= 1.0e-9);
         if (!supported) {

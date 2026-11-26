@@ -15,7 +15,9 @@ bool valid(InputSample p) { return std::isfinite(p.x) && std::isfinite(p.y) && s
 // can never drift away from the size of the stamp being placed.
 double effectiveDiameterFor(const BrushDefinition& b, const InputSample& p) noexcept
 {
-    const double pShaped = BrushRasterizer::shapedPressure(p.pressure, b.pressureGamma);
+    const double pShaped = b.pressureSizeCurve
+        ? clamp01(b.pressureSizeCurve->evaluate(clamp01(p.pressure)))
+        : BrushRasterizer::shapedPressure(p.pressure, b.pressureGamma);
     const double pSizeWeight = clamp01(b.pressureSize);
     const double minScale = std::clamp(b.minSizeRatio, 0.05, 1.0);
     const double sizeScale = (1.0 - pSizeWeight) + pSizeWeight * (minScale + (1.0 - minScale) * pShaped);
@@ -265,6 +267,10 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     if (!store.isValid()) return R::OutOfBounds;
 
     const double pShaped = shapedPressure(p.pressure, b.pressureGamma);
+    const double pShapedOpacity = b.pressureOpacityCurve
+        ? clamp01(b.pressureOpacityCurve->evaluate(clamp01(p.pressure))) : pShaped;
+    const double pShapedFlow = b.pressureFlowCurve
+        ? clamp01(b.pressureFlowCurve->evaluate(clamp01(p.pressure))) : pShaped;
     const double tiltMag = (p.hasTilt && std::isfinite(p.tiltX) && std::isfinite(p.tiltY))
         ? std::clamp(std::hypot(p.tiltX, p.tiltY) / 90.0, 0.0, 1.0)
         : 0.0;
@@ -275,9 +281,9 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const double radius = effectiveSize / 2.0;
 
     const double pOpWeight = clamp01(b.pressureOpacity);
-    const double pressureAlpha = (1.0 - pOpWeight) + pOpWeight * pShaped;
+    const double pressureAlpha = (1.0 - pOpWeight) + pOpWeight * pShapedOpacity;
     const double pFlowWeight = clamp01(b.pressureFlow);
-    const double pressureFlowScale = (1.0 - pFlowWeight) + pFlowWeight * pShaped;
+    const double pressureFlowScale = (1.0 - pFlowWeight) + pFlowWeight * pShapedFlow;
 
     const auto* bitmap = b.bitmapTip;
     if (bitmap && (!bitmap->expectedBytes() || bitmap->pixels().size() != bitmap->expectedBytes() ||

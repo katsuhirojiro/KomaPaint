@@ -129,6 +129,9 @@ struct ResolvedValues {
     double pressureOpacity;
     double pressureFlow;
     double pressureGamma;
+    std::shared_ptr<const brush::ResponseCurve> pressureSizeCurve;
+    std::shared_ptr<const brush::ResponseCurve> pressureOpacityCurve;
+    std::shared_ptr<const brush::ResponseCurve> pressureFlowCurve;
     double minSizeRatio;
     double tiltSize;
     bool tiltAngle;
@@ -174,6 +177,9 @@ ResolvedValues resolve(const brush::LegacyBrush& b) {
     v.pressureOpacity = b.pressureOpacity;
     v.pressureFlow = b.pressureFlow;
     v.pressureGamma = b.pressureGamma;
+    v.pressureSizeCurve.reset();
+    v.pressureOpacityCurve.reset();
+    v.pressureFlowCurve.reset();
     v.minSizeRatio = b.minSizeRatio;
     v.tiltSize = b.tiltSize;
     v.tiltAngle = b.tiltAngle;
@@ -251,6 +257,17 @@ ResolvedValues resolve(const brush::BrushDocument& doc) {
         : 100.0 - bindingAmount(doc, "opacity", brush::Signal::Pressure) * 100.0;
     v.pressureFlow = storedOrBound(doc, "pressure-flow", "flow", brush::Signal::Pressure, 100.0);
     v.pressureGamma = stored(doc, "pressure-gamma");
+    auto authoredCurve = [&](const char* parameter) -> std::shared_ptr<const brush::ResponseCurve> {
+        for (const auto& binding : doc.dynamics) {
+            if (binding.parameter != parameter || binding.signal != brush::Signal::Pressure) continue;
+            if (!(binding.amount > 0.0) || binding.curve == brush::ResponseCurve::linear()) continue;
+            return std::make_shared<const brush::ResponseCurve>(binding.curve);
+        }
+        return {};
+    };
+    v.pressureSizeCurve = authoredCurve("size");
+    v.pressureOpacityCurve = authoredCurve("opacity");
+    v.pressureFlowCurve = authoredCurve("flow");
     v.minSizeRatio = stored(doc, "min-size-ratio");
     v.tiltSize = storedOrBound(doc, "tilt-size", "size", brush::Signal::Tilt, 100.0);
     v.tiltAngle = stored(doc, "tilt-angle") >= 0.5;
@@ -299,6 +316,9 @@ BrushDefinition digitalFrom(const ResolvedValues& v, double tipShapeValue,
     definition.pressureOpacity = v.pressureOpacity / 100.0;
     definition.pressureFlow = v.pressureFlow / 100.0;
     definition.pressureGamma = v.pressureGamma / 100.0;
+    definition.pressureSizeCurve = v.pressureSizeCurve;
+    definition.pressureOpacityCurve = v.pressureOpacityCurve;
+    definition.pressureFlowCurve = v.pressureFlowCurve;
     definition.minSizeRatio = v.minSizeRatio / 100.0;
     definition.tiltSize = v.tiltSize / 100.0;
     definition.tiltAngle = v.tiltAngle;

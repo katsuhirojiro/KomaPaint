@@ -142,7 +142,8 @@ expose mask inversion.
 | Randomization: scatter X/Y, cluster, stamp count, component scale/opacity, rotation offset | per-stamp/per-stroke rules evaluated by `BrushEvaluator` |
 | Other randomization targets | stored, reported unsupported |
 | Dynamics: linear legacy pressure→size/opacity/flow and tilt→size | yes |
-| Arbitrary response curves and non-legacy signals | stored; not executed by the production stroke loop |
+| Authored response curve for pressure→size/opacity/flow | yes, any monotonic-in-x point set |
+| Response curves for other parameters or non-pressure signals | stored; not executed by the production stroke loop |
 
 The base stroke (spacing, size, angle, taper, delay) is still resolved once per
 stroke. Dynamics on the tip itself are represented by the legacy `pressure-*`,
@@ -187,7 +188,8 @@ These are refused or reported, never guessed at:
 
 - non-`ProceduralShape` visible components in Realistic;
 - native extension chunks / format flags, or a document that fails validation;
-- dynamics and randomization the stroke loop cannot reproduce;
+- dynamics and randomization the stroke loop cannot reproduce; pressure
+  curves with a strength that disagrees with the stored `pressure-*` value;
 - generators other than `Continuous` and their overrides;
 - Height and Mask component blends;
 - accumulation off, particle count/spread, and particle generators.

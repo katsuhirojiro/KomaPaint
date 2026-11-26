@@ -803,6 +803,48 @@ void testTaperAndSpacingVariationReachPixels() {
     CHECK(paintJitter(31u) != paintJitter(32u));
 }
 
+void testAuthoredPressureCurveChangesTheTip() {
+    LegacyBrush legacy;
+    legacy.size = 40.0;
+    legacy.opacity = 100.0;
+    legacy.flow = 100.0;
+    legacy.spacing = 20.0;
+    legacy.hardness = 100.0;
+    legacy.pressureSize = 100.0;
+    legacy.minSizeRatio = 10.0;
+    auto document = BrushDocument::fromLegacy(legacy, "brush-curve", "Curve");
+    StrokeRuntime runtime;
+    runtime.color = 0xff000000;
+    const double linear = BrushRasterizer::effectiveDiameter(
+        drawing::digitalDefinition(document, runtime), {0.0, 0.0, 0.5});
+    ResponseCurve curve({{0.0, 0.0}, {0.5, 0.1}, {1.0, 1.0}});
+    bool replaced = false;
+    for (auto& binding : document.dynamics) {
+        if (binding.parameter == "size" && binding.signal == Signal::Pressure) {
+            binding.curve = curve;
+            binding.amount = 1.0;
+            replaced = true;
+        }
+    }
+    if (!replaced) {
+        DynamicsBinding binding;
+        binding.parameter = "size";
+        binding.signal = Signal::Pressure;
+        binding.curve = curve;
+        binding.amount = 1.0;
+        document.dynamics.push_back(binding);
+    }
+    CHECK(document.validate().ok());
+    CHECK(drawing::digitalBrushIssue(document).empty());
+    const double curved = BrushRasterizer::effectiveDiameter(
+        drawing::digitalDefinition(document, runtime), {0.0, 0.0, 0.5});
+    CHECK(curved < linear);
+    // The same explicit strength is still required; a mismatched flat value
+    // must not silently change what the binding means.
+    CHECK(document.setParameter("pressure-size", 50.0));
+    CHECK(!drawing::digitalBrushIssue(document).empty());
+}
+
 void testBristleCountAndSpreadShapeTheTip() {
     LegacyBrush legacy;
     legacy.size = 32.0;
@@ -985,6 +1027,7 @@ int main() {
     testRandomizationReachesThePixels();
     testDocumentBrushKeepsItsSpacingThroughLowPressure();
     testTaperAndSpacingVariationReachPixels();
+    testAuthoredPressureCurveChangesTheTip();
     testBristleCountAndSpreadShapeTheTip();
     testColourVariationChangesEachMark();
     testAntialiasingCanBeDisabled();

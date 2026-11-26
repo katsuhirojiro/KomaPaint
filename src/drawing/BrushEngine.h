@@ -3,6 +3,7 @@
 #include "canvas/SparseTileStore.h"
 #include <cstdint>
 #include <deque>
+#include <memory>
 
 namespace komapaint {
 namespace brush { struct BrushResource; }
@@ -38,6 +39,11 @@ struct BrushDefinition {
     double pressureOpacity = 1.0; // 0 = fixed opacity, 1 = full pressure->opacity modulation
     double pressureFlow = 0.0;    // 0 = fixed flow, 1 = full pressure->flow modulation
     double pressureGamma = 1.0;   // < 1 lifts light pressure; > 1 requires firmer press
+    // Optional authored response curves. A curve replaces the gamma shaping for
+    // that parameter while the pressure-* weight still sets its strength.
+    std::shared_ptr<const brush::ResponseCurve> pressureSizeCurve;
+    std::shared_ptr<const brush::ResponseCurve> pressureOpacityCurve;
+    std::shared_ptr<const brush::ResponseCurve> pressureFlowCurve;
     double minSizeRatio = 0.15;   // minimum diameter fraction when pressureSize > 0
     double tiltSize = 0.0;        // 0 = fixed size, 1 = tilt broadens tip when device has tilt
     bool tiltAngle = false;       // orient/flatten tip along stylus tilt azimuth when supported
