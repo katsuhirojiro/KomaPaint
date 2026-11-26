@@ -67,6 +67,7 @@ private slots:
     void anUnsaveableBrushIsRefused();
     void failedOverwriteLeavesUnicodeBrushAndDraftIntact();
     void aCorruptFileChangesNothing();
+    void unsupportedDataSurvivesOpenAndResave();
 };
 
 void TestBrushStudioModel::newBrushIsPaintable() {
@@ -79,6 +80,16 @@ void TestBrushStudioModel::newBrushIsPaintable() {
     QCOMPARE(int(model.components().size()), 1);
     QCOMPARE(model.selectedIndex(), 0);
     QCOMPARE(model.selectedId(), QStringLiteral("c1"));
+    // The authoring menus offer only combinations the Digital renderer paints.
+    QCOMPARE(int(model.componentKinds().size()), 4);
+    for (const auto& kind : model.componentKinds()) {
+        const auto name = kind.toMap().value(QStringLiteral("name")).toString();
+        QVERIFY(name != QStringLiteral("texture") && name != QStringLiteral("particle") &&
+                name != QStringLiteral("bristle") && name != QStringLiteral("mask"));
+    }
+    QCOMPARE(int(model.componentBlends().size()), 1);
+    QCOMPARE(model.componentBlends().front().toMap().value(QStringLiteral("label")).toString(),
+             QStringLiteral("Normal"));
     QVERIFY(!model.canUndo());
     QVERIFY(!model.isModified());
     // A brush with one tip and one generator is valid and immediately usable.
@@ -626,16 +637,19 @@ void TestBrushStudioModel::invalidComponentEditsAreTransactional() {
 void TestBrushStudioModel::exposureCanBeRenamedReorderedAndReset() {
     BrushStudioModel model;
     const QVariantList initial = model.exposedProperties();
-    QCOMPARE(int(initial.size()), 5);
+    QCOMPARE(int(initial.size()), 7);
     // Group order decides the panel: the tip's settings come first, and size
-    // follows them, exactly as the thirteen groups are ordered.
+    // follows them, exactly as the thirteen groups are ordered. Aspect and Tip
+    // Angle are exposed by default for marker-like flat nibs.
     QCOMPARE(stringField(initial.at(0).toMap(), "key"), QStringLiteral("hardness"));
     QCOMPARE(stringField(initial.at(0).toMap(), "section"), QStringLiteral("Brush Tip"));
-    QCOMPARE(stringField(initial.at(1).toMap(), "key"), QStringLiteral("size"));
-    QCOMPARE(stringField(initial.at(1).toMap(), "section"), QStringLiteral("Size"));
+    QCOMPARE(stringField(initial.at(3).toMap(), "key"), QStringLiteral("size"));
+    QCOMPARE(stringField(initial.at(3).toMap(), "section"), QStringLiteral("Size"));
+    QVERIFY(model.isExposed(QStringLiteral("aspect")));
+    QVERIFY(model.isExposed(QStringLiteral("tip-angle")));
 
     QVERIFY(model.expose(QStringLiteral("scatter-x")));
-    QCOMPARE(int(model.exposedProperties().size()), 6);
+    QCOMPARE(int(model.exposedProperties().size()), 8);
     QVERIFY(model.isExposed(QStringLiteral("scatter-x")));
     QVERIFY(!model.expose(QStringLiteral("no-such-setting")));
 
@@ -653,8 +667,8 @@ void TestBrushStudioModel::exposureCanBeRenamedReorderedAndReset() {
     // opacity, scatter after both -- not alphabetically.
     const QVariantList grouped = model.exposedProperties();
     QCOMPARE(stringField(grouped.at(0).toMap(), "section"), QStringLiteral("Brush Tip"));
-    QCOMPARE(stringField(grouped.at(1).toMap(), "section"), QStringLiteral("Size"));
-    QCOMPARE(stringField(grouped.at(2).toMap(), "section"), QStringLiteral("Opacity & Flow"));
+    QCOMPARE(stringField(grouped.at(3).toMap(), "section"), QStringLiteral("Size"));
+    QCOMPARE(stringField(grouped.at(4).toMap(), "section"), QStringLiteral("Opacity & Flow"));
 
     // Ordering happens inside a group; a move that would leave the group is
     // refused rather than quietly doing nothing.
@@ -670,12 +684,12 @@ void TestBrushStudioModel::exposureCanBeRenamedReorderedAndReset() {
 
     QVERIFY(model.unexpose(QStringLiteral("scatter-x")));
     QVERIFY(model.unexpose(QStringLiteral("scatter-y")));
-    QCOMPARE(int(model.exposedProperties().size()), 5);
+    QCOMPARE(int(model.exposedProperties().size()), 7);
 
     model.expose(QStringLiteral("texture-strength"));
     model.resetExposure();
-    QCOMPARE(int(model.exposedProperties().size()), 5);
-    QCOMPARE(stringField(model.exposedProperties().at(1).toMap(), "key"), QStringLiteral("size"));
+    QCOMPARE(int(model.exposedProperties().size()), 7);
+    QCOMPARE(stringField(model.exposedProperties().at(3).toMap(), "key"), QStringLiteral("size"));
     QVERIFY(!model.isExposed(QStringLiteral("texture-strength")));
 }
 
@@ -1030,6 +1044,39 @@ void TestBrushStudioModel::failedOverwriteLeavesUnicodeBrushAndDraftIntact() {
     QVERIFY2(restored.save(path), qPrintable(restored.error()));
     QVERIFY2(model.load(path), qPrintable(model.error()));
     QCOMPARE(model.name(), QStringLiteral("Next draft"));
+}
+
+void TestBrushStudioModel::unsupportedDataSurvivesOpenAndResave() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString source = dir.filePath(QStringLiteral("unsupported.kb"));
+    const QString resaved = dir.filePath(QStringLiteral("resaved.kb"));
+
+    auto document = BrushStudioModel().document();
+    QVERIFY(document.setParameter("texture-strength", 42.0));
+    QVERIFY(document.setParameter("taper-in", 0.0));
+    QVERIFY(brush::saveBrushFile(QFileInfo(source).filesystemFilePath(), document));
+
+    BrushStudioModel opened;
+    QVERIFY2(opened.openDraft(QUrl::fromLocalFile(source)), qPrintable(opened.error()));
+    QCOMPARE(opened.document(), document);
+    const auto values = opened.settingState().value(QStringLiteral("values")).toMap();
+    const auto texture = values.value(QStringLiteral("texture-strength")).toMap();
+    QVERIFY(!texture.value(QStringLiteral("supported")).toBool());
+    QVERIFY(!texture.value(QStringLiteral("reason")).toString().isEmpty());
+    QVERIFY(!opened.setParameterValue(QStringLiteral("texture-strength"), 20.0));
+    QVERIFY(opened.error().contains(QStringLiteral("Texture")));
+    QCOMPARE(opened.document(), document);
+
+    // Editing a supported setting must not drop the stored unsupported data.
+    QVERIFY(opened.setParameterValue(QStringLiteral("size"), 33.0));
+    QVERIFY2(opened.saveDraft(QUrl::fromLocalFile(resaved)), qPrintable(opened.error()));
+    BrushStudioModel reread;
+    QVERIFY2(reread.openDraft(QUrl::fromLocalFile(resaved)), qPrintable(reread.error()));
+    QCOMPARE(reread.document().parameters.value("texture-strength"), 42.0);
+    QCOMPARE(reread.document().parameters.value("taper-in"), 0.0);
+    QCOMPARE(reread.document().parameters.value("size"), 33.0);
+    QVERIFY(!reread.document().parameters.contains("taper-out"));
 }
 
 void TestBrushStudioModel::aCorruptFileChangesNothing() {

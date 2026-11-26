@@ -400,7 +400,9 @@ are explicitly unavailable, not sample strokes.
 The brush name and Digital/Realistic choice edit the independent draft. New
 and Duplicate are undoable and create independent brush identities. Import
 and Save use local `.kb` files and the validated native codec; Export writes
-a copy without moving the draft's save point. Save is **not** Save to Library.
+a copy without moving the draft's save point. Save writes the `.kb` and, when
+the Digital renderer supports the document, installs it into the current
+Digital tab and selects it.
 The Studio has its own Undo/Redo shortcuts and uses file dialogs owned by
 its own native window. Closing Studio still hides it and retains its draft
 for the session.
@@ -510,3 +512,37 @@ connects the independent Studio draft, private production test pad, native
 file, ordinary Sub-Tool library, and artwork. See that page for the current
 workflow and limits; the unavailable-preview notes above describe earlier
 stages. Hardware tablet and artist workflow testing remain separate.
+
+## Phase B3 — truthful support and install outcomes
+
+`drawing::inspectDigitalBrush()` is now the single capability authority used by
+Studio controls, component creation, blend choice, validation, save/install and
+Sub-Tool registration. It reports one feature key (`parameter:<name>`,
+`component:<id>`, `blend`, `document`, `engine`, `generator`, `components`) and
+the plain-language reason for each refusal. The old ad-hoc support lists in the
+pad, installer and QML are gone.
+
+The Studio inspector keeps every stored setting and component available for
+reading, but a setting the Digital renderer ignores is dimmed, cannot be edited
+and carries its reason. Unsupported data is never removed: reopening and
+resaving an old `.kb` preserves it. The component add menu offers only tip,
+image, colour-image and procedural components, and the blend menu offers only
+Normal without masks.
+
+Save is now one explicit command, "Save and install brush". Its result is one
+of five reported outcomes: saved and installed (with the brush name and Digital
+tab), saved but installation failed, saved because the renderer does not
+support the brush, Realistic saved only, or save failed. Installation switches
+to the selected Digital tab and selects the new entry; it never silently lands
+in Default while another tab is open.
+
+The default Sub-Tool exposure now includes Tip Shape and Tip Angle alongside
+size, opacity, flow, spacing and hardness. Those are exposure declarations, not
+changes to any brush value or default.
+
+Tests: `test_digital_capabilities` covers the vocabulary, every brush-scope
+setting, every component kind and every blend; `test_brush_studio_model`,
+`test_brush_ui` and `test_native_brush_controls` cover unsupported data across
+open/resave, save/install outcomes, non-default tab installation, selection and
+native-control persistence. Build and run evidence is recorded with the change
+set; no claim is made from compilation alone.

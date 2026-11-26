@@ -1,7 +1,7 @@
 # Brush capability audit and architecture plan
 
-Status: **review 03 proposal — no production code changed**
-Tree inspected: `18d4a07` (the base of `arena/64f169fc-komapaint`)
+Status: **implemented in `src/drawing/DigitalBrushCapabilities.{h,cpp}`**
+Original tree inspected: `18d4a07` (the base of `arena/64f169fc-komapaint`)
 Scope: the real brush model, evaluator, rasterisers, input path, region mask,
 Studio window, and brush file/library formats — plus the isolated UI prototype
 in `docs/design/brush-studio-review-03/`.

@@ -40,7 +40,7 @@ The dark theme has no saturated accent: ink (`#c8c8c8`) carries structure and
 selection. This pass removed the one warm note the previous version spent on a
 "Realistic is experimental" triangle, so the window now uses **no colour at
 all** beyond the theme greys and the two semantic dots in the status bar. The
-single light surface is **Save to Library** — the one commit action in the
+single light surface is **Save & Install** — the one commit action in the
 window, and therefore the one element that reads as a button from across the
 room.
 
@@ -57,7 +57,7 @@ document sits on the theme's own transparency checkerboard
 │ 30  KomaPaint — Brush Studio                          – ▢ ✕           │
 │ 30  File  Edit  View  Brush  Window  Help          Edit › Brush Studio│
 │ 40  brush▾ Digital│Realistic │ New Duplicate Import Export            │
-│     … "Saves into KomaPaint's brush library"  Save to Library · Close │
+│     … "Saves and installs into Brush → Digital"  Save & Install · Close │
 ├──────────┬─────────────────────────────────────────────┬─────────────┤
 │ 260      │ 34 rail │ 32 tabs                           │ 340         │
 │ COMPO-   │         │ 34 tool options + undo/redo + zoom │ BRUSH       │
@@ -126,9 +126,9 @@ settings changed* and one way back.
 
 **5. The command bar.** Groups are now separated by rules and ordered by
 consequence: identity (brush name, Sub-Tool kind, engine), management (`New`,
-`Duplicate`, `Import`, `Export`), action (`Save to Library`, `Close`). The
+`Duplicate`, `Import`, `Export`), action (`Save & Install`, `Close`). The
 destination is spelled out immediately before the button — a folder glyph and
-*Saves into KomaPaint's brush library* — so "where does this go" is answered
+*Saves and installs into Brush → Digital* — so "where does this go" is answered
 before the click rather than after it.
 
 **6. Node editing.** Still exactly one entrance — a row under `Advanced`

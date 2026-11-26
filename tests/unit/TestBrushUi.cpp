@@ -461,6 +461,7 @@ private slots:
     void brushStudioWindowIsIndependentAndReusable();
     void brushStudioCommandsAndCompactLayout();
     void nativeBrushStudioPadToArtwork();
+    void brushStudioReportsSaveAndInstallOutcomes();
     void artistVerificationSevenBrushes();
     void brushStudioComponentsAndReadOnlyEditor();
     void brushStudioRegistryInspectorAndCreatorExposure();
@@ -863,7 +864,8 @@ void TestBrushUi::nativeBrushStudioPadToArtwork()
     QVERIFY(QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
                                       Q_ARG(QVariant, QVariant::fromValue(QUrl::fromLocalFile(nativeFile)))));
     QVERIFY(saved.toBool() && !draft->isModified() && QFile::exists(nativeFile));
-    QCOMPARE(library->currentBrushId(), stockId);
+    QVERIFY(library->currentBrushId() != stockId);
+    QVERIFY(settings->nativeBrushDocument() && *settings->nativeBrushDocument() == unsaved);
     studio->close();
     library->setSearchText(QString::fromStdString(unsaved.name));
     const auto rows = library->subTools();
@@ -895,6 +897,84 @@ void TestBrushUi::nativeBrushStudioPadToArtwork()
     QVERIFY(reopened.openFromPath(koma));
     QCOMPARE(artworkPixels(reopened.layers()->layerAt(0)->tiles()), expected);
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(u'\n')));
+}
+
+void TestBrushUi::brushStudioReportsSaveAndInstallOutcomes()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiSaveOutcomes")));
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    auto* library = app.workspace.subTools();
+    QVERIFY(library->initializePersistence(files.filePath(QStringLiteral("library.json"))));
+    app.workspace.setActiveTool(QStringLiteral("brush"));
+    QVERIFY(QMetaObject::invokeMethod(app.root.get(), "openBrushStudio"));
+    QQuickWindow* studio = nullptr;
+    QTRY_VERIFY((studio = studioWindow()) && studio->isVisible());
+    auto* draft = studio->findChild<BrushStudioModel*>();
+    QVERIFY(draft);
+
+    // Realistic is save-only: the file is written, but no install is attempted.
+    draft->setEngine(QStringLiteral("realistic"));
+    const QString realisticFile = files.filePath(QStringLiteral("realistic.kb"));
+    QVariant saved;
+    QVERIFY(QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
+                                      Q_ARG(QVariant, QVariant::fromValue(QUrl::fromLocalFile(realisticFile)))));
+    QVERIFY(saved.toBool());
+    QCOMPARE(studio->property("saveOutcome").toString(), QStringLiteral("savedOnly"));
+    QVERIFY(QFile::exists(realisticFile));
+    QCOMPARE(studio->property("libraryNotice").toString(), QString());
+
+    // A saved but unsupported document is not presented as installed.
+    draft->setEngine(QStringLiteral("digital"));
+    auto unsupported = draft->document();
+    QVERIFY(unsupported.setParameter("texture-strength", 42.0));
+    QVERIFY(draft->setDocument(std::move(unsupported)));
+    const QString unsupportedFile = files.filePath(QStringLiteral("unsupported.kb"));
+    QVERIFY(QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
+                                      Q_ARG(QVariant, QVariant::fromValue(QUrl::fromLocalFile(unsupportedFile)))));
+    QVERIFY(saved.toBool());
+    QCOMPARE(studio->property("saveOutcome").toString(), QStringLiteral("savedUnsupported"));
+    QVERIFY(QFile::exists(unsupportedFile));
+    QVERIFY(!studio->property("libraryNotice").toString().isEmpty());
+    QVERIFY(studio->property("fileNotice").toString().contains(QStringLiteral("not support")));
+    QVERIFY(studio->property("saveOutcome").toString() != QStringLiteral("savedInstalled"));
+
+    // A supported brush saved while another Digital tab is selected installs
+    // into that tab and selects the new entry.
+    QVERIFY(draft->newDraft());
+    draft->setName(QStringLiteral("Studio Marker"));
+    const QString markerTab = library->createTab(QStringLiteral("Studio Markers"));
+    QVERIFY(!markerTab.isEmpty());
+    QVERIFY(library->currentTabId() == markerTab);
+    const QString installedFile = files.filePath(QStringLiteral("studio-marker.kb"));
+    QVERIFY(QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
+                                      Q_ARG(QVariant, QVariant::fromValue(QUrl::fromLocalFile(installedFile)))));
+    QVERIFY(saved.toBool());
+    QCOMPARE(studio->property("saveOutcome").toString(), QStringLiteral("savedInstalled"));
+    QVERIFY(QFile::exists(installedFile));
+    QVERIFY(studio->property("libraryNotice").toString().isEmpty());
+    QVERIFY(studio->property("fileNotice").toString().contains(QStringLiteral("Studio Marker")));
+    QCOMPARE(library->currentTabId(), markerTab);
+    QVERIFY(library->currentName().startsWith(QStringLiteral("Studio Marker")));
+    QVERIFY(!library->currentBrushId().isEmpty());
+
+    // A file that saves successfully but cannot be registered reports the
+    // installation failure, never a saved-and-installed outcome.
+    QVERIFY(!library->initializePersistence(QString()));
+    QVERIFY(draft->newDraft());
+    draft->setName(QStringLiteral("Unregistered Marker"));
+    const QString failedFile = files.filePath(QStringLiteral("unregistered-marker.kb"));
+    QVERIFY(QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
+                                      Q_ARG(QVariant, QVariant::fromValue(QUrl::fromLocalFile(failedFile)))));
+    QVERIFY(saved.toBool());
+    QCOMPARE(studio->property("saveOutcome").toString(), QStringLiteral("savedNotInstalled"));
+    QVERIFY(QFile::exists(failedFile));
+    QVERIFY(!studio->property("libraryNotice").toString().isEmpty());
+    QVERIFY(studio->property("saveOutcome").toString() != QStringLiteral("savedInstalled"));
+
+    studio->close();
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
 
 void TestBrushUi::artistVerificationSevenBrushes()
@@ -1140,7 +1220,8 @@ void TestBrushUi::brushStudioComponentsAndReadOnlyEditor()
     QVERIFY(draft);
     const auto control = [&](const char* name) { return studioControl(studio, name); };
     const auto press = [&](const char* name) { return pressStudio(studio, name); };
-    QTRY_VERIFY(control("brushStudioBrowseLibrary") && !control("brushStudioBrowseLibrary")->isEnabled());
+    QVERIFY(!control("brushStudioBrowseLibrary"));
+    QTRY_VERIFY(control("brushStudioUnsupportedNotice") && control("brushStudioUnsupportedNotice")->isVisible());
     auto* editor = control("brushStudioEditor");
     auto* asset = control("brushStudioAsset");
     auto* stack = control("brushStudioComponentStack");
@@ -1158,23 +1239,27 @@ void TestBrushUi::brushStudioComponentsAndReadOnlyEditor()
     QVERIFY(addMenu);
     QVERIFY(press("brushStudioAddComponent"));
     QTRY_VERIFY(addMenu->property("opened").toBool());
-    QQuickItem* addTexture = nullptr;
-    QTRY_VERIFY((addTexture = control("brushStudioAdd_texture")) && addTexture->isVisible());
-    click(studio, addTexture);
+    // The menu is filtered to components the Digital renderer can paint.
+    QVERIFY(!control("brushStudioAdd_texture"));
+    QQuickItem* addImage = nullptr;
+    QTRY_VERIFY((addImage = control("brushStudioAdd_image")) && addImage->isVisible());
+    click(studio, addImage);
     QTRY_VERIFY(!addMenu->property("visible").toBool());
     QTRY_COMPARE(draft->componentCount(), 2);
-    const auto texture = draft->selectedId();
-    QCOMPARE(draft->document().components.back().kind, brush::ComponentKind::Texture);
-    QCOMPARE(editor->property("mode").toString(), QStringLiteral("texture"));
-    QVERIFY(asset->isVisible() && asset->property("tiled").toBool());
+    const auto added = draft->selectedId();
+    QCOMPARE(draft->document().components.back().kind, brush::ComponentKind::Image);
+    QCOMPARE(editor->property("mode").toString(), QStringLiteral("tip"));
+    QVERIFY(asset->isVisible() && !asset->property("tiled").toBool());
     QVERIFY(press("brushStudioZoomIn"));
     QCOMPARE(asset->property("magnification").toDouble(), 1.25);
     QVERIFY(press("brushStudioFit"));
     QCOMPARE(asset->property("magnification").toDouble(), 1.0);
 
-    // Same selected resource, changed immutable pixels: the read-only display
-    // must show the new pixels in both the centre tile and its neighbours.
+    // A texture is no longer offered by the filtered menu. Convert the newly
+    // added image in the document to keep the read-only texture viewer covered.
     auto textureDraft = draft->document();
+    textureDraft.components.back().kind = brush::ComponentKind::Texture;
+    const auto texture = added;
     auto* resource = textureDraft.resource(textureDraft.components.back().resourceId);
     QVERIFY(resource);
     resource->kind = brush::ResourceKind::Rgba8;
@@ -1310,15 +1395,16 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
     const auto texture = draft->addComponent(int(brush::ComponentKind::Texture));
     QVERIFY(!texture.isEmpty());
     QTRY_VERIFY(control("brushStudioValue_texture-scale") && control("brushStudioValue_texture-scale")->isVisible());
-    QVERIFY(enter("brushStudioValue_texture-scale", QLocale().toString(128.25)));
-    QCOMPARE(draft->document().parameter("texture-scale"), 128.25);
+    QVERIFY(!control("brushStudioValue_texture-scale")->isEnabled());
+    QVERIFY(control("brushStudioReason_texture-scale")
+            && control("brushStudioReason_texture-scale")->isVisible());
+    QVERIFY(draft->document().parameter("texture-scale") == 0.0); // no silent write
     QVERIFY(press("brushStudioSection_Brush TipToggle"));
     QTRY_VERIFY(control("brushStudioValue_tip-shape") && !control("brushStudioValue_tip-shape")->isEnabled());
     QVERIFY(press("brushStudioSection_AdvancedToggle"));
     QTRY_VERIFY(control("brushStudioValue_component-opacity") && control("brushStudioValue_component-opacity")->isVisible());
-    QVERIFY(enter("brushStudioValue_component-opacity", QStringLiteral("25")));
-    QCOMPARE(draft->document().components.back().opacity, 0.25);
-    QCOMPARE(draft->document().components.front().opacity, 1.0);
+    QVERIFY(!control("brushStudioValue_component-opacity")->isEnabled());
+    QCOMPARE(draft->document().components.back().opacity, 1.0);
     QVERIFY(press("brushStudioSelectedComponentSectionToggle"));
     QVERIFY(enter("brushStudioSelectedComponentName", QStringLiteral("Paper Fibre")));
     QCOMPARE(QString::fromStdString(draft->document().components.back().name), QStringLiteral("Paper Fibre"));

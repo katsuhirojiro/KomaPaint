@@ -39,8 +39,7 @@ int main(int argc, char** argv)
         CHECK(!stock.isEmpty());
         id = library.registerNativeBrush(url);
         CHECK(!id.isEmpty());
-        CHECK(library.currentBrushId() == stock && !settings.hasNativeBrush());
-        library.selectById(id);
+        CHECK(library.currentBrushId() == id && settings.hasNativeBrush());
         CHECK(settings.nativeBrushDocument() && *settings.nativeBrushDocument() == doc);
         auto first = settings.nativeBrushDocument();
         settings.setSize(48);
@@ -50,7 +49,9 @@ int main(int argc, char** argv)
         CHECK(settings.nativeBrushDocument() && *settings.nativeBrushDocument() == doc);
         CHECK(doc.setParameter("size", 27.25));
         CHECK(brush::saveBrushFile(path, doc));
-        CHECK(library.registerNativeBrush(url) == id); // update original; alias still pins old bytes
+        CHECK(library.registerNativeBrush(url) == id); // update original and select it
+        CHECK(library.currentBrushId() == id && *settings.nativeBrushDocument() == doc);
+        library.selectById(alias);
         CHECK(library.currentBrushId() == alias && *settings.nativeBrushDocument() == *first);
         library.selectById(id);
         CHECK(settings.nativeBrushDocument() && *settings.nativeBrushDocument() == doc);

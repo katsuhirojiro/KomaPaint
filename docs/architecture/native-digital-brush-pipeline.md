@@ -16,10 +16,12 @@
    the pad when the draft changes. They do not become a brush asset or get
    serialized. The pad uses the current foreground and tablet preferences but
    does not modify the artwork, the active brush, or the artwork's undo stack.
-3. **Save .kb…** writes the portable file and installs a supported native
-   brush under **Sub Tool → Brush → Digital** in the default collection tab.
-   Saving an installed original again updates that entry in its existing tab.
-   An install does not switch the current tool or selection. **Export** alone
+3. **Save and install brush** writes the portable file and, when the Digital
+   renderer supports it, installs a native brush under **Brush → Digital** in
+   the current Digital tab (or the selected target tab). It switches to that
+   tab and selects the new brush. Saving an installed original again updates
+   that entry in its existing tab. Realistic is save-only; unsupported stored
+   data is saved but not installed, with the reason shown. **Export** alone
    writes a copy without installing it. To install a received file, use
    **Install .kb…** in the Digital collection's tab menu.
 4. Select the `.kb` row in the ordinary Sub-Tool list and draw. Edit the brush
@@ -45,8 +47,11 @@ that row instead of substituting another tip. Other presets remain usable.
   be backed up together. Install writes the asset before committing the
   manifest. Original files can move or disappear. Library duplicates pin their
   selected snapshot; updating the original does not change those copies.
-  Old and unreferenced snapshots are not automatically deleted in this slice.
-  Existing legacy library versions still load.
+  Per-brush Sub-Tool adjustments are stored as `nativeOverrides` on the entry
+  and applied to a copy of the immutable `.kb`; the original file and the
+  library snapshot are never rewritten. Old and unreferenced snapshots are not
+  automatically deleted in this slice. Existing legacy library versions still
+  load.
 - `src/app/BrushStudioModel.*`, `BrushStudioPad.*`, `CanvasViewport.cpp`, and
   `ui/workspaces/BrushStudioWindow.qml`: the pad owns a sparse private canvas,
   private history, and private draft snapshot. Both viewports start their
@@ -78,9 +83,10 @@ local image codecs; `.kb` embeds pixel data, not a link to the imported image.
 - `test_brush_format` and `test_brush_document_engine`: byte/asset handling,
   seeded and legacy pixel equality, bitmap colour/coverage/transforms, and
   artwork-mask interaction.
-- `test_native_brush_library` and `test_brush_studio_model`: persistent exact
-  resolution, immutable aliases, corrupt/missing file handling, and image
-  import with undo/reload.
+- `test_native_brush_library`, `test_native_brush_controls`,
+  `test_digital_capabilities` and `test_brush_studio_model`: persistent exact
+  resolution, immutable aliases, per-install overrides, exact capability
+  vocabulary, corrupt/missing file handling, and image import with undo/reload.
 - `test_brush_ui nativeBrushStudioPadToArtwork`: real Studio input and ordinary
   Sub-Tool selection, pad isolation, rendered tile comparison, and artwork
   save/reopen. The packaged `KOMAPAINT_VERIFY_PACKAGED=1` path also exercises

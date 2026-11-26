@@ -100,6 +100,11 @@ target_link_libraries(test_brush_document_engine PRIVATE komapaint::drawing)
 set_target_properties(test_brush_document_engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_brush_document_engine COMMAND test_brush_document_engine)
+add_executable(test_digital_capabilities TestDigitalCapabilities.cpp)
+target_link_libraries(test_digital_capabilities PRIVATE komapaint::drawing)
+set_target_properties(test_digital_capabilities PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_digital_capabilities COMMAND test_digital_capabilities)
 
 # Brush model and the .kb container are pure C++ (no Qt): the same test
 # binaries run in CI and on a machine with only a compiler.
@@ -216,6 +221,8 @@ komapaint_add_test(test_brush_studio_model TestBrushStudioModel.cpp)
 target_link_libraries(test_brush_studio_model PRIVATE komapaint::app)
 komapaint_add_test(test_native_brush_library TestNativeBrushLibrary.cpp)
 target_link_libraries(test_native_brush_library PRIVATE komapaint::app)
+komapaint_add_test(test_native_brush_controls TestNativeBrushControls.cpp)
+target_link_libraries(test_native_brush_controls PRIVATE komapaint::app)
 komapaint_add_test(test_brush_ui TestBrushUi.cpp)
 target_sources(test_brush_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
 # The human artist check opens the same .kb fixtures that ship in the ZIP.
