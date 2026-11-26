@@ -666,7 +666,7 @@ void TestBrushUi::brushStudioCommandsAndCompactLayout()
     QTRY_VERIFY(control("brushStudioPad") && control("brushStudioPad")->isEnabled());
     QVERIFY(chooseStudioSegment(studio, "brushStudioEngineChoice", 1, 2));
     QCOMPARE(draft->document().engine, brush::Engine::Realistic);
-    QTRY_VERIFY(!control("brushStudioPad")->isEnabled());
+    QTRY_VERIFY(control("brushStudioPad")->isEnabled());
     QVERIFY(!app.workspace.isRealisticEngine());
 
     QVERIFY(press("brushStudioDraftName"));
@@ -914,14 +914,14 @@ void TestBrushUi::brushStudioReportsSaveAndInstallOutcomes()
     auto* draft = studio->findChild<BrushStudioModel*>();
     QVERIFY(draft);
 
-    // Realistic is save-only: the file is written, but no install is attempted.
+    // A supported Realistic document installs into the Realistic collection.
     draft->setEngine(QStringLiteral("realistic"));
     const QString realisticFile = files.filePath(QStringLiteral("realistic.kb"));
     QVariant saved;
     QVERIFY(QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
                                       Q_ARG(QVariant, QVariant::fromValue(QUrl::fromLocalFile(realisticFile)))));
     QVERIFY(saved.toBool());
-    QCOMPARE(studio->property("saveOutcome").toString(), QStringLiteral("savedOnly"));
+    QCOMPARE(studio->property("saveOutcome").toString(), QStringLiteral("savedInstalled"));
     QVERIFY(QFile::exists(realisticFile));
     QCOMPARE(studio->property("libraryNotice").toString(), QString());
 

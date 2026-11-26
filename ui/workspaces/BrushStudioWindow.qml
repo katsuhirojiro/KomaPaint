@@ -46,22 +46,19 @@ Window {
             libraryNotice = qsTr("Brush file was not saved: %1").arg(brushDraft.error)
             return false
         }
-        if (brushDraft.engine === "realistic") {
-            saveOutcome = "savedOnly"
-            fileNotice = qsTr("Brush file saved · Realistic is save-only; it was not installed")
-            return true
-        }
         if (!brushLibrary) {
             saveOutcome = "savedOnly"
-            fileNotice = qsTr("Brush file saved · install it into Brush → Digital from the Sub-Tool panel")
+            fileNotice = qsTr("Brush file saved · install it from the Sub-Tool panel")
             return true
         }
         if (workspace) workspace.activeTool = "brush"
         const result = brushLibrary.installNativeBrush(url)
         if (result.installed) {
             saveOutcome = "savedInstalled"
-            fileNotice = qsTr("Saved and installed “%1” in Brush → Digital → %2")
-                .arg(result.name).arg(result.tabName)
+            fileNotice = qsTr("Saved and installed “%1” in Brush → %2 → %3")
+                .arg(result.name)
+                .arg(brushDraft.engine === "realistic" ? qsTr("Realistic") : qsTr("Digital"))
+                .arg(result.tabName)
             // The install already selects the entry; repeat the explicit switch
             // so a just-changed tool/collection cannot leave another tab open.
             brushLibrary.selectTabById(result.tabId)
@@ -72,7 +69,7 @@ Window {
             libraryNotice = qsTr("Nothing was installed: %1").arg(result.error)
         } else {
             saveOutcome = "savedUnsupported"
-            fileNotice = qsTr("Brush file saved · the Digital renderer does not support this brush")
+            fileNotice = qsTr("Brush file saved · the selected engine does not support this brush")
             libraryNotice = qsTr("Nothing was installed: %1").arg(result.error)
         }
         return true
@@ -215,7 +212,7 @@ Window {
             Layout.leftMargin: KP.panelInset
             Layout.rightMargin: KP.panelInset
             Layout.topMargin: visible ? KP.gapS : 0
-            text: qsTr("Realistic is save-only in this Studio. A saved .kb is not previewable or installable here; the Digital renderer does not paint it.")
+            text: qsTr("Realistic brushes preview and paint through the material engine when they use the physical tip. Component marks and Digital-only settings are kept in the file but are not painted by Realistic.")
             textFormat: Text.PlainText
             color: KP.warning
             font.family: KP.fontUi

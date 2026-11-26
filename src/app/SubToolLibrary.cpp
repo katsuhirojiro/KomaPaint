@@ -1388,6 +1388,7 @@ void SubToolLibrary::apply()
     auto* tab = currentTabPtr();
     const int idx = currentBrushIndexInTab(tab);
     const BrushEntryData* entry = idx < 0 ? nullptr : &tab->brushes[idx];
+    const bool nativeEntry = entry && entry->isNative();
     if (entry) tab->currentBrushId = entry->id;
     if (m_brush) {
         std::shared_ptr<const brush::BrushDocument> native;
@@ -1417,7 +1418,7 @@ void SubToolLibrary::apply()
         m_applying = true;
         const bool realisticNative = native && native->engine == brush::Engine::Realistic;
         m_brush->setNativeBrush(std::move(native), issue);
-        if (issue.isEmpty() || realisticNative)
+        if (nativeEntry)
             m_brush->setBrushEngine(realisticNative ? QStringLiteral("realistic") : QStringLiteral("digital"));
         m_applying = false;
     }
