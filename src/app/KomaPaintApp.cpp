@@ -528,10 +528,8 @@ void KomaPaintApp::runPackagedVerification()
     const auto expectedBrush = draft->document();
     QVariant saved;
     if (!QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
-                                  Q_ARG(QVariant, QVariant::fromValue(brushPath))) || !saved.toBool() ||
-        !draft->newDraft() || !draft->openDraft(brushPath) || draft->document() != expectedBrush ||
-        m_workspace.document() != reopenedDoc || subTools->currentBrushId() != stockId) {
-        fail(QStringLiteral("Studio .kb round-trip failed or changed the active artwork/brush."));
+                                  Q_ARG(QVariant, QVariant::fromValue(brushPath))) || !saved.toBool()) {
+        fail(QStringLiteral("Studio .kb save/install command did not report success."));
         return;
     }
     QString installedId;
@@ -543,8 +541,18 @@ void KomaPaintApp::runPackagedVerification()
             break;
         }
     }
+    if (installedId.isEmpty() || subTools->currentBrushId() != installedId) {
+        fail(QStringLiteral("Studio save did not install and select the authored brush: installed=%1 current=%2")
+                 .arg(installedId, subTools->currentBrushId()));
+        return;
+    }
+    if (!draft->newDraft() || !draft->openDraft(brushPath) || draft->document() != expectedBrush ||
+        m_workspace.document() != reopenedDoc) {
+        fail(QStringLiteral("Studio .kb round-trip failed or changed the active artwork."));
+        return;
+    }
     studio->close();
-    if (installedId.isEmpty() || !QFile::remove(brushPath.toLocalFile()) ||
+    if (!QFile::remove(brushPath.toLocalFile()) ||
         !subTools->initializePersistence(subTools->persistencePath())) {
         fail(QStringLiteral("The Studio brush was not found in the reloaded library."));
         return;
