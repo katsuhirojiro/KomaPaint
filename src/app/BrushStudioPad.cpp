@@ -1,4 +1,5 @@
 #include "BrushStudioPad.h"
+#include "drawing/DigitalBrushCapabilities.h"
 
 #include <new>
 #include <stdexcept>
