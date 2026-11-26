@@ -8,3 +8,4 @@ StudioChoice 1.0 StudioChoice.qml
 StudioParameter 1.0 StudioParameter.qml
 StudioExposure 1.0 StudioExposure.qml
 StudioSettings 1.0 StudioSettings.qml
+StudioTipEditor 1.0 StudioTipEditor.qml

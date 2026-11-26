@@ -13,6 +13,7 @@
         <file alias="workspaces/brushstudio/StudioParameter.qml">../ui/workspaces/brushstudio/StudioParameter.qml</file>
         <file alias="workspaces/brushstudio/StudioExposure.qml">../ui/workspaces/brushstudio/StudioExposure.qml</file>
         <file alias="workspaces/brushstudio/StudioSettings.qml">../ui/workspaces/brushstudio/StudioSettings.qml</file>
+        <file alias="workspaces/brushstudio/StudioTipEditor.qml">../ui/workspaces/brushstudio/StudioTipEditor.qml</file>
         <file alias="components/MainToolbar.qml">../ui/components/MainToolbar.qml</file>
         <file alias="components/ToolPalette.qml">../ui/components/ToolPalette.qml</file>
         <file alias="components/CanvasWorkspace.qml">../ui/components/CanvasWorkspace.qml</file>
