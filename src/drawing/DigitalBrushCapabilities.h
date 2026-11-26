@@ -31,6 +31,11 @@ struct DigitalCapabilityReport {
 // Full document check, including combinations such as a bitmap tip with a
 // stored hardness other than 100.
 DigitalCapabilityReport inspectDigitalBrush(const brush::BrushDocument& document);
+DigitalCapabilityReport inspectRealisticBrush(const brush::BrushDocument& document);
+
+// The engine the document names decides which production renderer answers.
+DigitalCapabilityReport inspectNativeBrush(const brush::BrushDocument& document);
+std::string nativeBrushIssue(const brush::BrushDocument& document);
 
 // Static vocabulary support. A false result means no value of this setting is
 // consumed by the Digital renderer; a true result can still be rejected in a
@@ -38,6 +43,7 @@ DigitalCapabilityReport inspectDigitalBrush(const brush::BrushDocument& document
 bool digitalSupportsParameter(std::string_view name);
 bool digitalSupportsComponentKind(brush::ComponentKind kind);
 bool digitalSupportsBlend(brush::ComponentBlend blend);
+bool realisticSupportsParameter(std::string_view name);
 
 // The compact set offered for a new brush and as the fallback for a native
 // brush that has no exposure of its own. These are common marker controls, not

@@ -1021,9 +1021,11 @@ QVariantMap BrushStudioModel::settingState() const {
     const auto* selected = selectedComponentData();
     // One capability pass for the whole readback. Asking per row would re-run
     // the document validator dozens of times on every slider drag.
-    const auto capability = drawing::inspectDigitalBrush(m_document);
+    const auto capability = drawing::inspectNativeBrush(m_document);
     const auto parameterReason = [&](std::string_view name) -> QString {
-        if (!drawing::digitalSupportsParameter(name))
+        const bool realistic = m_document.engine == brush::Engine::Realistic;
+        if (realistic ? !drawing::realisticSupportsParameter(name)
+                      : !drawing::digitalSupportsParameter(name))
             return QString::fromStdString(drawing::digitalParameterReason(m_document, name));
         if (const auto* found = capability.find("parameter:" + std::string(name)))
             return QString::fromStdString(found->message);
@@ -1031,7 +1033,9 @@ QVariantMap BrushStudioModel::settingState() const {
     };
     QString componentSupport;
     if (selected) {
-        if (!drawing::digitalSupportsComponentKind(selected->kind)) {
+        if (m_document.engine == brush::Engine::Realistic && selected->kind != ComponentKind::ProceduralShape) {
+            componentSupport = tr("Realistic paint uses the physical tip and paint controls, not this mark component.");
+        } else if (!drawing::digitalSupportsComponentKind(selected->kind)) {
             componentSupport = QString::fromStdString(
                 drawing::digitalComponentReason(m_document, selected->id));
         } else if (const auto* found = capability.find("component:" + selected->id)) {

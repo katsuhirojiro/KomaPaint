@@ -15,7 +15,9 @@
 #include "brush/BrushModel.h"
 #include "drawing/BrushDocumentAdapter.h"
 #include "drawing/BrushEngine.h"
+#include "drawing/DigitalBrushCapabilities.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -801,6 +803,49 @@ void testTaperAndSpacingVariationReachPixels() {
     CHECK(paintJitter(31u) != paintJitter(32u));
 }
 
+void testRealisticDocumentPaintsThroughTheMaterialEngine() {
+    brush::BrushDocument document("Physical");
+    document.id = "brush-physical";
+    document.engine = brush::Engine::Realistic;
+    document.setParameter("size", 18.0);
+    document.setParameter("paint-load", 90.0);
+    document.setParameter("water-amount", 30.0);
+    brush::BrushComponent tip;
+    tip.id = "tip";
+    tip.name = "Physical round";
+    tip.kind = brush::ComponentKind::ProceduralShape;
+    tip.parameters.set("tip-shape", 0.0);
+    CHECK(document.addComponent(std::move(tip)));
+    CHECK(drawing::inspectNativeBrush(document).supported);
+
+    auto presets = material::defaultBrushDefinitions();
+    const auto preset = std::find_if(presets.begin(), presets.end(), [](const auto& item) {
+        return item.id == "gouache-round";
+    });
+    CHECK(preset != presets.end());
+    if (preset == presets.end()) return;
+    StrokeRuntime runtime;
+    runtime.color = 0xff2255aa;
+    auto definition = drawing::materialDefinition(*preset, document, runtime);
+    drawing::assignInitialPaint(&definition, document, runtime.color, 1.0);
+    material::BrushReservoir reservoir(definition.reservoirCapacity);
+    CHECK(reservoir.reload(definition));
+    material::PigmentLibrary pigments;
+    material::MaterialEngine engine(pigments);
+    SparseTileStore surface(48, 48);
+    const auto* medium = material::findMediumProfile(definition.mediumId);
+    CHECK(medium != nullptr);
+    if (!medium) return;
+    material::MaterialStroke stroke(surface, definition, reservoir, engine, *medium,
+                                    material::absorbentPaper());
+    CHECK(stroke.begin({12.0, 24.0, {1.0, 0.1, 0.0, 0.0}}));
+    CHECK(stroke.extend({36.0, 24.0, {0.9, 0.2, 0.0, 0.0}}));
+    CHECK(stroke.end({40.0, 24.0, {0.8, 0.2, 0.0, 0.0}}));
+    CHECK(!stroke.failed());
+    CHECK(surface.pixel({12, 24}).value_or(0) != 0);
+    CHECK(surface.pixel({36, 24}).value_or(0) != 0);
+}
+
 void testInvalidStrokeIsReportedNotSilent() {
     // A size below the engine's minimum must fail loudly, exactly as the flat
     // path does, rather than painting nothing.
@@ -831,6 +876,7 @@ int main() {
     testRandomizationReachesThePixels();
     testDocumentBrushKeepsItsSpacingThroughLowPressure();
     testTaperAndSpacingVariationReachPixels();
+    testRealisticDocumentPaintsThroughTheMaterialEngine();
     testInvalidStrokeIsReportedNotSilent();
     testBitmapTipPaintsActualPixels();
     testMasksAndComponentBlendsReachPixels();

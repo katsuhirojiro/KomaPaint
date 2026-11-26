@@ -58,7 +58,7 @@ void BrushStudioPad::syncDraft()
             issue = tr("There is no draft to preview.");
         } else {
             const auto& brush = m_draft->document();
-            issue = QString::fromStdString(drawing::digitalBrushIssue(brush));
+            issue = QString::fromStdString(drawing::nativeBrushIssue(brush));
             // Copy the authored metadata, not its immutable resource pixels.
             if (issue.isEmpty()) snapshot = std::make_shared<const brush::BrushDocument>(brush);
         }
@@ -69,6 +69,9 @@ void BrushStudioPad::syncDraft()
     }
     const bool notify = issue != m_padBrush.nativeBrushIssue();
     m_padBrush.setNativeBrush(std::move(snapshot), issue);
+    if (m_padBrush.nativeBrushDocument())
+        m_padBrush.setBrushEngine(m_padBrush.nativeBrushDocument()->engine == brush::Engine::Realistic
+                                      ? QStringLiteral("realistic") : QStringLiteral("digital"));
     if (notify) emit renderIssueChanged();
 }
 

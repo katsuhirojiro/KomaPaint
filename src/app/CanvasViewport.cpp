@@ -910,7 +910,7 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
         }
     }
 
-    if (!native && brush->isRealisticEngine()) {
+    if (brush->isRealisticEngine()) {
         if (!m_history->beginMaterialStroke(layer)) {
             emit strokeError(QStringLiteral("Could not start material stroke history; no paint was applied."));
             return false;

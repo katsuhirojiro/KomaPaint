@@ -104,6 +104,75 @@ std::string digitalBlendReason(brush::ComponentBlend blend) {
     return "Digital painting supports Normal, Multiply, Screen and Overlay component blending. This blend is kept in the brush file.";
 }
 
+bool realisticSupportsParameter(std::string_view name) {
+    constexpr std::string_view values[] = {
+        "size", "opacity", "flow", "spacing", "hardness", "aspect", "tip-angle",
+        "follow-direction", "paint-load", "pigment-concentration", "water-amount",
+        "paint-body", "pickup", "depletion", "wetness", "drying-speed", "tooth-response",
+        "granulation", "edge-accumulation", "pressure-amount", "pressure-contact",
+        "persistent-reservoir"
+    };
+    return contains(values, name);
+}
+
+DigitalCapabilityReport inspectRealisticBrush(const brush::BrushDocument& doc) {
+    DigitalCapabilityReport report;
+    auto add = [&](std::string feature, std::string message) {
+        report.issues.push_back(issue(std::move(feature), std::move(message)));
+    };
+    if (doc.engine != brush::Engine::Realistic) {
+        add("engine", "This is not a Realistic brush.");
+        return report;
+    }
+    const auto validation = doc.validate();
+    if (!validation.ok()) {
+        add("document", validation.summary());
+        return report;
+    }
+    if (doc.formatFlags || !doc.opaqueChunks.empty()) {
+        add("extensions", "This brush contains native extensions the Realistic renderer cannot interpret. They are preserved on save.");
+    }
+    for (const auto& [name, value] : doc.parameters.entries()) {
+        const auto* info = brush::findParameter(name);
+        if (!realisticSupportsParameter(name) && (!info || value != info->defaultValue)) {
+            add("parameter:" + name, parameterLabel(name) +
+                " is not used by Realistic paint. The stored value is kept in the brush file.");
+        }
+    }
+    for (const auto& component : doc.components) {
+        if (!component.visible) continue;
+        if (component.kind != ComponentKind::ProceduralShape) {
+            add("component:" + component.id,
+                "Realistic paint uses the physical tip, bristles and paint parameters. "
+                "This mark component is kept in the brush file but is not painted by the Realistic renderer.");
+        }
+    }
+    for (const auto& binding : doc.dynamics) {
+        if (binding.amount == 0.0) continue;
+        add("binding:" + binding.parameter,
+            "Realistic paint reads pressure through its paint-flow and contact controls, not this response curve. "
+            "The binding is kept in the brush file.");
+        break;
+    }
+    for (const auto& rule : doc.randomization) {
+        if (!rule.enabled) continue;
+        add("variation:" + rule.parameter,
+            "Realistic paint does not apply Digital parameter variation. The rule is kept in the brush file.");
+        break;
+    }
+    report.supported = report.issues.empty();
+    return report;
+}
+
+DigitalCapabilityReport inspectNativeBrush(const brush::BrushDocument& document) {
+    return document.engine == brush::Engine::Realistic ? inspectRealisticBrush(document)
+                                                      : inspectDigitalBrush(document);
+}
+
+std::string nativeBrushIssue(const brush::BrushDocument& document) {
+    return inspectNativeBrush(document).summary();
+}
+
 std::string digitalParameterReason(const brush::BrushDocument& document, std::string_view name) {
     if (!digitalSupportsParameter(name)) {
         return parameterLabel(name) +

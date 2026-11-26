@@ -784,7 +784,8 @@ QVariantMap SubToolLibrary::installNativeBrushInTab(const QUrl& file, const QStr
         outcome.insert(QStringLiteral("supported"), true);
         return failOutcome(error);
     }
-    const auto capability = drawing::inspectDigitalBrush(doc);
+    const bool realistic = doc.engine == brush::Engine::Realistic;
+    const auto capability = drawing::inspectNativeBrush(doc);
     outcome.insert(QStringLiteral("supported"), capability.supported);
     if (!capability.supported) {
         // The caller may already have saved this file. Do not copy an
@@ -797,17 +798,18 @@ QVariantMap SubToolLibrary::installNativeBrushInTab(const QUrl& file, const QStr
         return failOutcome(tr("The brush library is not available for writing."));
 
     auto next = m_collections;
-    auto& collection = next.digital;
+    auto& collection = realistic ? next.realistic : next.digital;
+    const QString engineName = realistic ? tr("Realistic") : tr("Digital");
     QString target = targetTabId;
     if (target.isEmpty()) {
         const QString current = collection.currentTabId;
-        target = (m_tool == QStringLiteral("brush") && activeEngine() == QStringLiteral("digital") &&
+        target = (m_tool == QStringLiteral("brush") && activeEngine() == engineName.toLower() &&
                   findTabIndex(collection, current) >= 0)
             ? current : collection.defaultTabId;
     }
     int targetIndex = findTabIndex(collection, target);
     if (targetIndex < 0)
-        return failOutcome(tr("The target Digital brush tab no longer exists."));
+        return failOutcome(tr("The target %1 brush tab no longer exists.").arg(engineName));
 
     const QString name = QString::fromStdString(doc.name).trimmed();
     const QString updateId = QString::fromStdString(doc.id);
@@ -825,7 +827,7 @@ QVariantMap SubToolLibrary::installNativeBrushInTab(const QUrl& file, const QStr
         }
         if (installed) break;
     }
-    if (targetIndex < 0) return failOutcome(tr("The target Digital brush tab no longer exists."));
+    if (targetIndex < 0) return failOutcome(tr("The target %1 brush tab no longer exists.").arg(engineName));
 
     const QString key = BrushLibraryStore::installNativeFile(m_persistencePath, original, &error);
     if (key.isEmpty()) return failOutcome(error);
@@ -848,7 +850,8 @@ QVariantMap SubToolLibrary::installNativeBrushInTab(const QUrl& file, const QStr
     for (auto it = installed->nativeOverrides.begin(); it != installed->nativeOverrides.end();) {
         const auto* info = brush::findParameter(it.key().toStdString());
         if (!info || info->scope != brush::ParameterScope::Brush ||
-            !drawing::digitalSupportsParameter(info->name)) {
+            !(realistic ? drawing::realisticSupportsParameter(info->name)
+                        : drawing::digitalSupportsParameter(info->name))) {
             it = installed->nativeOverrides.erase(it);
         } else {
             ++it;
@@ -864,7 +867,7 @@ QVariantMap SubToolLibrary::installNativeBrushInTab(const QUrl& file, const QStr
         return failOutcome(error);
     m_collections = std::move(next);
     setLastError({});
-    if (isBrushTool() && activeEngine() == QStringLiteral("digital")) apply();
+    if (isBrushTool() && activeEngine() == (realistic ? QStringLiteral("realistic") : QStringLiteral("digital"))) apply();
     emit tabsChanged();
     emit subToolsChanged();
     emit currentChanged();
@@ -1402,7 +1405,7 @@ void SubToolLibrary::apply()
                             doc.setParameter(info->name, it.value());
                         }
                     }
-                    issue = QString::fromStdString(drawing::digitalBrushIssue(doc));
+                    issue = QString::fromStdString(drawing::nativeBrushIssue(doc));
                     if (issue.isEmpty()) native = std::make_shared<const brush::BrushDocument>(std::move(doc));
                 }
             } catch (const std::bad_alloc&) {
@@ -1412,7 +1415,10 @@ void SubToolLibrary::apply()
             }
         }
         m_applying = true;
+        const bool realisticNative = native && native->engine == brush::Engine::Realistic;
         m_brush->setNativeBrush(std::move(native), issue);
+        if (issue.isEmpty() || realisticNative)
+            m_brush->setBrushEngine(realisticNative ? QStringLiteral("realistic") : QStringLiteral("digital"));
         m_applying = false;
     }
     if (entry) applyValuesToSettings(entry->current, m_tool == QStringLiteral("eraser"));
