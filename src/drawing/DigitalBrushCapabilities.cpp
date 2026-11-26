@@ -1,0 +1,248 @@
+#include "drawing/DigitalBrushCapabilities.h"
+
+#include <algorithm>
+#include <cmath>
+#include <span>
+#include <string>
+
+namespace komapaint::drawing {
+namespace {
+
+using brush::ComponentKind;
+using brush::Signal;
+
+constexpr std::string_view kBrushValues[] = {
+    "size", "opacity", "flow", "spacing", "hardness", "aspect", "tip-angle",
+    "pressure-size", "pressure-opacity", "pressure-flow", "pressure-gamma", "min-size-ratio",
+    "tilt-size", "tilt-angle", "follow-rotation", "follow-direction", "blend-strength", "color-mix",
+    "stabilization", "rotation-offset", "scatter-x", "scatter-y", "scatter-count", "cluster", "sequence-step"
+};
+
+constexpr std::string_view kRandomValues[] = {
+    "rotation-offset", "scatter-x", "scatter-y", "scatter-count", "cluster", "component-scale", "component-opacity"
+};
+
+bool contains(std::span<const std::string_view> values, std::string_view key) {
+    return std::find(values.begin(), values.end(), key) != values.end();
+}
+
+std::string parameterLabel(std::string_view name) {
+    const auto* info = brush::findParameter(name);
+    return info ? std::string(info->label) : std::string(name);
+}
+
+std::string componentLabel(const brush::BrushComponent& component) {
+    return component.name.empty() ? component.id : component.name;
+}
+
+DigitalCapabilityIssue issue(std::string feature, std::string message) {
+    return {std::move(feature), std::move(message)};
+}
+
+} // namespace
+
+std::string DigitalCapabilityReport::summary() const {
+    return issues.empty() ? std::string{} : issues.front().message;
+}
+
+const DigitalCapabilityIssue* DigitalCapabilityReport::find(std::string_view feature) const {
+    const auto it = std::find_if(issues.begin(), issues.end(),
+                                 [feature](const auto& item) { return item.feature == feature; });
+    return it == issues.end() ? nullptr : &*it;
+}
+
+bool digitalSupportsParameter(std::string_view name) {
+    if (name == "tip-shape" || name == "component-opacity" || name == "component-weight")
+        return true;
+    if (name == "component-scale" || name == "component-rotation" || name == "component-aspect" ||
+        name == "component-offset-x" || name == "component-offset-y")
+        return true;
+    return contains(kBrushValues, name);
+}
+
+bool digitalSupportsComponentKind(brush::ComponentKind kind) {
+    switch (kind) {
+    case ComponentKind::ProceduralShape:
+    case ComponentKind::Tip:
+    case ComponentKind::Image:
+    case ComponentKind::ColourImage:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool digitalSupportsBlend(brush::ComponentBlend blend) {
+    return blend == brush::ComponentBlend::Normal;
+}
+
+std::vector<std::string_view> recommendedDigitalControls() {
+    return {"size", "opacity", "flow", "spacing", "hardness", "aspect", "tip-angle"};
+}
+
+std::string digitalBlendReason(brush::ComponentBlend blend) {
+    if (digitalSupportsBlend(blend)) return {};
+    return "Digital painting only supports Normal component blending. This blend is kept in the brush file.";
+}
+
+std::string digitalParameterReason(const brush::BrushDocument& document, std::string_view name) {
+    if (!digitalSupportsParameter(name)) {
+        return parameterLabel(name) +
+               " is kept in the brush file, but the Digital renderer does not use it.";
+    }
+    const auto report = inspectDigitalBrush(document);
+    if (const auto* found = report.find("parameter:" + std::string(name))) return found->message;
+    return {};
+}
+
+std::string digitalComponentReason(const brush::BrushDocument& document, std::string_view componentId) {
+    const auto* component = document.component(std::string(componentId));
+    if (!component) return {};
+    if (!digitalSupportsComponentKind(component->kind)) {
+        return std::string("Digital painting does not use ") + brush::toString(component->kind) +
+               " components. This component is kept in the brush file.";
+    }
+    const auto report = inspectDigitalBrush(document);
+    if (const auto* found = report.find("component:" + std::string(componentId))) return found->message;
+    return {};
+}
+
+DigitalCapabilityReport inspectDigitalBrush(const brush::BrushDocument& doc) {
+    DigitalCapabilityReport report;
+    auto add = [&](std::string feature, std::string message) {
+        report.issues.push_back(issue(std::move(feature), std::move(message)));
+    };
+
+    if (doc.engine != brush::Engine::Digital) {
+        add("engine", "Native Realistic brushes can be saved, but this renderer only paints native Digital brushes.");
+        return report;
+    }
+    const auto validation = doc.validate();
+    if (!validation.ok()) {
+        add("document", validation.summary());
+        return report;
+    }
+    if (doc.formatFlags || !doc.opaqueChunks.empty()) {
+        add("extensions", "This brush contains native extensions this renderer cannot interpret. The extensions are preserved on save.");
+        return report;
+    }
+
+    for (const auto& [name, value] : doc.parameters.entries()) {
+        const auto* info = brush::findParameter(name);
+        const bool taper = name == "taper-in" || name == "taper-out";
+        if ((!digitalSupportsParameter(name) && (!info || value != (taper ? 0.0 : info->defaultValue))) ||
+            (taper && value != 0.0)) {
+            add("parameter:" + name, parameterLabel(name) +
+                " is not supported by Digital painting. The stored value is kept in the brush file.");
+        }
+    }
+
+    for (const auto& binding : doc.dynamics) {
+        if (binding.amount == 0.0) continue;
+        const char* explicitKey = nullptr;
+        if (binding.signal == Signal::Pressure) {
+            if (binding.parameter == "size") explicitKey = "pressure-size";
+            if (binding.parameter == "opacity") explicitKey = "pressure-opacity";
+            if (binding.parameter == "flow") explicitKey = "pressure-flow";
+        } else if (binding.signal == Signal::Tilt && binding.parameter == "size") {
+            explicitKey = "tilt-size";
+        }
+        double amount = binding.amount * 100;
+        if (binding.parameter == "opacity") amount = 100 - amount;
+        const bool supported = explicitKey && binding.perStamp && binding.amount <= 1.0 &&
+            binding.curve == brush::ResponseCurve::linear() &&
+            (!doc.parameters.contains(explicitKey) ||
+             std::abs(doc.parameters.value(explicitKey, 0.0) - amount) <= 1.0e-9);
+        if (!supported) {
+            add("binding:" + binding.parameter,
+                "This Digital renderer cannot apply the stored response for '" + binding.parameter + "'. It is kept in the brush file.");
+        }
+    }
+
+    for (const auto& rule : doc.randomization) {
+        if (rule.enabled && (!contains(kRandomValues, rule.parameter) || !std::isfinite(rule.minimum) ||
+                             !std::isfinite(rule.maximum) || !std::isfinite(rule.maximum - rule.minimum))) {
+            add("variation:" + rule.parameter,
+                "This Digital renderer cannot apply the stored variation for '" + rule.parameter + "'. It is kept in the brush file.");
+        }
+    }
+
+    for (const auto& generator : doc.generators) {
+        if (!generator.enabled) continue;
+        if (generator.kind != brush::GeneratorKind::Continuous || !generator.parameters.empty()) {
+            add("generator", std::string("Digital painting does not yet support the stored '") +
+                brush::toString(generator.kind) + "' generator or its overrides.");
+        }
+    }
+
+    auto hasGenerator = [&](std::string_view groupId) {
+        for (const auto& generator : doc.generators) {
+            if (generator.enabled && generator.groupId == groupId) return true;
+        }
+        return false;
+    };
+    const double hardness = doc.parameters.value("hardness", 100.0);
+    const double blendStrength = doc.parameters.value("blend-strength", 0.0);
+    bool hasTip = false;
+    for (const auto& component : doc.components) {
+        if (!component.visible) continue;
+        bool connected = hasGenerator(component.groupId);
+        for (const auto* group = doc.group(component.groupId);
+             group && !connected && !group->parentGroupId.empty();
+             group = doc.group(group->parentGroupId)) {
+            connected = hasGenerator(group->parentGroupId);
+        }
+        if (!connected) continue;
+        hasTip = true;
+        const std::string label = componentLabel(component);
+        const std::string componentFeature = "component:" + component.id;
+        if (!digitalSupportsComponentKind(component.kind)) {
+            add(componentFeature, "Digital painting does not use " + std::string(brush::toString(component.kind)) +
+                " components. '" + label + "' is kept in the brush file.");
+            continue;
+        }
+        if (!digitalSupportsBlend(component.blend) || !component.maskComponentId.empty()) {
+            add(componentFeature, "Component '" + label + "' uses a blend or mask not yet supported in Digital painting.");
+            if (!digitalSupportsBlend(component.blend)) {
+                add("blend", "Digital painting only supports Normal component blending. The stored blend on '" +
+                    label + "' is kept in the brush file.");
+            }
+            continue;
+        }
+        if (component.kind == ComponentKind::ProceduralShape && component.resourceId.empty()) {
+            for (const auto& [key, value] : component.parameters.entries()) {
+                (void)value;
+                if (key != "tip-shape") {
+                    add(componentFeature, "Component '" + label + "' has unsupported tip settings.");
+                    break;
+                }
+            }
+            continue;
+        }
+        const bool colour = component.kind == ComponentKind::Image || component.kind == ComponentKind::ColourImage;
+        if (!(colour || component.kind == ComponentKind::Tip) || !component.parameters.empty()) {
+            add(componentFeature, "Digital painting does not support component '" + label + "' (" +
+                brush::toString(component.kind) + ").");
+            continue;
+        }
+        const auto* bitmap = doc.resource(component.resourceId);
+        if (!bitmap || (colour && bitmap->kind != brush::ResourceKind::Rgba8)) {
+            add(componentFeature, "Component '" + label + "' needs " +
+                (colour ? "an RGBA image." : "valid tip pixels."));
+            continue;
+        }
+        if (hardness != 100.0) {
+            add(componentFeature, "Bitmap tips use their own edges. Digital painting cannot apply the stored Hardness to '" + label + "'.");
+            add("parameter:hardness", "Hardness cannot change a bitmap tip. Set Hardness to 100 or use a procedural tip.");
+        }
+        if (colour && blendStrength != 0.0) {
+            add(componentFeature, "Colour image stamps do not support Digital smudging yet ('" + label + "').");
+            add("parameter:blend-strength", "Smudging is not supported on Colour Image components. Set Blend / Smudge to 0.");
+        }
+    }
+    if (!hasTip) add("components", "No visible tip is connected to an enabled generator.");
+    report.supported = report.issues.empty();
+    return report;
+}
+
+} // namespace komapaint::drawing
