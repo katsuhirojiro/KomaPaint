@@ -1400,7 +1400,19 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
             && control("brushStudioReason_texture-scale")->isVisible());
     QVERIFY(draft->document().parameter("texture-scale") == 0.0); // no silent write
     QVERIFY(press("brushStudioSection_Brush TipToggle"));
-    QTRY_VERIFY(control("brushStudioValue_tip-shape") && !control("brushStudioValue_tip-shape")->isEnabled());
+    auto* tipShapeControl = control("brushStudioValue_tip-shape");
+    QVERIFY2(tipShapeControl, "The Tip Shape control is missing after opening the Brush Tip section");
+    const auto tipShapeState = draft->settingState().value(QStringLiteral("values")).toMap()
+                                   .value(QStringLiteral("tip-shape")).toMap();
+    QVERIFY2(!tipShapeState.value(QStringLiteral("available")).toBool(),
+             qPrintable(QStringLiteral("Tip Shape is available for selected kind %1")
+                            .arg(draft->selectedComponent().value(QStringLiteral("kindName")).toString())));
+    QVERIFY2(!tipShapeControl->isEnabled(),
+             qPrintable(QStringLiteral("Tip Shape state available=%1 supported=%2 reason=%3")
+                            .arg(tipShapeState.value(QStringLiteral("available")).toBool())
+                            .arg(tipShapeState.value(QStringLiteral("supported")).toBool())
+                            .arg(tipShapeState.value(QStringLiteral("reason")).toString())));
+    QTRY_VERIFY(!tipShapeControl->isEnabled());
     QVERIFY(press("brushStudioSection_AdvancedToggle"));
     QTRY_VERIFY(control("brushStudioValue_component-opacity") && control("brushStudioValue_component-opacity")->isVisible());
     QVERIFY(!control("brushStudioValue_component-opacity")->isEnabled());
