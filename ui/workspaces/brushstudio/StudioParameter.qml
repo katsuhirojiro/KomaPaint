@@ -181,10 +181,10 @@ ColumnLayout {
         focus: false
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         background: Rectangle {
-            color: KP.surfaceRaised
+            color: KP.paneBgAlt
             radius: KP.radiusS
             border.width: KP.hairlineWidth
-            border.color: KP.borderStrong
+            border.color: KP.border
         }
         contentItem: Text {
             text: row.explanation
