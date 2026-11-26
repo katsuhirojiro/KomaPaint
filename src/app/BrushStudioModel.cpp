@@ -29,6 +29,8 @@ using brush::ComponentKind;
 using brush::Engine;
 using brush::SelectionMode;
 
+bool isMaskSource(ComponentKind kind);
+
 QString unitName(brush::ParameterUnit unit) {
     switch (unit) {
     case brush::ParameterUnit::Percent: return QStringLiteral("%");
@@ -595,16 +597,16 @@ QVariantMap BrushStudioModel::loadSelectedPixels() const {
     const auto count = std::size_t(resource->width) * std::size_t(resource->height);
     QVariantList rgba;
     rgba.reserve(qsizetype(count));
-    const auto* data = resource->pixels.data();
+    const auto& pixels = resource->pixels();
     for (std::size_t i = 0; i < count; ++i) {
         std::uint32_t r = 255, g = 255, b = 255, a = 255;
         if (resource->kind == brush::ResourceKind::Grayscale8) {
-            a = data[i];
+            a = pixels[i];
         } else {
-            r = data[i * 4];
-            g = data[i * 4 + 1];
-            b = data[i * 4 + 2];
-            a = data[i * 4 + 3];
+            r = pixels[i * 4];
+            g = pixels[i * 4 + 1];
+            b = pixels[i * 4 + 2];
+            a = pixels[i * 4 + 3];
         }
         rgba.append((a << 24) | (r << 16) | (g << 8) | b);
     }
