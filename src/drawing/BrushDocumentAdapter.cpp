@@ -74,6 +74,7 @@ struct ResolvedValues {
     double taperIn;
     double taperOut;
     double spacingJitter;
+    double strokeDelay;
     bool followDirection;
     bool erase;
     bool texturedTip;
@@ -115,6 +116,7 @@ ResolvedValues resolve(const brush::LegacyBrush& b) {
     v.taperIn = 0.0;
     v.taperOut = 0.0;
     v.spacingJitter = 0.0;
+    v.strokeDelay = 0.0;
     v.followDirection = b.followDirection;
     v.erase = b.erase;
     v.texturedTip = b.tipStyle != "round";
@@ -188,6 +190,7 @@ ResolvedValues resolve(const brush::BrushDocument& doc) {
     v.taperIn = stored(doc, "taper-in");
     v.taperOut = stored(doc, "taper-out");
     v.spacingJitter = stored(doc, "spacing-jitter");
+    v.strokeDelay = stored(doc, "stroke-delay");
     v.followDirection = stored(doc, "follow-direction") >= 0.5;
     v.erase = false;   // the tool decides; a component's own eraser is a request
     v.texturedTip = static_cast<int>(std::lround(tipShape(doc))) != 0;
@@ -232,6 +235,7 @@ BrushDefinition digitalFrom(const ResolvedValues& v, double tipShapeValue,
     definition.taperIn = std::clamp(v.taperIn / 100.0, 0.0, 1.0);
     definition.taperOut = std::clamp(v.taperOut / 100.0, 0.0, 1.0);
     definition.spacingJitter = std::clamp(v.spacingJitter / 100.0, 0.0, 1.0);
+    definition.strokeDelay = std::clamp(v.strokeDelay / 100.0, 0.0, 1.0);
     definition.erase = erase;
     definition.color = runtime.color;
     return definition;

@@ -27,6 +27,7 @@ struct BrushDefinition {
     double taperIn = 0.0;        // distance ramp at the start, as a share of size
     double taperOut = 0.0;       // distance ramp at the end, as a share of size
     double spacingJitter = 0.0;  // 0..1 random variation of each spacing step
+    double strokeDelay = 0.0;    // distance the painted line trails the pointer, as a share of size
     std::uint32_t randomSeed = 0; // deterministic spacing/scatter seed for this stroke
 
     // Pressure & stylus dynamics (defaults preserve fixed-size linear opacity behaviour)
@@ -155,6 +156,7 @@ private:
     double m_travelled = 0.0;
     double m_taperDistanceIn = 0.0;
     double m_taperDistanceOut = 0.0;
+    double m_delayDistance = 0.0;
     std::uint32_t m_randomState = 1u;
     std::deque<PendingStamp> m_pending;
     SparseTileStore::WriteResult m_failureReason = SparseTileStore::WriteResult::Unchanged;

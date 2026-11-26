@@ -109,10 +109,10 @@ int main(int argc, char** argv)
     restarted.selectById(alias);
     CHECK(settings.nativeBrushDocument() && settings.size() == 16);
 
-    CHECK(changed.setParameter("stroke-delay", 5));
+    CHECK(changed.setParameter("accumulate", 0));
     CHECK(brush::saveBrushFile(path, changed));
     CHECK(restarted.registerNativeBrush(url).isEmpty());
-    CHECK(restarted.lastError().contains(QStringLiteral("Stroke delay")));
+    CHECK(restarted.lastError().contains(QStringLiteral("Accumulation")));
     CHECK(restarted.currentBrushId() == alias);
     QFile damaged(source);
     CHECK(damaged.open(QIODevice::WriteOnly | QIODevice::Truncate));

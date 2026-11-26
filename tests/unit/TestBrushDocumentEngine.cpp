@@ -705,8 +705,8 @@ void testUnsupportedAndBadAssetsAreDiagnosed() {
     unsupported.components[0].blend = ComponentBlend::Height;
     CHECK(drawing::digitalBrushIssue(unsupported).find("blend") != std::string::npos);
     unsupported = bitmap;
-    unsupported.setParameter("stroke-delay", 20);
-    CHECK(drawing::digitalBrushIssue(unsupported).find("Stroke delay") != std::string::npos);
+    unsupported.setParameter("accumulate", 0);
+    CHECK(drawing::digitalBrushIssue(unsupported).find("Accumulation") != std::string::npos);
     unsupported = bitmap;
     unsupported.opaqueChunks.push_back({"FUTR", "retained"});
     CHECK(drawing::digitalBrushIssue(unsupported).find("extensions") != std::string::npos);
@@ -803,6 +803,30 @@ void testTaperAndSpacingVariationReachPixels() {
     CHECK(paintJitter(31u) != paintJitter(32u));
 }
 
+void testStrokeDelayTrailsThePointer() {
+    LegacyBrush legacy;
+    legacy.size = 16.0;
+    legacy.opacity = 100.0;
+    legacy.flow = 100.0;
+    legacy.spacing = 20.0;
+    legacy.hardness = 100.0;
+    auto document = BrushDocument::fromLegacy(legacy, "brush-delay", "Delay");
+    document.setParameter("stroke-delay", 100.0);
+    StrokeRuntime runtime;
+    runtime.color = 0xff000000;
+    SparseTileStore store(320, 120);
+    drawing::DocumentStroke stroke(store, document,
+                                   drawing::digitalDefinition(document, runtime), 3u);
+    CHECK(stroke.begin({20, 60, 1}));
+    for (int x = 21; x <= 160; ++x) CHECK(stroke.extend({double(x), 60, 1}));
+    // 100% of a 16px tip is a 64px trail: the leading edge is still held back.
+    CHECK(store.pixel({150, 60}).value_or(0) == 0U);
+    CHECK(store.pixel({40, 60}).value_or(0) != 0U);
+    CHECK(stroke.end({160, 60, 1}));
+    CHECK(!stroke.failed());
+    CHECK(store.pixel({150, 60}).value_or(0) != 0U);
+}
+
 void testRealisticDocumentPaintsThroughTheMaterialEngine() {
     brush::BrushDocument document("Physical");
     document.id = "brush-physical";
@@ -876,6 +900,7 @@ int main() {
     testRandomizationReachesThePixels();
     testDocumentBrushKeepsItsSpacingThroughLowPressure();
     testTaperAndSpacingVariationReachPixels();
+    testStrokeDelayTrailsThePointer();
     testRealisticDocumentPaintsThroughTheMaterialEngine();
     testInvalidStrokeIsReportedNotSilent();
     testBitmapTipPaintsActualPixels();

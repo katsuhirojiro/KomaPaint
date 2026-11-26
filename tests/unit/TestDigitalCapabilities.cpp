@@ -37,10 +37,10 @@ int main()
     for (const auto& info : brush::parameterRegistry()) {
         const bool supported = drawing::digitalSupportsParameter(info.name);
         if (info.name == std::string("taper-in") || info.name == std::string("taper-out") ||
-            info.name == std::string("spacing-jitter"))
+            info.name == std::string("spacing-jitter") || info.name == std::string("stroke-delay"))
             CHECK(supported);
         if (info.name == std::string("bristle-count") ||
-            info.name == std::string("stroke-delay") || info.name == std::string("accumulate") ||
+            info.name == std::string("accumulate") ||
             info.name == std::string("particle-count") || info.name == std::string("antialias"))
             CHECK(!supported);
         if (info.name == std::string("size") || info.name == std::string("aspect") ||

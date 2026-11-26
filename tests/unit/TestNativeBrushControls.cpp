@@ -112,13 +112,13 @@ int main(int argc, char** argv)
 
     // Unsupported stored data is honestly refused.
     auto unsupported = doc;
-    CHECK(unsupported.setParameter("stroke-delay", 42));
+    CHECK(unsupported.setParameter("accumulate", 42));
     const QString unsupportedFile = dir.filePath(QStringLiteral("Unsupported.kb"));
     CHECK(brush::saveBrushFile(QFileInfo(unsupportedFile).filesystemFilePath(), unsupported));
     const auto rejected = library.installNativeBrush(QUrl::fromLocalFile(unsupportedFile));
     CHECK(!rejected.value(QStringLiteral("supported")).toBool());
     CHECK(!rejected.value(QStringLiteral("installed")).toBool());
-    CHECK(rejected.value(QStringLiteral("error")).toString().contains(QStringLiteral("Stroke delay")));
+    CHECK(rejected.value(QStringLiteral("error")).toString().contains(QStringLiteral("Accumulation")));
 
     std::printf("%d checks, 0 failures\n", g_checks);
     std::puts("Native install outcomes, tab selection, overrides, reset and asset immutability passed.");

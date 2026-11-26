@@ -16,7 +16,7 @@ constexpr std::string_view kBrushValues[] = {
     "pressure-size", "pressure-opacity", "pressure-flow", "pressure-gamma", "min-size-ratio",
     "tilt-size", "tilt-angle", "follow-rotation", "follow-direction", "blend-strength", "color-mix",
     "stabilization", "rotation-offset", "scatter-x", "scatter-y", "scatter-count", "cluster", "sequence-step",
-    "taper-in", "taper-out", "spacing-jitter",
+    "taper-in", "taper-out", "spacing-jitter", "stroke-delay",
     "texture-strength", "texture-scale", "texture-rotation", "texture-offset-x", "texture-offset-y",
     "texture-contrast", "texture-depth"
 };

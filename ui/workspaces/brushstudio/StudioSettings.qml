@@ -71,7 +71,7 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.bottomMargin: KP.gapS
                         visible: inspector.readback.hasUnsupported
-                        text: qsTr("Unavailable controls are kept in the brush file, but the Digital renderer does not use them.")
+                        text: qsTr("Unavailable controls are kept in the brush file, but the current engine does not use them.")
                         color: KP.textSubtle
                         font.family: KP.fontUi
                         font.pixelSize: KP.fontS

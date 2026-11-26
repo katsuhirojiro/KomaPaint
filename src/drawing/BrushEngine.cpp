@@ -633,7 +633,7 @@ double BrushStroke::randomUnit() {
 }
 
 void BrushStroke::place(InputSample p, double travelled) {
-    if (m_taperDistanceOut > 0.0) {
+    if (m_taperDistanceOut > 0.0 || m_delayDistance > 0.0) {
         m_pending.push_back({p, travelled});
         return;
     }
@@ -642,17 +642,18 @@ void BrushStroke::place(InputSample p, double travelled) {
 
 bool BrushStroke::flushPending(bool final) {
     while (!m_pending.empty()) {
-        if (!final && m_travelled - m_pending.front().travelled <= m_taperDistanceOut + 1.0e-9)
+        const double hold = std::max(m_taperDistanceOut, m_delayDistance);
+        if (!final && m_travelled - m_pending.front().travelled <= hold + 1.0e-9)
             break;
         const PendingStamp next = m_pending.front();
         m_pending.pop_front();
         double taper = taperInAt(next.travelled);
-        if (final && m_taperDistanceOut > 0.0) {
+        if (m_taperDistanceOut > 0.0) {
             const double remaining = std::max(0.0, m_travelled - next.travelled);
-            double out = remaining >= m_taperDistanceOut
+            const double out = remaining >= m_taperDistanceOut
                 ? 1.0 : std::clamp(remaining / m_taperDistanceOut, 0.0, 1.0);
-            out = out * out * (3.0 - 2.0 * out);
-            taper = std::min(taper, out);
+            const double shaped = out * out * (3.0 - 2.0 * out);
+            taper = std::min(taper, shaped);
         }
         if (!stamp(next.sample, taper)) return false;
     }
@@ -674,6 +675,7 @@ bool BrushStroke::begin(InputSample p) {
     m_travelled = 0.0;
     m_taperDistanceIn = std::max(0.0, std::min(1.0, m_brush.taperIn)) * m_brush.size * 4.0;
     m_taperDistanceOut = std::max(0.0, std::min(1.0, m_brush.taperOut)) * m_brush.size * 4.0;
+    m_delayDistance = std::max(0.0, std::min(1.0, m_brush.strokeDelay)) * m_brush.size * 4.0;
     m_pending.clear();
     m_hasAngle = false;
     m_hasCarry = false;
@@ -798,7 +800,7 @@ bool BrushStroke::end(InputSample p) {
     // already placed a stamp there. This preserves the old "no duplicate dab"
     // behaviour for stationary strokes.
     if (m_moved && !m_endpointStamped && m_remaining > 1.0e-9) place(p, m_travelled);
-    if (m_taperDistanceOut > 0.0) return flushPending(true);
+    if (m_taperDistanceOut > 0.0 || m_delayDistance > 0.0) return flushPending(true);
     return true;
 }
 } // namespace komapaint
