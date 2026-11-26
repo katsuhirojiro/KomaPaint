@@ -1482,8 +1482,13 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
     QVERIFY(chooseStudioSegment(studio, "brushStudioInspectorChoice", 0, 2));
     QTRY_VERIFY(control("brushStudioSettingsScroll")->height() > 70);
     QVERIFY(control("brushStudioSettingsScroll")->property("contentHeight").toReal() > control("brushStudioSettingsScroll")->height());
-    QVERIFY(enter("brushStudioValue_texture-scale", QStringLiteral("150")));
-    QCOMPARE(draft->document().parameter("texture-scale"), 150.0);
+    // An unsupported stored setting is readable but not an ordinary editable
+    // field. The compact layout must preserve that refusal too.
+    auto* textureScale = control("brushStudioValue_texture-scale");
+    QVERIFY(textureScale && !textureScale->isEnabled());
+    QVERIFY(!enter("brushStudioValue_texture-scale", QStringLiteral("150")));
+    QVERIFY(!draft->setParameterValue(QStringLiteral("texture-scale"), 150.0));
+    QCOMPARE(draft->document().parameter("texture-scale"), 0.0);
     captureStudio(studio, QStringLiteral("studio-compact"));
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
 }
