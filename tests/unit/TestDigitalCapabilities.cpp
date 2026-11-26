@@ -11,7 +11,15 @@
 
 using namespace komapaint;
 
-#define CHECK(test) do { if (!(test)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #test); return 1; } } while (false)
+static int g_checks = 0;
+
+#define CHECK(test) do { \
+    ++g_checks; \
+    if (!(test)) { \
+        std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #test); \
+        return 1; \
+    } \
+} while (false)
 
 namespace {
 
@@ -137,6 +145,7 @@ int main()
     const auto bitmapReport = drawing::inspectDigitalBrush(bitmap);
     CHECK(!bitmapReport.supported && bitmapReport.find("parameter:hardness"));
 
+    std::printf("%d checks, 0 failures\n", g_checks);
     std::puts("Digital capability vocabulary, combinations and explanations passed.");
     return 0;
 }

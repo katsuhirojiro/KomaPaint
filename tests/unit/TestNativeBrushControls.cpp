@@ -14,7 +14,15 @@
 
 using namespace komapaint;
 
-#define CHECK(test) do { if (!(test)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #test); return 1; } } while (false)
+static int g_checks = 0;
+
+#define CHECK(test) do { \
+    ++g_checks; \
+    if (!(test)) { \
+        std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #test); \
+        return 1; \
+    } \
+} while (false)
 
 namespace {
 
@@ -112,6 +120,7 @@ int main(int argc, char** argv)
     CHECK(!rejected.value(QStringLiteral("installed")).toBool());
     CHECK(rejected.value(QStringLiteral("error")).toString().contains(QStringLiteral("Texture")));
 
+    std::printf("%d checks, 0 failures\n", g_checks);
     std::puts("Native install outcomes, tab selection, overrides, reset and asset immutability passed.");
     return 0;
 }
