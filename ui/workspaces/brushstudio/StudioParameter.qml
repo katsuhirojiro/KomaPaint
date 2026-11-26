@@ -12,6 +12,7 @@ ColumnLayout {
     required property var readback
     readonly property bool choice: spec.editor === "choice"
     spacing: 0
+    enabled: readback.available
     opacity: readback.available && readback.supported ? 1 : KP.disabledOpacity
 
     RowLayout {
