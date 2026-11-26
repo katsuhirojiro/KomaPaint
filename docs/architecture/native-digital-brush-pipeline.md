@@ -1,4 +1,4 @@
-# Native Digital brushes: from a Studio draft to saved artwork
+# Native brushes: from a Studio draft to saved artwork
 
 ## Try the workflow
 
@@ -16,14 +16,14 @@
    the pad when the draft changes. They do not become a brush asset or get
    serialized. The pad uses the current foreground and tablet preferences but
    does not modify the artwork, the active brush, or the artwork's undo stack.
-3. **Save and install brush** writes the portable file and, when the Digital
-   renderer supports it, installs a native brush under **Brush → Digital** in
-   the current Digital tab (or the selected target tab). It switches to that
-   tab and selects the new brush. Saving an installed original again updates
-   that entry in its existing tab. Realistic is save-only; unsupported stored
+3. **Save and install brush** writes the portable file and, when the selected
+   renderer supports it, installs a native brush under **Brush → Digital** or
+   **Brush → Realistic** in the active tab (or the collection's default tab).
+   It switches to that tab and selects the new brush. Saving an installed
+   original again updates that entry in its existing tab. Unsupported stored
    data is saved but not installed, with the reason shown. **Export** alone
    writes a copy without installing it. To install a received file, use
-   **Install .kb…** in the Digital collection's tab menu.
+   **Install .kb…** in either collection's tab menu.
 4. Select the `.kb` row in the ordinary Sub-Tool list and draw. Edit the brush
    in Studio rather than in the legacy quick settings. Save and reopen the
    artwork as `.koma`; it stores the resulting artwork pixels and does not
@@ -68,15 +68,22 @@ that row instead of substituting another tip. Other presets remain usable.
 
 ## Limits
 
-This is a native **Digital** path for supported procedural and bitmap tips,
-Normal composition, the existing component selection/variation, and the
-supported stroke controls. It does not add native Realistic/material parity,
-texture/noise assets as grain, component masks, non-Normal component blends,
-animated image sequences, independent generator schedules, arbitrary response
-curves, or a node graph editor. Material legacy presets are unchanged. There
-is no SVG/ABR/SUT conversion, pad replay or A/B comparison, per-artist native
-quick override, or native pad recovery. Image decoding uses Qt's supported
-local image codecs; `.kb` embeds pixel data, not a link to the imported image.
+The exact per-setting contract lives in
+[the feature matrix](brush-studio-feature-matrix.md). In summary, both engines
+paint supported native documents, including procedural and bitmap Digital
+tips, texture and mask sources, Normal/Multiply/Screen/Overlay components,
+component selection and variation, and the supported stroke controls.
+Realistic paints `ProceduralShape` components through the material engine and
+refuses image or mask components rather than ignoring them.
+
+Still not executed: arbitrary response-curve dynamics, generator kinds other
+than `Continuous`, Height/Mask component blends, accumulation-off, hue or
+luminance variation, and the bristle/particle parameter families. These values
+round-trip in the file and are reported as unavailable in Studio. There is no
+animated image sequence, node graph editor, SVG/ABR/SUT conversion, pad replay
+or A/B comparison, per-artist native quick override, or native pad recovery.
+Image decoding uses Qt's supported local image codecs; `.kb` embeds pixel data,
+not a link to the imported image.
 
 ## Verification entry points
 

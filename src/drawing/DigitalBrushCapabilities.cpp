@@ -16,7 +16,7 @@ constexpr std::string_view kBrushValues[] = {
     "pressure-size", "pressure-opacity", "pressure-flow", "pressure-gamma", "min-size-ratio",
     "tilt-size", "tilt-angle", "follow-rotation", "follow-direction", "blend-strength", "color-mix",
     "stabilization", "rotation-offset", "scatter-x", "scatter-y", "scatter-count", "cluster", "sequence-step",
-    "taper-in", "taper-out", "spacing-jitter", "stroke-delay",
+    "taper-in", "taper-out", "spacing-jitter", "stroke-delay", "antialias",
     "texture-strength", "texture-scale", "texture-rotation", "texture-offset-x", "texture-offset-y",
     "texture-contrast", "texture-depth"
 };
@@ -106,7 +106,7 @@ std::string digitalBlendReason(brush::ComponentBlend blend) {
 
 bool realisticSupportsParameter(std::string_view name) {
     constexpr std::string_view values[] = {
-        "size", "opacity", "flow", "spacing", "hardness", "aspect", "tip-angle",
+        "size", "opacity", "flow", "spacing", "hardness", "aspect", "tip-angle", "tip-shape",
         "follow-direction", "paint-load", "pigment-concentration", "water-amount",
         "paint-body", "pickup", "depletion", "wetness", "drying-speed", "tooth-response",
         "granulation", "edge-accumulation", "pressure-amount", "pressure-contact",

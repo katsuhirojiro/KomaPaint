@@ -18,6 +18,7 @@ struct BrushDefinition {
     std::uint32_t color = 0xff000000; // straight ARGB
     BrushTip tip = BrushTip::Round;
     double hardness = 1;          // 1 = crisp edge; 0 = fades from the centre to the rim
+    bool antialias = true;        // false = hard one-bit coverage on the tip rim
     bool erase = false;           // remove paint from the layer instead of depositing colour
 
     // Tip geometry & directionality

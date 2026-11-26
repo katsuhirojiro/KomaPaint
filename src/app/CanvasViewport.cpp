@@ -883,9 +883,6 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
     }
     const bool effectiveErase = eraseOverride || (!native && brush->erase());
     m_modifiedBeforeStroke = m_document->isModified();
-    const int effectiveStab = brush->stabilization() > 0
-        ? brush->stabilization()
-        : (m_inputSettings ? m_inputSettings->stabilizationDefault() : 0);
 
     m_strokeMaskContext = {};
     m_strokeMaskContext.selection = &m_document->selection();
@@ -909,6 +906,16 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
             return false;
         }
     }
+
+    // A native document owns its own stabiliser setting; the legacy quick
+    // control only applies when the draft leaves it at zero.
+    const double nativeStabilization = document
+        ? std::clamp(document->parameters.value("stabilization", 0.0), 0.0, 100.0) : 0.0;
+    const int effectiveStab = nativeStabilization > 0.0
+        ? qRound(nativeStabilization)
+        : (brush->stabilization() > 0
+               ? brush->stabilization()
+               : (m_inputSettings ? m_inputSettings->stabilizationDefault() : 0));
 
     if (brush->isRealisticEngine()) {
         if (!m_history->beginMaterialStroke(layer)) {

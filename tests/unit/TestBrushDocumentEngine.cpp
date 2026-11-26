@@ -803,6 +803,34 @@ void testTaperAndSpacingVariationReachPixels() {
     CHECK(paintJitter(31u) != paintJitter(32u));
 }
 
+void testAntialiasingCanBeDisabled() {
+    LegacyBrush legacy;
+    legacy.size = 9.0;
+    legacy.opacity = 100.0;
+    legacy.flow = 100.0;
+    legacy.spacing = 20.0;
+    legacy.hardness = 0.0;   // a soft rim makes the difference unambiguous
+    StrokeRuntime runtime;
+    runtime.color = 0xff000000;
+    auto document = BrushDocument::fromLegacy(legacy, "brush-aa", "Aliasing");
+    auto countPartial = [&](double antialias) {
+        document.setParameter("antialias", antialias);
+        SparseTileStore store(64, 64);
+        CHECK(BrushRasterizer::dab(store, drawing::digitalDefinition(document, runtime),
+                                   {32.0, 32.0, 1.0}) == SparseTileStore::WriteResult::Changed);
+        int partial = 0;
+        for (int y = 0; y < 64; ++y)
+            for (int x = 0; x < 64; ++x) {
+                const auto pixel = store.pixel({x, y}).value_or(0U);
+                const auto alpha = (pixel >> 24) & 255U;
+                if (alpha > 0U && alpha < 255U) ++partial;
+            }
+        return partial;
+    };
+    CHECK(countPartial(1.0) > 0);
+    CHECK(countPartial(0.0) == 0);
+}
+
 void testStrokeDelayTrailsThePointer() {
     LegacyBrush legacy;
     legacy.size = 16.0;
@@ -900,6 +928,7 @@ int main() {
     testRandomizationReachesThePixels();
     testDocumentBrushKeepsItsSpacingThroughLowPressure();
     testTaperAndSpacingVariationReachPixels();
+    testAntialiasingCanBeDisabled();
     testStrokeDelayTrailsThePointer();
     testRealisticDocumentPaintsThroughTheMaterialEngine();
     testInvalidStrokeIsReportedNotSilent();

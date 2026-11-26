@@ -76,6 +76,7 @@ struct ResolvedValues {
     double spacingJitter;
     double strokeDelay;
     bool followDirection;
+    bool antialias;
     bool erase;
     bool texturedTip;
     bool persistentReservoir;
@@ -118,6 +119,7 @@ ResolvedValues resolve(const brush::LegacyBrush& b) {
     v.spacingJitter = 0.0;
     v.strokeDelay = 0.0;
     v.followDirection = b.followDirection;
+    v.antialias = true;
     v.erase = b.erase;
     v.texturedTip = b.tipStyle != "round";
     v.persistentReservoir = b.persistentReservoir;
@@ -192,6 +194,7 @@ ResolvedValues resolve(const brush::BrushDocument& doc) {
     v.spacingJitter = stored(doc, "spacing-jitter");
     v.strokeDelay = stored(doc, "stroke-delay");
     v.followDirection = stored(doc, "follow-direction") >= 0.5;
+    v.antialias = stored(doc, "antialias") >= 0.5;
     v.erase = false;   // the tool decides; a component's own eraser is a request
     v.texturedTip = static_cast<int>(std::lround(tipShape(doc))) != 0;
     v.persistentReservoir = stored(doc, "persistent-reservoir") >= 0.5;
@@ -236,6 +239,7 @@ BrushDefinition digitalFrom(const ResolvedValues& v, double tipShapeValue,
     definition.taperOut = std::clamp(v.taperOut / 100.0, 0.0, 1.0);
     definition.spacingJitter = std::clamp(v.spacingJitter / 100.0, 0.0, 1.0);
     definition.strokeDelay = std::clamp(v.strokeDelay / 100.0, 0.0, 1.0);
+    definition.antialias = v.antialias;
     definition.erase = erase;
     definition.color = runtime.color;
     return definition;

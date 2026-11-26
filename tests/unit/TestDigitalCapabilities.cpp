@@ -41,8 +41,11 @@ int main()
             CHECK(supported);
         if (info.name == std::string("bristle-count") ||
             info.name == std::string("accumulate") ||
-            info.name == std::string("particle-count") || info.name == std::string("antialias"))
+            info.name == std::string("particle-count"))
             CHECK(!supported);
+        // Realistic reads the procedural component's tip shape, but not the
+        // Digital-only raster tip selector as a brush value.
+        if (info.name == std::string("tip-shape")) CHECK(drawing::realisticSupportsParameter(info.name));
         if (info.name == std::string("size") || info.name == std::string("aspect") ||
             info.name == std::string("tip-angle") || info.name == std::string("follow-direction") ||
             info.name == std::string("hardness") || info.name == std::string("stabilization") ||

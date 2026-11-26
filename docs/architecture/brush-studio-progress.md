@@ -532,7 +532,7 @@ Normal without masks.
 Save is now one explicit command, "Save and install brush". Its result is one
 of five reported outcomes: saved and installed (with the brush name and Digital
 tab), saved but installation failed, saved because the renderer does not
-support the brush, Realistic saved only, or save failed. Installation switches
+support the brush, Realistic saved only (superseded in B4 below), or save failed. Installation switches
 to the selected Digital tab and selects the new entry; it never silently lands
 in Default while another tab is open.
 
@@ -546,3 +546,34 @@ setting, every component kind and every blend; `test_brush_studio_model`,
 open/resave, save/install outcomes, non-default tab installation, selection and
 native-control persistence. Build and run evidence is recorded with the change
 set; no claim is made from compilation alone.
+
+## Phase B4 — native Realistic brush production path
+
+Realistic documents are no longer save-only. `inspectRealisticBrush()` accepts
+a validated document whose visible mark components are all `ProceduralShape`
+and whose stored settings are either physical-paint settings or untouched
+defaults. The Studio pad previews it by switching its brush engine from
+`digital` to `realistic`, and the artwork viewport routes every Realistic
+stroke through the material engine, including reservoir load, wetness, pickup,
+granulation and drying. Installation targets the Realistic collection and the
+active Realistic tab; a missing target tab fails loudly instead of falling back
+to Default.
+
+Selecting a Digital entry no longer forces the collection back to Digital:
+`SubToolLibrary::apply()` changes the engine only when the chosen entry is
+itself native. The Studio window's save result distinguishes saved-and-installed,
+saved-with-install-failure, saved-but-unsupported and save-only, and no longer
+reports Realistic as inherently save-only.
+
+Two more Digital settings now reach pixels. **Stroke delay** holds stamps until
+the pointer has travelled a distance derived from the brush size and flushes
+the tail on release, so the painted line trails the cursor without being lost
+at the end. **Antialiasing off** quantises the same footprint to whole pixels
+for a deliberate hard edge. A native document's **stabilisation** value now
+feeds `StrokeStabilizer` instead of always taking the legacy quick setting.
+
+Tests: `test_brush_document_engine` gained pixel-level stroke-delay,
+antialiasing and Realistic-through-material cases (4,516 checks); the
+capability, Studio model, native library and UI suites were updated to use
+`accumulate` as the canonical unsupported setting, which is stored and
+reported but not painted.

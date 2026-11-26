@@ -451,6 +451,11 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
                         coverage = computeCoverage(dx, dy, x, y);
                     }
                     if (coverage <= 0.0) continue;
+                    // Antialiasing is the coverage gradient itself; turning it
+                    // off quantises the same footprint to whole pixels so an
+                    // artist can deliberately paint a hard, pixel-crisp edge.
+                    if (!b.antialias) coverage = coverage >= 0.5 ? 1.0 : 0.0;
+                    if (coverage <= 0.0) continue;
                     if (b.maskTip) {
                         // The authored mask lives in the same local tip space.
                         // Its own scale/rotation/offset are applied here, not by
