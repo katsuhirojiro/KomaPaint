@@ -1429,7 +1429,8 @@ void TestBrushUi::brushStudioRegistryInspectorAndCreatorExposure()
     QTRY_VERIFY(!tipShapeControl->isEnabled());
     QVERIFY(press("brushStudioSection_AdvancedToggle"));
     QTRY_VERIFY(control("brushStudioValue_component-opacity") && control("brushStudioValue_component-opacity")->isVisible());
-    QVERIFY(!control("brushStudioValue_component-opacity")->isEnabled());
+    // A texture is now a real mask source, so it has component settings.
+    QVERIFY(control("brushStudioValue_component-opacity")->isEnabled());
     QCOMPARE(draft->document().components.back().opacity, 1.0);
     QVERIFY(press("brushStudioSelectedComponentSectionToggle"));
     QVERIFY(enter("brushStudioSelectedComponentName", QStringLiteral("Paper Fibre")));

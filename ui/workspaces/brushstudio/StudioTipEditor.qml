@@ -202,7 +202,7 @@ Item {
                 scale: Math.min(1, (parent.width - 2 * KP.gapS) / width,
                                 (parent.height - 2 * KP.gapS) / height)
                 transformOrigin: Item.Center
-                onImageLoaded: requestPaint()
+                onAvailableChanged: if (available) editor.loadPixels()
             }
             MouseArea {
                 anchors.fill: parent
@@ -262,5 +262,5 @@ Item {
         }
     }
 
-    Component.onCompleted: loadPixels()
+    Component.onCompleted: if (canvas.available) loadPixels()
 }
