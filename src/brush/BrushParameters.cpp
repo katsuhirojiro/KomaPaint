@@ -18,7 +18,7 @@ constexpr ParameterInfo kParameters[] = {
      "How strongly pressure shrinks the tip."},
     {"tilt-size", "Tilt to size", ParameterScope::Brush, ParameterUnit::Percent, 0, 100, 0,
      "How strongly stylus tilt broadens the tip."},
-    {"aspect", "Aspect", ParameterScope::Brush, ParameterUnit::Ratio, 25, 400, 100,
+    {"aspect", "Tip Shape", ParameterScope::Brush, ParameterUnit::Ratio, 25, 400, 100,
      "Tip width relative to height; 100 is circular, 400 is a chisel."},
     {"tip-angle", "Tip angle", ParameterScope::Brush, ParameterUnit::Degrees, -180, 180, 0,
      "Fixed rotation of the tip, in degrees."},
@@ -158,7 +158,7 @@ constexpr ParameterInfo kParameters[] = {
      "Size of this component relative to the tip."},
     {"component-rotation", "Rotation", ParameterScope::Component, ParameterUnit::Degrees, -180, 180, 0,
      "Additional rotation applied to this component."},
-    {"component-aspect", "Aspect", ParameterScope::Component, ParameterUnit::Ratio, 25, 400, 100,
+    {"component-aspect", "Tip Shape", ParameterScope::Component, ParameterUnit::Ratio, 25, 400, 100,
      "Width relative to height for this component."},
     {"component-offset-x", "Offset X", ParameterScope::Component, ParameterUnit::Percent, -200, 200, 0,
      "Horizontal placement of this component within the tip."},
@@ -170,7 +170,7 @@ constexpr ParameterInfo kParameters[] = {
     // masks. A brush migrated from the flat record selects one of them here
     // until Brush Studio authors real tip resources (Stage 3).
     // 0 round, 1 textured, 2 bristle, 3 graphite, 4 stipple.
-    {"tip-shape", "Tip shape", ParameterScope::Component, ParameterUnit::Unit, 0, 4, 0,
+    {"tip-shape", "Tip Shape Style", ParameterScope::Component, ParameterUnit::Unit, 0, 4, 0,
      "Built-in procedural tip mask: 0 round, 1 textured, 2 bristle, 3 graphite, 4 stipple."},
 };
 

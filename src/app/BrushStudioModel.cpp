@@ -2,6 +2,7 @@
 
 #include "../brush/BrushEvaluator.h"
 #include "../canvas/MemoryAvailability.h"
+#include "drawing/DigitalBrushCapabilities.h"
 
 #include <QFileInfo>
 #include <QImageReader>
@@ -141,11 +142,13 @@ BrushDocument defaultDraft() {
     generator.id = "n1";
     generator.kind = brush::GeneratorKind::Continuous;
     document.addGenerator(std::move(generator));
-    const char* defaults[] = {"size", "opacity", "flow", "spacing", "hardness"};
+    // Marker-friendly common controls: the five essentials plus the two tip
+    // angles that make a flat nib behave like a marker. These are exposure
+    // declarations only; no brush value is changed.
     int order = 0;
-    for (const char* key : defaults) {
+    for (const std::string_view key : drawing::recommendedDigitalControls()) {
         brush::ExposedProperty property;
-        property.parameter = key;
+        property.parameter = std::string(key);
         property.order = order++;
         document.expose(std::move(property));
     }
@@ -296,6 +299,12 @@ QVariantMap BrushStudioModel::componentRow(int index) const {
     map.insert(QStringLiteral("flipX"), component.transform.flipX);
     map.insert(QStringLiteral("flipY"), component.transform.flipY);
     map.insert(QStringLiteral("selected"), index == m_selectedIndex);
+    map.insert(QStringLiteral("supported"), drawing::digitalSupportsComponentKind(component.kind));
+    map.insert(QStringLiteral("supportReason"), QString::fromStdString(
+        drawing::digitalComponentReason(m_document, component.id)));
+    map.insert(QStringLiteral("blendSupported"), drawing::digitalSupportsBlend(component.blend));
+    map.insert(QStringLiteral("blendReason"), QString::fromStdString(
+        drawing::digitalBlendReason(component.blend)));
     return map;
 }
 
@@ -355,6 +364,9 @@ QVariantList BrushStudioModel::groups() const {
 QVariantList BrushStudioModel::componentKinds() const {
     QVariantList list;
     for (ComponentKind kind : kComponentKinds) {
+        // Offer only what the production Digital renderer can paint. Existing
+        // unsupported components remain in the document and are preserved.
+        if (!drawing::digitalSupportsComponentKind(kind)) continue;
         QVariantMap map;
         map.insert(QStringLiteral("value"), kindIndex(kind));
         map.insert(QStringLiteral("name"), QString::fromUtf8(brush::toString(kind)));
@@ -366,8 +378,11 @@ QVariantList BrushStudioModel::componentKinds() const {
 
 QVariantList BrushStudioModel::componentBlends() const {
     QVariantList list;
-    for (const auto blend : {ComponentBlend::Normal, ComponentBlend::Multiply, ComponentBlend::Screen,
-                             ComponentBlend::Overlay, ComponentBlend::Height, ComponentBlend::Mask}) {
+    // Only blends the native renderer consumes are offered. An existing
+    // unsupported blend is retained in the document but is not a choice.
+    for (int raw = 0; raw <= int(ComponentBlend::Mask); ++raw) {
+        const auto blend = static_cast<ComponentBlend>(raw);
+        if (!drawing::digitalSupportsBlend(blend)) continue;
         QString label = blendName(blend);
         if (!label.isEmpty()) label[0] = label[0].toUpper();
         list.append(QVariantMap{{QStringLiteral("value"), int(blend)}, {QStringLiteral("label"), label}});
@@ -798,23 +813,54 @@ QVariantList BrushStudioModel::settingSections() const {
 QVariantMap BrushStudioModel::settingState() const {
     QVariantMap values;
     int changed = 0;
+    bool hasUnsupported = false;
     QLocale locale;
     locale.setNumberOptions(locale.numberOptions() | QLocale::OmitGroupSeparator);
     const auto* selected = selectedComponentData();
+    // One capability pass for the whole readback. Asking per row would re-run
+    // the document validator dozens of times on every slider drag.
+    const auto capability = drawing::inspectDigitalBrush(m_document);
+    const auto parameterReason = [&](std::string_view name) -> QString {
+        if (!drawing::digitalSupportsParameter(name))
+            return QString::fromStdString(drawing::digitalParameterReason(m_document, name));
+        if (const auto* found = capability.find("parameter:" + std::string(name)))
+            return QString::fromStdString(found->message);
+        return {};
+    };
+    QString componentSupport;
+    if (selected) {
+        if (!drawing::digitalSupportsComponentKind(selected->kind)) {
+            componentSupport = QString::fromStdString(
+                drawing::digitalComponentReason(m_document, selected->id));
+        } else if (const auto* found = capability.find("component:" + selected->id)) {
+            componentSupport = QString::fromStdString(found->message);
+        }
+    }
     for (const auto& info : brush::parameterRegistry()) {
         const auto key = QString::fromUtf8(info.name);
         const double value = parameterValue(key);
         const bool available = parameterApplies(info, selected);
         const bool differs = available && value != info.defaultValue;
         changed += differs ? 1 : 0;
+        QString reason;
+        if (!available) reason = tr("Select a component that has this setting.");
+        else if (info.scope == brush::ParameterScope::Component && !componentSupport.isEmpty())
+            reason = componentSupport;
+        else reason = parameterReason(info.name);
+        const bool supported = available && reason.isEmpty();
         values.insert(key, QVariantMap{
             {QStringLiteral("value"), value},
             {QStringLiteral("text"), locale.toString(value, 'g', QLocale::FloatingPointShortest)},
             {QStringLiteral("available"), available},
+            {QStringLiteral("supported"), supported},
+            {QStringLiteral("reason"), reason},
             {QStringLiteral("changed"), differs},
+            {QStringLiteral("resetEnabled"), available && supported && differs},
         });
+        if (available && !supported) hasUnsupported = true;
     }
-    return {{QStringLiteral("values"), values}, {QStringLiteral("changedCount"), changed}};
+    return {{QStringLiteral("values"), values}, {QStringLiteral("changedCount"), changed},
+            {QStringLiteral("hasUnsupported"), hasUnsupported}};
 }
 
 bool BrushStudioModel::setParameterText(const QString& key, const QString& text) {
@@ -851,6 +897,9 @@ bool BrushStudioModel::setParameterValue(const QString& key, double value) {
     if (!brush::parameterInRange(*info, value)) {
         return fail(QStringLiteral("'%1' must be between %2 and %3.")
                     .arg(key).arg(info->minimum).arg(info->maximum));
+    }
+    if (info->scope == brush::ParameterScope::Brush && !drawing::digitalSupportsParameter(info->name)) {
+        return fail(QString::fromStdString(drawing::digitalParameterReason(m_document, info->name)));
     }
     if (info->scope == brush::ParameterScope::Component) {
         const auto id = selectedId();
@@ -904,6 +953,11 @@ QVariantList BrushStudioModel::exposedProperties() const {
                    QString::fromStdString(brush::effectiveSection(*property)));
         map.insert(QStringLiteral("order"), property->order);
         map.insert(QStringLiteral("control"), QString::fromUtf8(controlName(property->control)));
+        const QString support = QString::fromStdString(
+            brush::findParameter(property->parameter)
+                ? drawing::digitalParameterReason(m_document, property->parameter) : std::string{});
+        map.insert(QStringLiteral("supported"), support.isEmpty());
+        map.insert(QStringLiteral("supportReason"), support);
         map.insert(QStringLiteral("hasRange"), property->hasRangeOverride);
         map.insert(QStringLiteral("minimum"), property->hasRangeOverride && info
                                                    ? property->minimumOverride : info ? info->minimum : 0.0);
@@ -931,7 +985,7 @@ QVariantList BrushStudioModel::exposureCandidates() const {
     QVariantList list;
     for (const auto& info : brush::parameterRegistry()) {
         const auto key = QString::fromUtf8(info.name);
-        if (isExposed(key)) continue;
+        if (isExposed(key) || !drawing::digitalSupportsParameter(info.name)) continue;
         list.append(QVariantMap{
             {QStringLiteral("key"), key},
             {QStringLiteral("label"), tr("%1 · %2").arg(QString::fromUtf8(info.label), QString::fromUtf8(brush::parameterSection(info.name)))},
@@ -1057,11 +1111,10 @@ bool BrushStudioModel::moveExposure(const QString& key, int delta) try {
 void BrushStudioModel::resetExposure() {
     edit("Reset creator exposure", [this] {
         m_document.exposed.clear();
-        const char* defaults[] = {"size", "opacity", "flow", "spacing", "hardness"};
         int order = 0;
-        for (const char* key : defaults) {
+        for (const std::string_view key : drawing::recommendedDigitalControls()) {
             brush::ExposedProperty property;
-            property.parameter = key;
+            property.parameter = std::string(key);
             property.order = order++;
             m_document.expose(std::move(property));
         }

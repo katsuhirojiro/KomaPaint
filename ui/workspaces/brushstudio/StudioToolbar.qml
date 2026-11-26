@@ -22,7 +22,7 @@ ColumnLayout {
     Action { id: duplicate; text: qsTr("Duplicate draft"); onTriggered: bar.draft.duplicateDraft() }
     Action { id: openBrush; text: qsTr("Import .kb…"); onTriggered: bar.importRequested() }
     Action { id: exportBrush; text: qsTr("Export .kb copy…"); onTriggered: bar.exportRequested() }
-    Action { id: saveBrush; text: qsTr("Save .kb…"); onTriggered: bar.saveRequested() }
+    Action { id: saveBrush; text: qsTr("Save .kb and install…"); onTriggered: bar.saveRequested() }
     Action { id: closeStudio; text: qsTr("Close Brush Studio"); onTriggered: bar.closeRequested() }
 
     component Rule: Rectangle {
@@ -67,8 +67,6 @@ ColumnLayout {
             KpMenuItem { action: openBrush }
             KpMenuItem { action: saveBrush }
             KpMenuItem { action: exportBrush }
-            KpMenuSeparator {}
-            KpMenuItem { text: qsTr("Save to Library (unavailable)"); enabled: false }
         }
         KpMenu {
             title: qsTr("Edit")
@@ -86,7 +84,7 @@ ColumnLayout {
             title: qsTr("Brush")
             KpMenuItem { action: duplicate }
             KpMenuItem { text: qsTr("Digital"); checkable: true; checked: bar.draft.engine === "digital"; onTriggered: bar.draft.engine = "digital" }
-            KpMenuItem { text: qsTr("Realistic"); checkable: true; checked: bar.draft.engine === "realistic"; onTriggered: bar.draft.engine = "realistic" }
+            KpMenuItem { text: qsTr("Realistic (save only)"); checkable: true; checked: bar.draft.engine === "realistic"; onTriggered: bar.draft.engine = "realistic" }
         }
         KpMenu {
             title: qsTr("Window")
@@ -128,7 +126,7 @@ ColumnLayout {
             SegmentedChoice {
                 objectName: "brushStudioEngineChoice"
                 Layout.preferredWidth: 158
-                options: [qsTr("Digital"), qsTr("Realistic")]
+                options: [qsTr("Digital"), qsTr("Realistic (save only)")]
                 currentIndex: bar.draft.engine === "realistic" ? 1 : 0
                 onChosen: function(index) { bar.draft.engine = index === 1 ? "realistic" : "digital" }
             }
@@ -158,7 +156,7 @@ ColumnLayout {
             Item { Layout.fillWidth: true; visible: bar.showCommands }
             Text {
                 visible: bar.showDestination
-                text: qsTr("Saves a local brush file · library unavailable")
+                text: qsTr("Save installs into Brush → Digital")
                 color: KP.textSubtle
                 font.family: KP.fontUi
                 font.pixelSize: KP.fontXS
@@ -167,9 +165,9 @@ ColumnLayout {
                 objectName: "brushStudioSave"
                 action: saveBrush
                 glyph: "save"
-                label: qsTr("Save .kb…")
+                label: qsTr("Save & Install…")
                 variant: "primary"
-                tip: qsTr("Save this draft as .kb and install it if it can paint in Digital mode")
+                tip: qsTr("Save this draft as .kb and install it into Brush → Digital when the renderer supports it")
             }
             KpButton {
                 objectName: "brushStudioClose"

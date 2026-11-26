@@ -66,6 +66,17 @@ Rectangle {
                         font.pixelSize: KP.fontS
                         wrapMode: Text.WordWrap
                     }
+                    Text {
+                        objectName: "brushStudioUnsupportedNotice"
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: KP.gapS
+                        visible: inspector.readback.hasUnsupported
+                        text: qsTr("Unavailable controls are kept in the brush file, but the Digital renderer does not use them.")
+                        color: KP.textSubtle
+                        font.family: KP.fontUi
+                        font.pixelSize: KP.fontS
+                        wrapMode: Text.WordWrap
+                    }
                     PanelSection {
                         id: componentSection
                         objectName: "brushStudioSelectedComponentSection"
@@ -112,6 +123,8 @@ Rectangle {
                                     model: inspector.draft.componentBlends
                                     textRole: "label"
                                     valueRole: "value"
+                                    enabled: inspector.draft.selectedComponent.supported
+                                        && inspector.draft.selectedComponent.blendSupported
                                     function fromSelection() { return findValueIndex(inspector.draft.selectedComponent.blend) }
                                     function findValueIndex(value) { return model.findIndex(entry => entry.value === value) }
                                     currentIndex: fromSelection()
@@ -120,6 +133,20 @@ Rectangle {
                                         currentIndex = Qt.binding(function() { return blendChoice.fromSelection() })
                                     }
                                 }
+                            }
+                            Text {
+                                objectName: "brushStudioComponentSupport"
+                                Layout.fillWidth: true
+                                visible: inspector.draft.selectedIndex >= 0
+                                    && (inspector.draft.selectedComponent.supportReason.length > 0
+                                        || inspector.draft.selectedComponent.blendReason.length > 0)
+                                text: inspector.draft.selectedComponent.supportReason.length > 0
+                                    ? inspector.draft.selectedComponent.supportReason
+                                    : inspector.draft.selectedComponent.blendReason
+                                color: KP.textSubtle
+                                font.family: KP.fontUi
+                                font.pixelSize: KP.fontXS
+                                wrapMode: Text.WordWrap
                             }
                             Item { Layout.preferredHeight: KP.gapS }
                         }

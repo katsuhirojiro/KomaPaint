@@ -82,10 +82,15 @@ Flickable {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: exposedRow.entry.key ? qsTr("%1 · %2").arg(exposedRow.entry.section).arg(exposedRow.entry.control) : ""
+                        text: exposedRow.entry.key
+                            ? (exposedRow.entry.supported
+                                ? qsTr("%1 · %2").arg(exposedRow.entry.section).arg(exposedRow.entry.control)
+                                : exposedRow.entry.supportReason)
+                            : ""
                         textFormat: Text.PlainText
-                        elide: Text.ElideRight
-                        color: KP.textSubtle
+                        wrapMode: exposedRow.entry.supported ? Text.NoWrap : Text.WordWrap
+                        elide: exposedRow.entry.supported ? Text.ElideRight : Text.ElideNone
+                        color: exposedRow.entry.supported ? KP.textSubtle : KP.warning
                         font.family: KP.fontUi
                         font.pixelSize: KP.fontXS
                     }

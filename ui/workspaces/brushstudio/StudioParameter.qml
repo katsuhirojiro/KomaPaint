@@ -12,8 +12,7 @@ ColumnLayout {
     required property var readback
     readonly property bool choice: spec.editor === "choice"
     spacing: 0
-    enabled: readback.available
-    opacity: enabled ? 1 : KP.disabledOpacity
+    opacity: readback.available && readback.supported ? 1 : KP.disabledOpacity
 
     RowLayout {
         Layout.fillWidth: true
@@ -30,7 +29,9 @@ ColumnLayout {
             font.weight: row.readback.changed ? Font.DemiBold : Font.Normal
             ToolTip.visible: hover.hovered
             ToolTip.delay: 600
-            ToolTip.text: row.spec.description
+            ToolTip.text: row.readback.reason.length > 0
+                ? row.spec.description + "\n" + row.readback.reason
+                : row.spec.description
             HoverHandler { id: hover }
         }
         Loader {
@@ -48,11 +49,25 @@ ColumnLayout {
             objectName: "brushStudioReset_" + row.spec.key
             small: true
             glyph: "reset"
-            tip: qsTr("Reset %1 to its registry default").arg(row.spec.label)
-            enabled: row.readback.changed
+            tip: row.readback.supported
+                ? qsTr("Reset %1 to its registry default").arg(row.spec.label)
+                : row.readback.reason
+            enabled: row.readback.resetEnabled
             opacity: enabled ? 1 : 0
             onClicked: row.draft.setParameterValue(row.spec.key, row.spec.default)
         }
+    }
+
+    Text {
+        objectName: "brushStudioReason_" + row.spec.key
+        Layout.fillWidth: true
+        visible: row.readback.reason.length > 0 && (row.readback.available || row.readback.changed)
+        text: row.readback.reason
+        color: KP.textSubtle
+        font.family: KP.fontUi
+        font.pixelSize: KP.fontXS
+        wrapMode: Text.WordWrap
+        leftPadding: 0
     }
 
     Component {
@@ -63,6 +78,7 @@ ColumnLayout {
             text: row.readback.text
             alignment: TextInput.AlignRight
             Accessible.name: row.spec.label
+            enabled: row.readback.supported
             onSubmitted: function(typed) {
                 if (typed !== row.readback.text) row.draft.setParameterText(row.spec.key, typed)
                 numberField.text = Qt.binding(function() { return row.readback.text })
@@ -75,11 +91,12 @@ ColumnLayout {
             objectName: "brushStudioValue_" + row.spec.key
             model: row.spec.choices
             Accessible.name: row.spec.label
-            currentIndex: row.enabled ? row.readback.value : -1
-            displayText: row.enabled ? currentText : qsTr("Not applicable")
+            enabled: row.readback.supported
+            currentIndex: row.readback.supported ? row.readback.value : -1
+            displayText: row.readback.supported ? currentText : qsTr("Unavailable")
             onActivated: function(index) {
                 row.draft.setParameterValue(row.spec.key, index)
-                currentIndex = Qt.binding(function() { return row.enabled ? row.readback.value : -1 })
+                currentIndex = Qt.binding(function() { return row.readback.supported ? row.readback.value : -1 })
             }
         }
     }
@@ -87,6 +104,7 @@ ColumnLayout {
         id: rail
         objectName: "brushStudioRail_" + row.spec.key
         visible: row.spec.editor === "slider"
+        enabled: row.readback.supported
         Layout.fillWidth: true
         implicitHeight: 16
         leftPadding: 4

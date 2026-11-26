@@ -185,7 +185,7 @@ Rectangle {
                 glyph: "plus"
                 label: rail.width >= 226 ? qsTr("Add component") : ""
                 variant: "solid"
-                tip: qsTr("Add a built-in component. Importing image files is unavailable.")
+                tip: qsTr("Add a component the Digital renderer can paint")
                 onClicked: addKinds.popup(add, 0, height)
                 StudioComponentMenu { id: addKinds; objectName: "brushStudioAddMenu"; draft: rail.draft }
             }
@@ -213,19 +213,6 @@ Rectangle {
                 tip: qsTr("Remove selected component (undoable)")
                 enabled: rail.draft.selectedIndex >= 0
                 onClicked: rail.draft.removeComponent(rail.draft.selectedId)
-            }
-        }
-        StudioHeader {
-            objectName: "brushStudioLibrary"
-            Layout.fillWidth: true
-            title: qsTr("Brush Library")
-            actions: KpButton {
-                objectName: "brushStudioBrowseLibrary"
-                small: true
-                enabled: false
-                glyph: "folder"
-                label: rail.width >= 212 ? qsTr("Unavailable") : ""
-                tip: qsTr("Browsing and saving Studio brushes in the library are unavailable. Use local .kb files instead.")
             }
         }
     }
