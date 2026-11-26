@@ -112,7 +112,7 @@ int main(int argc, char** argv)
 
     // Unsupported stored data is honestly refused.
     auto unsupported = doc;
-    CHECK(unsupported.setParameter("accumulate", 42));
+    CHECK(unsupported.setParameter("accumulate", 0));
     const QString unsupportedFile = dir.filePath(QStringLiteral("Unsupported.kb"));
     CHECK(brush::saveBrushFile(QFileInfo(unsupportedFile).filesystemFilePath(), unsupported));
     const auto rejected = library.installNativeBrush(QUrl::fromLocalFile(unsupportedFile));

@@ -565,7 +565,10 @@ itself native. The Studio window's save result distinguishes saved-and-installed
 saved-with-install-failure, saved-but-unsupported and save-only, and no longer
 reports Realistic as inherently save-only.
 
-Two more Digital settings now reach pixels. **Stroke delay** holds stamps until
+Three more Digital settings now reach pixels. **Hue**, **saturation** and
+**brightness variation** shift the foreground colour deterministically from
+mark to mark, seeded from the same stroke seed as spacing and scatter, so a
+replayed stroke reproduces the same colours. **Stroke delay** holds stamps until
 the pointer has travelled a distance derived from the brush size and flushes
 the tail on release, so the painted line trails the cursor without being lost
 at the end. **Antialiasing off** quantises the same footprint to whole pixels

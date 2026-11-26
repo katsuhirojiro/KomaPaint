@@ -803,6 +803,33 @@ void testTaperAndSpacingVariationReachPixels() {
     CHECK(paintJitter(31u) != paintJitter(32u));
 }
 
+void testColourVariationChangesEachMark() {
+    LegacyBrush legacy;
+    legacy.size = 10.0;
+    legacy.opacity = 100.0;
+    legacy.flow = 100.0;
+    legacy.spacing = 10.0;
+    legacy.hardness = 100.0;
+    auto document = BrushDocument::fromLegacy(legacy, "brush-colour", "Colour");
+    CHECK(document.setParameter("hue-variation", 180.0));
+    CHECK(document.setParameter("saturation-variation", 100.0));
+    CHECK(document.setParameter("brightness-variation", 100.0));
+    StrokeRuntime runtime;
+    runtime.color = 0xffcc6633U;
+    SparseTileStore store(120, 40);
+    drawing::DocumentStroke stroke(store, document,
+                                   drawing::digitalDefinition(document, runtime), 9u);
+    CHECK(stroke.begin({10.0, 20.0, 1.0}));
+    CHECK(stroke.extend({40.0, 20.0, 1.0}));
+    CHECK(stroke.end({40.0, 20.0, 1.0}));
+    CHECK(!stroke.failed());
+    const auto first = store.pixel({10, 20}).value_or(0U);
+    const auto last = store.pixel({40, 20}).value_or(0U);
+    CHECK((first >> 24) > 0U);
+    CHECK((last >> 24) > 0U);
+    CHECK(first != last);
+}
+
 void testAntialiasingCanBeDisabled() {
     LegacyBrush legacy;
     legacy.size = 9.0;
@@ -928,6 +955,7 @@ int main() {
     testRandomizationReachesThePixels();
     testDocumentBrushKeepsItsSpacingThroughLowPressure();
     testTaperAndSpacingVariationReachPixels();
+    testColourVariationChangesEachMark();
     testAntialiasingCanBeDisabled();
     testStrokeDelayTrailsThePointer();
     testRealisticDocumentPaintsThroughTheMaterialEngine();

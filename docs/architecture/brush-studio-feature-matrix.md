@@ -56,7 +56,7 @@ whereas taper, delay, masking and bitmap grain belong to Digital.
 | `taper-in` | Taper in | yes | no |
 | `taper-out` | Taper out | yes | no |
 | `follow-direction` | Follow direction | yes | yes |
-| `stabilization` | Stabilization | yes | no |
+| `stabilization` | Stabilization | yes | yes |
 | `stroke-delay` | Stroke delay | yes | no |
 | `rotation-offset` | Rotation | yes | no |
 | `rotation-jitter` | Rotation variation | no | no |
@@ -72,9 +72,9 @@ whereas taper, delay, masking and bitmap grain belong to Digital.
 | `texture-offset-y` | Texture offset Y | yes | no |
 | `texture-contrast` | Texture contrast | yes | no |
 | `texture-depth` | Texture depth | yes | no |
-| `hue-variation` | Hue variation | no | no |
-| `saturation-variation` | Saturation variation | no | no |
-| `brightness-variation` | Brightness variation | no | no |
+| `hue-variation` | Hue variation | yes | no |
+| `saturation-variation` | Saturation variation | yes | no |
+| `brightness-variation` | Brightness variation | yes | no |
 | `color-mix` | Colour mix | yes | no |
 | `paint-load` | Paint load | no | yes |
 | `pigment-concentration` | Pigment concentration | no | yes |
@@ -162,7 +162,7 @@ randomization run per stamp through `BrushEvaluator`.
 | Follow direction | yes | tip and component rotation |
 | Stabilisation | yes | native document value feeds `StrokeStabilizer`; quick setting is the fallback |
 | Accumulation off | no | repeated dabs always build up |
-| Hue / saturation / brightness variation | no | stored only |
+| Hue / saturation / brightness variation | yes | deterministic per-stamp HSV shift; seeded with the stroke |
 | Bristle count/spread, particle count/spread | no | stored only |
 
 ## Studio and library behaviour
@@ -189,8 +189,7 @@ These are refused or reported, never guessed at:
 - dynamics and randomization the stroke loop cannot reproduce;
 - generators other than `Continuous` and their overrides;
 - Height and Mask component blends;
-- accumulation off, hue/saturation/brightness variation, bristle and particle
-  parameter families.
+- accumulation off, bristle and particle parameter families.
 
 The values are retained on save so a later build can implement them without a
 format migration, and the Studio inspector marks each one unavailable rather

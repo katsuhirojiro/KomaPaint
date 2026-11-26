@@ -928,7 +928,7 @@ void TestBrushUi::brushStudioReportsSaveAndInstallOutcomes()
     // A saved but unsupported document is not presented as installed.
     draft->setEngine(QStringLiteral("digital"));
     auto unsupported = draft->document();
-    QVERIFY(unsupported.setParameter("accumulate", 42.0));
+    QVERIFY(unsupported.setParameter("accumulate", 0.0));
     QVERIFY(draft->setDocument(std::move(unsupported)));
     const QString unsupportedFile = files.filePath(QStringLiteral("unsupported.kb"));
     QVERIFY(QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),

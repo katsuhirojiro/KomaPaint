@@ -1091,7 +1091,7 @@ void TestBrushStudioModel::unsupportedDataSurvivesOpenAndResave() {
     const QString resaved = dir.filePath(QStringLiteral("resaved.kb"));
 
     auto document = BrushStudioModel().document();
-    QVERIFY(document.setParameter("accumulate", 42.0));
+    QVERIFY(document.setParameter("accumulate", 0.0));
     QVERIFY(document.setParameter("taper-in", 0.0));
     QVERIFY(brush::saveBrushFile(QFileInfo(source).filesystemFilePath(), document));
 
@@ -1102,7 +1102,7 @@ void TestBrushStudioModel::unsupportedDataSurvivesOpenAndResave() {
     const auto texture = values.value(QStringLiteral("accumulate")).toMap();
     QVERIFY(!texture.value(QStringLiteral("supported")).toBool());
     QVERIFY(!texture.value(QStringLiteral("reason")).toString().isEmpty());
-    QVERIFY(!opened.setParameterValue(QStringLiteral("accumulate"), 20.0));
+    QVERIFY(!opened.setParameterValue(QStringLiteral("accumulate"), 0.5));
     QVERIFY(opened.error().contains(QStringLiteral("Accumulation")));
     QCOMPARE(opened.document(), document);
 
@@ -1111,7 +1111,7 @@ void TestBrushStudioModel::unsupportedDataSurvivesOpenAndResave() {
     QVERIFY2(opened.saveDraft(QUrl::fromLocalFile(resaved)), qPrintable(opened.error()));
     BrushStudioModel reread;
     QVERIFY2(reread.openDraft(QUrl::fromLocalFile(resaved)), qPrintable(reread.error()));
-    QCOMPARE(reread.document().parameters.value("accumulate"), 42.0);
+    QCOMPARE(reread.document().parameters.value("accumulate"), 0.0);
     QCOMPARE(reread.document().parameters.value("taper-in"), 0.0);
     QCOMPARE(reread.document().parameters.value("size"), 33.0);
     QVERIFY(!reread.document().parameters.contains("taper-out"));

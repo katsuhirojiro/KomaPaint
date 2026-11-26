@@ -34,6 +34,70 @@ BrushTip digitalTipForShape(double shape) noexcept {
     }
 }
 
+std::uint64_t mixColourKey(std::uint64_t value) noexcept {
+    value ^= value >> 30;
+    value *= 0xbf58476d1ce4e5b9ull;
+    value ^= value >> 27;
+    value *= 0x94d049bb133111ebull;
+    value ^= value >> 31;
+    return value;
+}
+
+double colourDraw(std::uint64_t key) noexcept {
+    return static_cast<double>(mixColourKey(key) >> 11) * (1.0 / 9007199254740992.0);
+}
+
+// "From mark to mark" colour variation: one deterministic HSV shift per stamp,
+// seeded exactly like spacing/scatter so a replayed stroke paints the same
+// pixels. Zero variation returns the input colour untouched.
+std::uint32_t variedColour(std::uint32_t straight, double hueDegrees, double saturationPercent,
+                           double brightnessPercent, std::uint32_t strokeSeed,
+                           std::uint64_t stampIndex) noexcept {
+    if (hueDegrees == 0.0 && saturationPercent == 0.0 && brightnessPercent == 0.0) return straight;
+    const double alpha = ((straight >> 24) & 255U) / 255.0;
+    double r = ((straight >> 16) & 255U) / 255.0;
+    double g = ((straight >> 8) & 255U) / 255.0;
+    double b = (straight & 255U) / 255.0;
+    const double maximum = std::max({r, g, b});
+    const double minimum = std::min({r, g, b});
+    double h = 0.0, s = 0.0;
+    const double v = maximum;
+    const double delta = maximum - minimum;
+    if (delta > 0.0) {
+        s = delta / maximum;
+        if (maximum == r) h = (g - b) / delta + (g < b ? 6.0 : 0.0);
+        else if (maximum == g) h = (b - r) / delta + 2.0;
+        else h = (r - g) / delta + 4.0;
+        h /= 6.0;
+    }
+    const std::uint64_t key = static_cast<std::uint64_t>(strokeSeed) * 0x9E3779B97F4A7C15ull +
+                              (stampIndex + 1) * 0xD6E8FEB86659FD93ull;
+    const double hueDraw = colourDraw(key) * 2.0 - 1.0;
+    const double saturationDraw = colourDraw(key ^ 0x51ed270bU) * 2.0 - 1.0;
+    const double brightnessDraw = colourDraw(key ^ 0x9e3779b9U) * 2.0 - 1.0;
+    h = std::fmod(h + hueDraw * std::abs(hueDegrees) / 360.0 + 1.0, 1.0);
+    s = std::clamp(s + saturationDraw * std::abs(saturationPercent) / 100.0, 0.0, 1.0);
+    double value = std::clamp(v + brightnessDraw * std::abs(brightnessPercent) / 100.0, 0.0, 1.0);
+    const double c = value * s;
+    const double x = c * (1.0 - std::abs(std::fmod(h * 6.0, 2.0) - 1.0));
+    const double m = value - c;
+    double outR = 0.0, outG = 0.0, outB = 0.0;
+    const int sector = static_cast<int>(std::floor(h * 6.0)) % 6;
+    switch (sector) {
+    case 0: outR = c; outG = x; break;
+    case 1: outR = x; outG = c; break;
+    case 2: outG = c; outB = x; break;
+    case 3: outG = x; outB = c; break;
+    case 4: outR = x; outB = c; break;
+    default: outR = c; outB = x; break;
+    }
+    auto channel = [&](double in) {
+        return static_cast<unsigned>(std::clamp(std::lround((in + m) * 255.0), 0L, 255L));
+    };
+    return (static_cast<unsigned>(std::lround(alpha * 255.0)) << 24) |
+           (channel(outR) << 16) | (channel(outG) << 8) | channel(outB);
+}
+
 // The tip mask a document names, or 0 (round) when it names none. Only the
 // procedural components carry this today; image and pattern components are
 // painted by the evaluator, not by the tip selector.
@@ -517,6 +581,10 @@ SparseTileStore::WriteResult DocumentStroke::paintStamp(SparseTileStore& store,
         }
 
         InputSample dabSample = sample;
+        dabBrush.color = variedColour(brush.color, stored(*m_document, "hue-variation"),
+                                      stored(*m_document, "saturation-variation"),
+                                      stored(*m_document, "brightness-variation"),
+                                      m_strokeSeed, m_stampCount);
         dabBrush.size *= request.scale;
         dabBrush.opacity *= request.opacity;
         dabBrush.angleRadians += request.rotationDegrees * (kPi / 180.0);
