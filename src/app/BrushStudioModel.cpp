@@ -593,7 +593,7 @@ bool BrushStudioModel::importTipImage(const QUrl& url) try {
 
 QVariantMap BrushStudioModel::loadSelectedPixels() const {
     const auto* resource = selectedResource();
-    if (!resource || resource->pixels.empty() || resource->width <= 0 || resource->height <= 0) return {};
+    if (!resource || resource->pixels().empty() || resource->width <= 0 || resource->height <= 0) return {};
     const auto count = std::size_t(resource->width) * std::size_t(resource->height);
     QVariantList rgba;
     rgba.reserve(qsizetype(count));
