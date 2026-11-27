@@ -13,8 +13,8 @@ artist changing brushes.
 
 ## What the artist sees
 
-`ToolPropertyPanel.qml` has a **Speed Dynamics** section directly below
-Correction, with a single signed **Speed influence** slider:
+`SpeedDynamicsSection.qml` is shown in the normal brush properties and in the
+native `.kb` brush properties, with a single signed **Speed influence** slider:
 
 | Master | Meaning |
 | --- | --- |

@@ -10,6 +10,7 @@ ColorWheel 1.0 ColorWheel.qml
 PaintMixerView 1.0 PaintMixerView.qml
 PropertySlider 1.0 PropertySlider.qml
 HelpCheckBox 1.0 HelpCheckBox.qml
+SpeedDynamicsSection 1.0 SpeedDynamicsSection.qml
 SegmentedChoice 1.0 SegmentedChoice.qml
 PreferencesDialog 1.0 PreferencesDialog.qml
 KomaSettingsDialog 1.0 KomaSettingsDialog.qml
