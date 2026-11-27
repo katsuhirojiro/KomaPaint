@@ -222,6 +222,38 @@ void sharpTurnsNoiseAndBadTimestampsStayBounded()
     CHECK(tracker.update(110 * kMs, NAN, 0.0) == before);
 }
 
+void speedDoesNotDependOnCanvasZoom()
+{
+    // The same hand movement on screen must give the same speed whether the
+    // document is shown at 100% or 800%. The arbiter measures the view-space
+    // pointer, not the zoomed document coordinate.
+    auto run = [](double docScale) {
+        PointerStrokeArbiter arbiter;
+        RawPointerEvent down;
+        down.deviceId = 9;
+        down.pointerId = 9;
+        down.timestampNs = 10 * kMs;
+        down.pointerType = PointerType::Mouse;
+        down.phase = PointerPhase::Down;
+        down.viewX = 10.0;
+        down.viewY = 10.0;
+        down.buttons = PrimaryButton;
+        auto result = arbiter.process(down, 10.0 * docScale, 10.0 * docScale);
+        for (int i = 1; i <= 10; ++i) {
+            RawPointerEvent move = down;
+            move.phase = PointerPhase::Move;
+            move.timestampNs = std::uint64_t(10 + i * 8) * kMs;
+            move.viewX = 10.0 + i * 10.0;
+            result = arbiter.process(move, move.viewX * docScale, move.viewY * docScale);
+        }
+        return result.sample.speedNormalized;
+    };
+    const double atOneHundredPercent = run(1.0);
+    const double atEightHundredPercent = run(8.0);
+    CHECK(atOneHundredPercent > 0.0);
+    CHECK(std::abs(atOneHundredPercent - atEightHundredPercent) < 1e-12);
+}
+
 void arbiterPublishesSmoothedSpeedAndResetsAtStrokeBoundaries()
 {
     PointerStrokeArbiter arbiter;
@@ -277,6 +309,7 @@ int main()
     sampleRateDoesNotChangeTheSpeedSignal();
     stationaryShortAndInterruptedStrokesSettle();
     sharpTurnsNoiseAndBadTimestampsStayBounded();
+    speedDoesNotDependOnCanvasZoom();
     arbiterPublishesSmoothedSpeedAndResetsAtStrokeBoundaries();
     if (g_failures) {
         std::printf("%d Speed Dynamics checks failed\n", g_failures);

@@ -551,7 +551,7 @@ ProcessResult PointerStrokeArbiter::process(const RawPointerEvent& raw,
         SpeedTrackerConfig speedConfig;
         speedConfig.referenceMaxSpeedPxPerSec = m_config.referenceMaxSpeedPxPerSec;
         m_speedTracker.setConfig(speedConfig);
-        m_speedTracker.begin(raw.timestampNs, sample.docX, sample.docY);
+        m_speedTracker.begin(raw.timestampNs, raw.viewX, raw.viewY);
         sample.speedNormalized = 0.0;
         res.shouldBeginStroke = true;
         break;
@@ -561,7 +561,7 @@ ProcessResult PointerStrokeArbiter::process(const RawPointerEvent& raw,
         if (m_strokeActive) {
             if (raw.pointerId == m_activePointerId || isStylusType(raw.pointerType) ||
                 raw.pointerType == PointerType::Mouse) {
-                sample.speedNormalized = m_speedTracker.update(raw.timestampNs, sample.docX, sample.docY);
+                sample.speedNormalized = m_speedTracker.update(raw.timestampNs, raw.viewX, raw.viewY);
                 res.shouldExtendStroke = true;
             }
         }
@@ -569,7 +569,7 @@ ProcessResult PointerStrokeArbiter::process(const RawPointerEvent& raw,
 
     case PointerPhase::Up:
         if (m_strokeActive) {
-            sample.speedNormalized = m_speedTracker.update(raw.timestampNs, sample.docX, sample.docY);
+            sample.speedNormalized = m_speedTracker.update(raw.timestampNs, raw.viewX, raw.viewY);
             res.shouldEndStroke = true;
             m_strokeActive = false;
             m_activeDeviceId = 0;

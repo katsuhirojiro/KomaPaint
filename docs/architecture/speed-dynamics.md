@@ -55,7 +55,8 @@ the checkboxes are not.
 `PointerStrokeArbiter::process()` feeds every pointer sample through
 `input::SpeedTracker`:
 
-- distance and elapsed time are measured between chronological samples;
+- distance and elapsed time are measured between chronological samples in
+  view/screen space, so zooming the canvas does not change the response;
 - the interval is clamped to a plausible range, and a gap longer than 0.25 s
   starts a fresh measurement instead of reading as an extremely slow stroke;
 - an exponential smoothing constant in **time** (`0.045 s`) replaces a fixed
