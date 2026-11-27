@@ -896,7 +896,8 @@ void TestBrushUi::nativeBrushStudioPadToArtwork()
                                       + dynamicNames.join(u',')));
     QVERIFY2(item(app, QStringLiteral("nativeSpeedDynamicsSlider")),
              qPrintable(QStringLiteral("native slider missing; dynamics=")
-                        + dynamicNames.join(u',')));
+                        + dynamicNames.join(u',') + QStringLiteral("; warnings=")
+                        + app.warnings.join(u'|')));
     QVERIFY(item(app, QStringLiteral("nativeSpeedAffectsSize")));
 
     const auto artworkBegin = app.canvas->documentToViewport(begin.x(), begin.y());
