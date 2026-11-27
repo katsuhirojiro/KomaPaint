@@ -885,6 +885,10 @@ void TestBrushUi::nativeBrushStudioPadToArtwork()
     click(app, listRow);
     QCOMPARE(library->currentBrushId(), row.value(QStringLiteral("id")).toString());
     QVERIFY(settings->nativeBrushDocument() && *settings->nativeBrushDocument() == unsaved);
+    // With a native brush active the native properties scroll is shown, so the
+    // shared Speed Dynamics section is part of the visible tree there too.
+    QTRY_VERIFY(item(app, QStringLiteral("nativeSpeedDynamicsSlider")));
+    QVERIFY(item(app, QStringLiteral("nativeSpeedAffectsSize")));
 
     const auto artworkBegin = app.canvas->documentToViewport(begin.x(), begin.y());
     const auto artworkEnd = app.canvas->documentToViewport(end.x(), end.y());
