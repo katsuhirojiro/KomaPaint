@@ -599,6 +599,13 @@ void TestBrushUi::brushStudioWindowIsIndependentAndReusable()
     QVERIFY(!studio->parent()); // transient owner, not an embedded QWindow
     QCOMPARE(studio->transientParent(), static_cast<QWindow*>(app.window));
 
+    // The Studio pad and the artwork canvas must consume the same personal
+    // Speed Dynamics settings object; there is no second copy to drift.
+    auto* pad = studioControl(studio, "brushStudioPad");
+    QVERIFY(pad);
+    QCOMPARE(pad->property("inputSettings").value<QObject*>(),
+             static_cast<QObject*>(app.workspace.inputSettings()));
+
     QPointer<BrushStudioModel> draft(studio->findChild<BrushStudioModel*>(QStringLiteral("brushStudioModel")));
     auto* draftName = studio->findChild<QQuickItem*>(QStringLiteral("brushStudioDraftName"));
     QVERIFY(draft && draftName);
@@ -2732,15 +2739,15 @@ void TestBrushUi::speedDynamicsControlsAreDiscoverableAndPersisted()
     QVERIFY(summary);
     QVERIFY(summary->property("text").toString().contains(QStringLiteral("neutral")));
     QVERIFY(item(app, QStringLiteral("speedAffectsSize")));
-    QVERIFY(item(app, QStringLiteral("speedAffectsFlow")));
+    auto* flow = item(app, QStringLiteral("speedAffectsFlow"));
+    QVERIFY(flow);
+    QVERIFY(flow->property("help").toString().contains(QStringLiteral("flow"), Qt::CaseInsensitive));
 
     QVERIFY(setSlider(app, QStringLiteral("speedDynamicsSlider"), 0.0));
     QTRY_COMPARE(app.settings->value(QStringLiteral("input/speedDynamics")).toInt(), -100);
     QTRY_VERIFY(summary->property("text").toString().contains(QStringLiteral("Slower")));
 
     // Every property can be chosen independently, and the choice persists.
-    auto* flow = item(app, QStringLiteral("speedAffectsFlow"));
-    QVERIFY(flow);
     QVERIFY(!flow->property("checked").toBool());
     QVERIFY(scrollIntoView(flow));
     click(app, flow);
