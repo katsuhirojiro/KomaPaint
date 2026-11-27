@@ -11,8 +11,14 @@ PanelSection {
     property var inputSettings: null
     property string objectPrefix: ""
 
-    objectName: root.objectPrefix.length > 0
-               ? root.objectPrefix + "SpeedDynamicsSection" : "speedDynamicsSection"
+    // The default panel keeps the historical object names; the native panel
+    // gets a native* prefix with the same capitalisation.
+    function prefixed(name) {
+        return root.objectPrefix.length > 0
+            ? root.objectPrefix + name.charAt(0).toUpperCase() + name.slice(1) : name
+    }
+
+    objectName: root.prefixed("speedDynamicsSection")
     title: qsTr("Speed Dynamics")
     hint: root.inputSettings && root.inputSettings.speedDynamics !== 0
           ? qsTr("active") : qsTr("neutral")
@@ -37,7 +43,7 @@ PanelSection {
             spacing: KP.gapXS
 
             PropertySlider {
-                objectName: root.objectPrefix + "speedDynamicsSlider"
+                objectName: root.prefixed("speedDynamicsSlider")
                 width: parent.width
                 label: qsTr("Speed influence")
                 from: -100
@@ -53,7 +59,7 @@ PanelSection {
             }
 
             Text {
-                objectName: root.objectPrefix + "speedDynamicsSummary"
+                objectName: root.prefixed("speedDynamicsSummary")
                 width: parent.width
                 text: root.inputSettings ? root.inputSettings.speedDynamicsSummary : ""
                 color: KP.textMuted
@@ -73,7 +79,7 @@ PanelSection {
             }
 
             HelpCheckBox {
-                objectName: root.objectPrefix + "speedAffectsSize"
+                objectName: root.prefixed("speedAffectsSize")
                 width: parent.width
                 text: qsTr("Let speed change size")
                 help: qsTr("When on, the Speed influence slider can make slow or fast strokes wider or narrower. Turn it off to keep this brush at one width no matter how fast you draw.")
@@ -85,7 +91,7 @@ PanelSection {
                 }
             }
             HelpCheckBox {
-                objectName: root.objectPrefix + "speedInvertSize"
+                objectName: root.prefixed("speedInvertSize")
                 width: parent.width
                 visible: root.inputSettings && root.inputSettings.speedAffectsSize
                 text: qsTr("Size: use the opposite direction")
@@ -98,7 +104,7 @@ PanelSection {
                 }
             }
             HelpCheckBox {
-                objectName: root.objectPrefix + "speedAffectsOpacity"
+                objectName: root.prefixed("speedAffectsOpacity")
                 width: parent.width
                 text: qsTr("Let speed change opacity")
                 help: qsTr("When on, speed can make a stroke more or less solid. Turn it off when the paint should keep the same opacity from the first mark to the last.")
@@ -110,7 +116,7 @@ PanelSection {
                 }
             }
             HelpCheckBox {
-                objectName: root.objectPrefix + "speedInvertOpacity"
+                objectName: root.prefixed("speedInvertOpacity")
                 width: parent.width
                 visible: root.inputSettings && root.inputSettings.speedAffectsOpacity
                 text: qsTr("Opacity: use the opposite direction")
@@ -123,7 +129,7 @@ PanelSection {
                 }
             }
             HelpCheckBox {
-                objectName: root.objectPrefix + "speedAffectsFlow"
+                objectName: root.prefixed("speedAffectsFlow")
                 width: parent.width
                 text: qsTr("Let speed change flow")
                 help: qsTr("Flow is how much paint each mark releases. Turn this on for a dry brush that loads up or runs dry as your speed changes.")
@@ -135,7 +141,7 @@ PanelSection {
                 }
             }
             HelpCheckBox {
-                objectName: root.objectPrefix + "speedInvertFlow"
+                objectName: root.prefixed("speedInvertFlow")
                 width: parent.width
                 visible: root.inputSettings && root.inputSettings.speedAffectsFlow
                 text: qsTr("Flow: use the opposite direction")
@@ -148,7 +154,7 @@ PanelSection {
                 }
             }
             HelpCheckBox {
-                objectName: root.objectPrefix + "speedAffectsSpacing"
+                objectName: root.prefixed("speedAffectsSpacing")
                 width: parent.width
                 text: qsTr("Let speed change spacing")
                 help: qsTr("Spacing is the distance between the brush's marks. Turn this on for a stroke that becomes denser or more broken up with speed. It changes the texture, not the brush width.")
@@ -160,7 +166,7 @@ PanelSection {
                 }
             }
             HelpCheckBox {
-                objectName: root.objectPrefix + "speedInvertSpacing"
+                objectName: root.prefixed("speedInvertSpacing")
                 width: parent.width
                 visible: root.inputSettings && root.inputSettings.speedAffectsSpacing
                 text: qsTr("Spacing: use the opposite direction")
