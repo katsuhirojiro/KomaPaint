@@ -889,9 +889,10 @@ void TestBrushUi::nativeBrushStudioPadToArtwork()
     // shared Speed Dynamics section is part of the visible tree there too.
     auto* nativeScroll = item(app, QStringLiteral("nativeBrushPropertyScroll"));
     QStringList dynamicNames;
-    for (auto* object : app.window->findChildren<QObject*>())
-        if (object->objectName().contains(QStringLiteral("SpeedDynamics")))
-            dynamicNames << object->objectName();
+    if (nativeScroll)
+        for (auto* object : nativeScroll->findChildren<QObject*>())
+            if (object->objectName().contains(QStringLiteral("peedDynamics")))
+                dynamicNames << object->objectName();
     QVERIFY2(nativeScroll, qPrintable(QStringLiteral("native scroll missing; dynamics=")
                                       + dynamicNames.join(u',')));
     QVERIFY2(item(app, QStringLiteral("nativeSpeedDynamicsSlider")),
