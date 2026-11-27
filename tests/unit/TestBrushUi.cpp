@@ -2741,8 +2741,10 @@ void TestBrushUi::speedDynamicsControlsAreDiscoverableAndPersisted()
     // Every property can be chosen independently, and the choice persists.
     auto* flow = item(app, QStringLiteral("speedAffectsFlow"));
     QVERIFY(flow);
-    QVERIFY(QMetaObject::invokeMethod(flow, "toggle"));
-    QCoreApplication::processEvents();
+    QVERIFY(!flow->property("checked").toBool());
+    QVERIFY(scrollIntoView(flow));
+    click(app, flow);
+    QTRY_VERIFY(flow->property("checked").toBool());
     QTRY_COMPARE(app.settings->value(QStringLiteral("input/speedAffectsFlow")).toBool(), true);
 
     // The settings dialog shows the same control and applies it through the
