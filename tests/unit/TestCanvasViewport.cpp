@@ -770,6 +770,7 @@ void TestCanvasViewport::speedDynamicsSettingsRoundTrip()
     QVERIFY(!config.spacingEnabled);
     QVERIFY(speedSettings.speedDynamicsSummary().contains(QStringLiteral("Slower")));
     QVERIFY(speedSettings.speedDynamicsSummary().contains(QStringLiteral("size")));
+    QVERIFY(speedSettings.speedDynamicsSummary().contains(QStringLiteral("opposite")));
     QVERIFY(speedSettings.speedDynamicsSummary().contains(QStringLiteral("pressure")));
 
     // Values are bounded rather than accepted blindly.

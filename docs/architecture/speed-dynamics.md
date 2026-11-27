@@ -166,7 +166,8 @@ Limitations that need real-device verification:
   inversion, invalid input, sample-rate independence, stationary/short/gap
   strokes, sharp turns, bad timestamps, arbiter publication and reset.
 - `tests/unit/TestSpeedRendering.cpp` — Digital and Realistic pixels: neutral
-  identity, both directions, size/opacity/flow/spacing independently, pressure
-  combined with speed, and stored document weights.
+  identity, both directions, size/opacity/flow/spacing independently, a
+  mid-stroke speed change, pressure combined with speed, and stored document
+  weights.
 - `tests/unit/TestBrushUi.cpp` and the Studio model suites cover the packaged
   controls and the new parameters.

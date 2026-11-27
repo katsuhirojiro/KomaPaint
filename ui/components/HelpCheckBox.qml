@@ -11,54 +11,38 @@ CheckBox {
     property bool pinned: false
 
     hoverEnabled: true
+    rightPadding: help.length > 0 ? 20 : 0
     Accessible.name: text
     Accessible.description: help
-    implicitHeight: Math.max(KP.controlHeight, contentItem.implicitHeight + topPadding + bottomPadding)
 
-    contentItem: Item {
-        implicitWidth: root.width - root.leftPadding - root.rightPadding
-        implicitHeight: Math.max(label.implicitHeight, badge.height)
+    Rectangle {
+        id: badge
+        parent: root
+        visible: root.help.length > 0
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        width: 15
+        height: 15
+        radius: width / 2
+        color: helpArea.containsMouse || root.pinned ? KP.accent : "transparent"
+        border.width: 1
+        border.color: helpArea.containsMouse || root.pinned ? KP.accent : KP.textMuted
 
         Text {
-            id: label
-            anchors.left: parent.left
-            anchors.right: root.help.length > 0 ? badge.left : parent.right
-            anchors.rightMargin: root.help.length > 0 ? 6 : 0
-            anchors.verticalCenter: parent.verticalCenter
-            text: root.text
-            color: root.enabled ? KP.text : KP.textMuted
-            font.pixelSize: KP.fontS + 1
+            anchors.centerIn: parent
+            text: "?"
+            color: helpArea.containsMouse || root.pinned ? KP.textOnAccent : KP.textMuted
+            font.pixelSize: 10
+            font.bold: true
             font.family: KP.fontUi
-            wrapMode: Text.Wrap
         }
 
-        Rectangle {
-            id: badge
-            visible: root.help.length > 0
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            width: 15
-            height: 15
-            radius: width / 2
-            color: helpArea.containsMouse || root.pinned ? KP.accent : "transparent"
-            border.width: 1
-            border.color: helpArea.containsMouse || root.pinned ? KP.accent : KP.textMuted
-
-            Text {
-                anchors.centerIn: parent
-                text: "?"
-                color: helpArea.containsMouse || root.pinned ? KP.textOnAccent : KP.textMuted
-                font.pixelSize: 10
-                font.bold: true
-                font.family: KP.fontUi
-            }
-            MouseArea {
-                id: helpArea
-                anchors.fill: parent
-                anchors.margins: -5
-                hoverEnabled: true
-                onClicked: root.pinned = !root.pinned
-            }
+        MouseArea {
+            id: helpArea
+            anchors.fill: parent
+            anchors.margins: -5
+            hoverEnabled: true
+            onClicked: root.pinned = !root.pinned
         }
     }
 

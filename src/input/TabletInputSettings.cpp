@@ -337,16 +337,25 @@ QString TabletInputSettings::speedDynamicsSummary() const
     }
     const bool slowStrong = m_speedDynamics < 0;
     QStringList selected;
-    if (m_speedAffectsSize) selected << QStringLiteral("size");
-    if (m_speedAffectsOpacity) selected << QStringLiteral("opacity");
-    if (m_speedAffectsFlow) selected << QStringLiteral("flow");
-    if (m_speedAffectsSpacing) selected << QStringLiteral("spacing");
+    bool anyInverted = false;
+    auto add = [&](bool enabled, bool inverted, const QString& name) {
+        if (!enabled) return;
+        selected << (inverted ? name + QStringLiteral(" (opposite direction)") : name);
+        anyInverted = anyInverted || inverted;
+    };
+    add(m_speedAffectsSize, m_speedInvertSize, QStringLiteral("size"));
+    add(m_speedAffectsOpacity, m_speedInvertOpacity, QStringLiteral("opacity"));
+    add(m_speedAffectsFlow, m_speedInvertFlow, QStringLiteral("flow"));
+    add(m_speedAffectsSpacing, m_speedInvertSpacing, QStringLiteral("spacing"));
     if (selected.isEmpty()) {
         return QStringLiteral("Speed is set, but no property responds yet. Turn on at least one property below. Your pen pressure is never replaced.");
     }
-    const QString direction = slowStrong
+    QString direction = slowStrong
         ? QStringLiteral("Slower strokes become thicker or stronger, and faster strokes become thinner or lighter.")
         : QStringLiteral("Slower strokes become thinner or lighter, and faster strokes become thicker or stronger.");
+    if (anyInverted) {
+        direction += QStringLiteral(" Properties marked opposite follow the other direction.");
+    }
     return direction + QStringLiteral(" Responding: %1. Your pen pressure still applies on its own.")
         .arg(selected.join(QStringLiteral(", ")));
 }

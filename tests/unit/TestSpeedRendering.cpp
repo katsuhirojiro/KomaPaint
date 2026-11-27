@@ -75,7 +75,7 @@ struct DigitalResult {
 };
 
 DigitalResult paintDigital(const LegacyBrush& legacy, const input::SpeedDynamicsConfig& config,
-                           double speed, double pressure = 0.85)
+                           double speed, double pressure = 0.85, int changeAt = -1)
 {
     SparseTileStore store(kSize, kSize);
     StrokeRuntime runtime;
@@ -94,7 +94,7 @@ DigitalResult paintDigital(const LegacyBrush& legacy, const input::SpeedDynamics
     CHECK(stroke.begin(sample));
     for (int i = 1; i <= 18; ++i) {
         sample.x = 18.0 + double(i) * 3.4;
-        sample.speed = speed;
+        sample.speed = (changeAt >= 0 && i >= changeAt) ? 1.0 : speed;
         CHECK(stroke.extend(sample));
     }
     CHECK(stroke.end(sample));
@@ -140,6 +140,13 @@ void digitalMasterDirectionsChangeRenderedPixels()
     // Strength is continuous, not an on/off switch.
     const auto weak = paintDigital(plainBrush(), master(-0.25), 1.0);
     CHECK(weak.alpha > leftFast.alpha);
+
+    // A speed change in the middle of a stroke is applied from that stamp on
+    // and is not a separate stroke or a reset to neutral.
+    const auto mixed = paintDigital(plainBrush(), master(-1.0), 0.0, 0.85, 9);
+    CHECK(mixed.hash != leftSlow.hash);
+    CHECK(mixed.hash != leftFast.hash);
+    CHECK(mixed.alpha > leftFast.alpha);
 }
 
 void digitalPropertiesRespondIndependently()
@@ -270,6 +277,14 @@ void realisticMasterChangesTheRenderedStroke()
     const auto rightSlow = paintMaterial(only(master(1.0), "opacity"), 0.0);
     const auto rightFast = paintMaterial(only(master(1.0), "opacity"), 1.0);
     CHECK(rightFast.alpha > rightSlow.alpha);
+
+    const auto flowSlow = paintMaterial(only(master(-1.0), "flow"), 0.0);
+    const auto flowFast = paintMaterial(only(master(-1.0), "flow"), 1.0);
+    CHECK(flowSlow.alpha > flowFast.alpha);
+
+    const auto spacingSlow = paintMaterial(only(master(-1.0), "spacing"), 0.0);
+    const auto spacingFast = paintMaterial(only(master(-1.0), "spacing"), 1.0);
+    CHECK(spacingSlow.alpha > spacingFast.alpha);
 }
 
 } // namespace

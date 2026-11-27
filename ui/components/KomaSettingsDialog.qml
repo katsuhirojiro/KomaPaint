@@ -129,15 +129,22 @@ KpDialog {
         if (master === 0)
             return qsTr("Speed is neutral. Strokes look the same whether you draw slowly or quickly.")
         const selected = []
-        if (inp.speedAffectsSize) selected.push(qsTr("size"))
-        if (inp.speedAffectsOpacity) selected.push(qsTr("opacity"))
-        if (inp.speedAffectsFlow) selected.push(qsTr("flow"))
-        if (inp.speedAffectsSpacing) selected.push(qsTr("spacing"))
+        let anyInverted = false
+        const add = function(enabled, inverted, name) {
+            if (!enabled) return
+            selected.push(inverted ? name + " " + qsTr("(opposite direction)") : name)
+            anyInverted = anyInverted || inverted
+        }
+        add(inp.speedAffectsSize, inp.speedInvertSize, qsTr("size"))
+        add(inp.speedAffectsOpacity, inp.speedInvertOpacity, qsTr("opacity"))
+        add(inp.speedAffectsFlow, inp.speedInvertFlow, qsTr("flow"))
+        add(inp.speedAffectsSpacing, inp.speedInvertSpacing, qsTr("spacing"))
         if (selected.length === 0)
             return qsTr("No property responds yet. Turn on at least one below.")
-        const direction = master < 0
+        let direction = master < 0
             ? qsTr("Slower strokes become thicker or stronger; faster strokes become thinner or lighter.")
             : qsTr("Slower strokes become thinner or lighter; faster strokes become thicker or stronger.")
+        if (anyInverted) direction += " " + qsTr("Properties marked opposite follow the other direction.")
         return direction + " " + qsTr("Responding: %1.").arg(selected.join(qsTr(", ")))
     }
 
