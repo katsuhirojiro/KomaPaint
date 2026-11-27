@@ -93,9 +93,10 @@ struct InputSample {
     double tiltY = 0.0;
     double rotationRadians = 0.0;
     double tangentialPressure = 0.0;
-    double speed = 0.0;            // normalized pointer speed from SpeedTracker
     bool hasTilt = false;
     bool hasRotation = false;
+    // Trailing so existing aggregate initialisers keep their meaning.
+    double speed = 0.0;            // normalized pointer speed from SpeedTracker
 };
 
 // Stateless tip mask, sensor response and paint deposition helpers.
