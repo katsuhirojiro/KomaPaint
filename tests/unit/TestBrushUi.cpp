@@ -481,6 +481,7 @@ private slots:
     void iconsFollowTheTheme();
     void preferencesDialogStoresThemeAndIconColours();
     void komaSettingsApplyAndCancelPersistGlobalValues();
+    void speedDynamicsControlsAreDiscoverableAndPersisted();
     void brushEngineSettingsPersistAcrossRestartsAndStayNonDestructive();
     void shortcutsAndPerformanceSettingsPersistAndResolveConflicts();
     void toolShortcutsCycleThroughTheirFamilies();
@@ -2713,6 +2714,60 @@ void TestBrushUi::preferencesDialogStoresThemeAndIconColours()
         second.settings->setValue(QStringLiteral("ui/theme"), QStringLiteral("dark"));
     }
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(QLatin1Char('\n'))));
+}
+
+void TestBrushUi::speedDynamicsControlsAreDiscoverableAndPersisted()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushUiSpeedDynamics")));
+
+    auto* slider = item(app, QStringLiteral("speedDynamicsSlider"));
+    QVERIFY(slider);
+    QVERIFY(slider->property("help").toString().contains(QStringLiteral("speed"), Qt::CaseInsensitive));
+    QCOMPARE(slider->property("from").toInt(), -100);
+    QCOMPARE(slider->property("to").toInt(), 100);
+    QCOMPARE(slider->property("value").toInt(), 0);
+
+    auto* summary = item(app, QStringLiteral("speedDynamicsSummary"));
+    QVERIFY(summary);
+    QVERIFY(summary->property("text").toString().contains(QStringLiteral("neutral")));
+    QVERIFY(item(app, QStringLiteral("speedAffectsSize")));
+    QVERIFY(item(app, QStringLiteral("speedAffectsFlow")));
+
+    QVERIFY(setSlider(app, QStringLiteral("speedDynamicsSlider"), 0.0));
+    QTRY_COMPARE(app.settings->value(QStringLiteral("input/speedDynamics")).toInt(), -100);
+    QTRY_VERIFY(summary->property("text").toString().contains(QStringLiteral("Slower")));
+
+    // Every property can be chosen independently, and the choice persists.
+    auto* flow = item(app, QStringLiteral("speedAffectsFlow"));
+    QVERIFY(flow);
+    QVERIFY(QMetaObject::invokeMethod(flow, "toggle"));
+    QCoreApplication::processEvents();
+    QTRY_COMPARE(app.settings->value(QStringLiteral("input/speedAffectsFlow")).toBool(), true);
+
+    // The settings dialog shows the same control and applies it through the
+    // normal draft path, including on a project switch.
+    auto* dialog = app.root->findChild<QObject*>(QStringLiteral("komaSettingsDialog"));
+    QVERIFY(dialog);
+    dialog->setProperty("visible", true);
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    auto draft = dialog->property("draft").toMap();
+    auto input = draft.value(QStringLiteral("input")).toMap();
+    QCOMPARE(input.value(QStringLiteral("speedDynamics")).toInt(), -100);
+    QVERIFY(dialog->findChild<QObject*>(QStringLiteral("komaSettingsSpeedDynamics")));
+    QVERIFY(dialog->findChild<QObject*>(QStringLiteral("komaSettingsSpeedSize")));
+    input.insert(QStringLiteral("speedDynamics"), 45);
+    input.insert(QStringLiteral("speedAffectsOpacity"), false);
+    input.insert(QStringLiteral("speedAffectsSpacing"), true);
+    draft.insert(QStringLiteral("input"), input);
+    dialog->setProperty("draft", draft);
+    auto* apply = item(app, QStringLiteral("komaSettingsApply"));
+    QVERIFY(apply);
+    click(app, apply);
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+    QCOMPARE(app.settings->value(QStringLiteral("input/speedDynamics")).toInt(), 45);
+    QCOMPARE(app.settings->value(QStringLiteral("input/speedAffectsOpacity")).toBool(), false);
+    QCOMPARE(app.settings->value(QStringLiteral("input/speedAffectsSpacing")).toBool(), true);
 }
 
 void TestBrushUi::komaSettingsApplyAndCancelPersistGlobalValues()

@@ -589,3 +589,33 @@ antialiasing and Realistic-through-material cases (4,516 checks); the
 capability, Studio model, native library and UI suites were updated to use
 `accumulate` as the canonical unsupported setting, which is stored and
 reported but not painted.
+
+
+## Phase C — Speed Dynamics as an input capability
+
+Speed Dynamics is now an application input capability rather than a brush
+document feature. A signed master control (−100 … +100) lives in the painting
+panel and in Settings → Input, with a plain-language live explanation, help on
+hover/focus/touch, and independent size/opacity/flow/spacing choices. The
+default is neutral, and returning to the centre restores speed-independent
+strokes.
+
+The speed signal moved out of the arbiter's fixed-weight EMA into
+`input::SpeedTracker`: time-based smoothing, gap rejection, stationary decay and
+device-rate independence. `PointerSample::speedNormalized` now reaches a trailing
+`InputSample.speed` field, `DocumentStroke`'s stamp context and both production
+stroke loops. Digital applies the factors to size, opacity, flow and spacing;
+Realistic maps them onto size, contact transfer, release rate and spacing ratio.
+Real stylus pressure still applies and is never described as simulated pressure.
+
+Brush documents carry creator ceilings (`speed-size`, `speed-opacity`,
+`speed-flow`, `speed-spacing`) and `BrushEvaluator` also executes an authored
+`Signal::Speed` binding for those four targets. The artist's master and property
+choices stay in personal `input/speedDynamics` settings, separate from every
+`.kb` file. Both the canvas and the Studio preview read the same settings object.
+
+Tests: `test_speed_dynamics` and `test_speed_rendering` cover the signal,
+directions, neutral centre, per-property independence, pressure combination and
+real Digital/Realistic pixels. The feature matrix and
+[`speed-dynamics.md`](speed-dynamics.md) record what genuinely renders and what
+remains unsupported.

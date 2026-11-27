@@ -108,8 +108,37 @@ KpDialog {
             barrelButton2Action: "pan",
             eraserEndEnabled: true,
             hoverOutlineEnabled: true,
-            tiltCursorEnabled: true
+            tiltCursorEnabled: true,
+            speedDynamics: 0,
+            speedAffectsSize: true,
+            speedAffectsOpacity: true,
+            speedAffectsFlow: false,
+            speedAffectsSpacing: false,
+            speedInvertSize: false,
+            speedInvertOpacity: false,
+            speedInvertFlow: false,
+            speedInvertSpacing: false
         }
+    }
+
+    // Plain-language preview of the draft, so the settings page explains the
+    // choice before it is applied rather than only after closing the dialog.
+    function speedDraftSummary() {
+        const inp = draft.input || defaultInputDraft()
+        const master = Number(inp.speedDynamics || 0)
+        if (master === 0)
+            return qsTr("Speed is neutral. Strokes look the same whether you draw slowly or quickly.")
+        const selected = []
+        if (inp.speedAffectsSize) selected.push(qsTr("size"))
+        if (inp.speedAffectsOpacity) selected.push(qsTr("opacity"))
+        if (inp.speedAffectsFlow) selected.push(qsTr("flow"))
+        if (inp.speedAffectsSpacing) selected.push(qsTr("spacing"))
+        if (selected.length === 0)
+            return qsTr("No property responds yet. Turn on at least one below.")
+        const direction = master < 0
+            ? qsTr("Slower strokes become thicker or stronger; faster strokes become thinner or lighter.")
+            : qsTr("Slower strokes become thinner or lighter; faster strokes become thicker or stronger.")
+        return direction + " " + qsTr("Responding: %1.").arg(selected.join(qsTr(", ")))
     }
 
     function defaultPerformanceDraft() {
@@ -150,7 +179,16 @@ KpDialog {
             barrelButton2Action: barrelActionIds.indexOf(rawB2) >= 0 ? rawB2 : d.barrelButton2Action,
             eraserEndEnabled: asBool("input/eraserEndEnabled", d.eraserEndEnabled),
             hoverOutlineEnabled: asBool("input/hoverOutlineEnabled", d.hoverOutlineEnabled),
-            tiltCursorEnabled: asBool("input/tiltCursorEnabled", d.tiltCursorEnabled)
+            tiltCursorEnabled: asBool("input/tiltCursorEnabled", d.tiltCursorEnabled),
+            speedDynamics: Number(Settings.value("input/speedDynamics", d.speedDynamics)),
+            speedAffectsSize: asBool("input/speedAffectsSize", d.speedAffectsSize),
+            speedAffectsOpacity: asBool("input/speedAffectsOpacity", d.speedAffectsOpacity),
+            speedAffectsFlow: asBool("input/speedAffectsFlow", d.speedAffectsFlow),
+            speedAffectsSpacing: asBool("input/speedAffectsSpacing", d.speedAffectsSpacing),
+            speedInvertSize: asBool("input/speedInvertSize", d.speedInvertSize),
+            speedInvertOpacity: asBool("input/speedInvertOpacity", d.speedInvertOpacity),
+            speedInvertFlow: asBool("input/speedInvertFlow", d.speedInvertFlow),
+            speedInvertSpacing: asBool("input/speedInvertSpacing", d.speedInvertSpacing)
         }
     }
 
@@ -360,6 +398,15 @@ KpDialog {
         Settings.setValue("input/eraserEndEnabled", Boolean(inputDraft.eraserEndEnabled))
         Settings.setValue("input/hoverOutlineEnabled", Boolean(inputDraft.hoverOutlineEnabled))
         Settings.setValue("input/tiltCursorEnabled", Boolean(inputDraft.tiltCursorEnabled))
+        Settings.setValue("input/speedDynamics", Number(inputDraft.speedDynamics))
+        Settings.setValue("input/speedAffectsSize", Boolean(inputDraft.speedAffectsSize))
+        Settings.setValue("input/speedAffectsOpacity", Boolean(inputDraft.speedAffectsOpacity))
+        Settings.setValue("input/speedAffectsFlow", Boolean(inputDraft.speedAffectsFlow))
+        Settings.setValue("input/speedAffectsSpacing", Boolean(inputDraft.speedAffectsSpacing))
+        Settings.setValue("input/speedInvertSize", Boolean(inputDraft.speedInvertSize))
+        Settings.setValue("input/speedInvertOpacity", Boolean(inputDraft.speedInvertOpacity))
+        Settings.setValue("input/speedInvertFlow", Boolean(inputDraft.speedInvertFlow))
+        Settings.setValue("input/speedInvertSpacing", Boolean(inputDraft.speedInvertSpacing))
         Settings.setValue("performance/tileCacheLimitMB", Number(perfDraft.tileCacheLimitMB))
         Settings.setValue("performance/undoHistoryLimit", Number(perfDraft.undoHistoryLimit))
         Settings.setValue("performance/wetSimEnabled", Boolean(perfDraft.wetSimEnabled))
@@ -934,6 +981,51 @@ KpDialog {
                                                 from: 0; to: 100
                                                 value: Number((dialog.draft.input || {}).stabilizationDefault || 0)
                                                 onEdited: function(v) { dialog.setInputDraft("stabilizationDefault", v) }
+                                            }
+                                            PropertySlider {
+                                                objectName: "komaSettingsSpeedDynamics"
+                                                Layout.fillWidth: true
+                                                label: qsTr("Speed influence")
+                                                from: -100; to: 100
+                                                value: Number((dialog.draft.input || {}).speedDynamics || 0)
+                                                resetValue: 0
+                                                help: qsTr("Centre leaves strokes independent of speed. Left makes slow strokes thicker or stronger; right makes fast strokes thicker or stronger. This is a personal setting and does not change the brush file.")
+                                                onEdited: function(v) { dialog.setInputDraft("speedDynamics", v) }
+                                            }
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: dialog.speedDraftSummary()
+                                                color: KP.textMuted
+                                                font.pixelSize: KP.fontXS
+                                                wrapMode: Text.Wrap
+                                            }
+                                            HelpCheckBox {
+                                                objectName: "komaSettingsSpeedSize"
+                                                text: qsTr("Let speed change size")
+                                                help: qsTr("When on, the Speed influence slider can make slow or fast strokes wider or narrower. Turn it off to keep a constant width at every speed.")
+                                                checked: Boolean((dialog.draft.input || {}).speedAffectsSize)
+                                                onToggled: dialog.setInputDraft("speedAffectsSize", checked)
+                                            }
+                                            HelpCheckBox {
+                                                objectName: "komaSettingsSpeedOpacity"
+                                                text: qsTr("Let speed change opacity")
+                                                help: qsTr("When on, speed can make a stroke more or less solid. Turn it off when the paint should keep the same opacity at every speed.")
+                                                checked: Boolean((dialog.draft.input || {}).speedAffectsOpacity)
+                                                onToggled: dialog.setInputDraft("speedAffectsOpacity", checked)
+                                            }
+                                            HelpCheckBox {
+                                                objectName: "komaSettingsSpeedFlow"
+                                                text: qsTr("Let speed change flow")
+                                                help: qsTr("Flow is how much paint each mark releases. Turn it on for a dry brush that loads up or runs dry with speed.")
+                                                checked: Boolean((dialog.draft.input || {}).speedAffectsFlow)
+                                                onToggled: dialog.setInputDraft("speedAffectsFlow", checked)
+                                            }
+                                            HelpCheckBox {
+                                                objectName: "komaSettingsSpeedSpacing"
+                                                text: qsTr("Let speed change spacing")
+                                                help: qsTr("Spacing is the distance between marks. Turn it on for a stroke that becomes denser or more broken up with speed.")
+                                                checked: Boolean((dialog.draft.input || {}).speedAffectsSpacing)
+                                                onToggled: dialog.setInputDraft("speedAffectsSpacing", checked)
                                             }
                                         }
                                     }

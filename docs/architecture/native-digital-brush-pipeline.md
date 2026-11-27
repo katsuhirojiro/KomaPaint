@@ -66,6 +66,16 @@ that row instead of substituting another tip. Other presets remain usable.
   transparent texels). Equivalent stroke comparisons require the same input
   samples, seed, colour, starting surface, and input settings.
 
+## Speed as an input, not a brush
+
+Application-level **Speed Dynamics** derives pressure-like variation from pointer
+speed for mice, fingers and non-pressure pens, and can be layered on a pressure
+pen. It is configured once in the input settings and applied by both the Digital
+and Realistic stroke loops; it is not stored in a `.kb` file. The brush document
+only supplies per-property response ceilings. See
+[`speed-dynamics.md`](speed-dynamics.md) for the signal, mapping, pressure
+combination and supported properties.
+
 ## Limits
 
 The exact per-setting contract lives in

@@ -7,6 +7,7 @@
 #include "core/ApplicationConfig.h"
 #include "core/Settings.h"
 #include "core/NewProjectSettings.h"
+#include "input/TabletInputSettings.h"
 #include <QQmlEngine>
 #include <QQmlContext>
 #include <QQmlComponent>
@@ -50,6 +51,7 @@ private slots:
     void largestBrushStrokesAndPressure();
     void compositeCacheAccounting();
     void qmlMouseStroke();
+    void speedDynamicsSettingsRoundTrip();
     void actualWindowShortcuts();
 };
 void TestCanvasViewport::navigationAndVisibleTiles()
@@ -739,6 +741,52 @@ void TestCanvasViewport::watercolourCleanWaterAndPaintLiftingInViewport()
     const auto liftedSpot = layer->materialTiles().batchAt({128, 128});
     QVERIFY(liftedSpot && liftedSpot->pigmentMass() < initialPigment);
     QCOMPARE(layer->tiles().allocatedTiles(), std::size_t(0));
+}
+
+void TestCanvasViewport::speedDynamicsSettingsRoundTrip()
+{
+    Settings settings(QStringLiteral("KomaPaintTests"), QStringLiteral("SpeedDynamicsSettings"));
+    input::TabletInputSettings speedSettings;
+    speedSettings.attachSettings(&settings);
+    speedSettings.applyVariantMap(speedSettings.defaultVariantMap());
+
+    QCOMPARE(speedSettings.speedDynamics(), 0);
+    QVERIFY(speedSettings.speedDynamicsSummary().contains(QStringLiteral("neutral")));
+    QVERIFY(speedSettings.speedDynamicsConfig().master == 0.0);
+
+    speedSettings.setSpeedDynamics(-73);
+    speedSettings.setSpeedAffectsSize(true);
+    speedSettings.setSpeedAffectsOpacity(false);
+    speedSettings.setSpeedAffectsFlow(true);
+    speedSettings.setSpeedAffectsSpacing(false);
+    speedSettings.setSpeedInvertFlow(true);
+    QCOMPARE(speedSettings.speedDynamics(), -73);
+    const auto config = speedSettings.speedDynamicsConfig();
+    QVERIFY(std::abs(config.master + 0.73) < 1e-12);
+    QVERIFY(config.sizeEnabled);
+    QVERIFY(!config.opacityEnabled);
+    QVERIFY(config.flowEnabled);
+    QVERIFY(config.flowInverted);
+    QVERIFY(!config.spacingEnabled);
+    QVERIFY(speedSettings.speedDynamicsSummary().contains(QStringLiteral("Slower")));
+    QVERIFY(speedSettings.speedDynamicsSummary().contains(QStringLiteral("size")));
+    QVERIFY(speedSettings.speedDynamicsSummary().contains(QStringLiteral("pressure")));
+
+    // Values are bounded rather than accepted blindly.
+    speedSettings.setSpeedDynamics(500);
+    QCOMPARE(speedSettings.speedDynamics(), 100);
+    speedSettings.setSpeedDynamics(-500);
+    QCOMPARE(speedSettings.speedDynamics(), -100);
+
+    const QVariantMap saved = speedSettings.toVariantMap();
+    speedSettings.restoreDefaults();
+    QCOMPARE(speedSettings.speedDynamics(), 0);
+    QVERIFY(speedSettings.speedAffectsSize());
+    QVERIFY(!speedSettings.speedAffectsFlow());
+    QVERIFY(speedSettings.applyVariantMap(saved));
+    QCOMPARE(speedSettings.speedDynamics(), -100);
+    QVERIFY(speedSettings.speedAffectsFlow());
+    QVERIFY(speedSettings.speedInvertFlow());
 }
 
 QTEST_MAIN(TestCanvasViewport)

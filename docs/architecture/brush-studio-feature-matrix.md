@@ -50,6 +50,10 @@ whereas taper, delay, masking and bitmap grain belong to Digital.
 | `pressure-opacity` | Pressure to opacity | yes | no |
 | `pressure-flow` | Pressure to flow | yes | no |
 | `pressure-gamma` | Pressure curve | yes | no |
+| `speed-size` | Size response to speed | yes | yes |
+| `speed-opacity` | Opacity response to speed | yes | yes |
+| `speed-flow` | Flow response to speed | yes | yes |
+| `speed-spacing` | Spacing response to speed | yes | yes |
 | `accumulate` | Accumulation | no | no |
 | `spacing` | Spacing | yes | yes |
 | `spacing-jitter` | Spacing variation | yes | no |
@@ -112,6 +116,38 @@ the raster tip from it and Realistic selects the physical tip geometry.
 `component-rotation`, `component-aspect` and component offsets are written by
 the evaluator and are Digital-only.
 
+## Application Speed Dynamics
+
+Speed Dynamics is an application-level input capability, not a brush document
+feature. The artist's personal master control and property choices live in
+`TabletInputSettings` (`input/speedDynamics`, `input/speedAffects*`) and are
+persisted separately from every `.kb` file. A brush document only supplies the
+creator's response ceilings `speed-size`, `speed-opacity`, `speed-flow` and
+`speed-spacing`; the adapter multiplies those ceilings by the artist's choices
+at stroke time.
+
+The master is signed and continuous: `-100` makes slow strokes thicker/stronger,
+`0` is neutral, and `+100` makes fast strokes thicker/stronger. Size, opacity,
+flow and spacing can each be enabled independently. Size changes the footprint
+and therefore the spacing distance, opacity scales the mark, flow scales the
+paint released per dab, and spacing changes how closely dabs are laid. Realistic
+maps these onto the real material inputs it already owns: size, contact
+transfer, release rate and spacing ratio. No other property is claimed.
+
+The factors multiply real stylus pressure rather than replacing it. A pressure
+sensitive pen keeps its pressure response and the speed response is applied on
+top; a mouse or finger starts from a constant pressure, which is exactly why
+Speed Dynamics is useful there. The normalized speed itself comes from
+`input::SpeedTracker`, which uses elapsed time rather than a fixed per-sample
+weight, ignores impossible gaps, settles to zero when the pointer is stationary
+and is independent of the device sample rate.
+
+The same settings object reaches the artwork viewport and the Brush Studio
+preview pad (`inputSettings`), so what the artist sees in the Studio is what the
+canvas paints. Authored `Signal::Speed` bindings are also executed by
+`BrushEvaluator`; the capability inspector accepts them only for size, opacity,
+flow and spacing and reports every other target.
+
 ## Components and compositing
 
 | Feature | Digital | Realistic |
@@ -143,6 +179,8 @@ expose mask inversion.
 | Other randomization targets | stored, reported unsupported |
 | Dynamics: linear legacy pressure→size/opacity/flow and tilt→size | yes |
 | Authored response curve for pressure→size/opacity/flow | yes, any monotonic-in-x point set |
+| Authored `Signal::Speed` binding to size/opacity/flow/spacing | yes |
+| Authored `Signal::Speed` binding to any other parameter | stored, reported unsupported |
 | Response curves for other parameters or non-pressure signals | stored; not executed by the production stroke loop |
 
 The base stroke (spacing, size, angle, taper, delay) is still resolved once per
@@ -211,3 +249,10 @@ than accepting an edit it cannot honour.
   install, tab selection, overrides, corrupt snapshots.
 - `tests/unit/TestBrushUi.cpp` — packaged Studio UI in both themes, compact
   layout, native lifecycle, Realistic preview/install.
+- `tests/unit/TestSpeedDynamics.cpp` — neutral centre, both directions, every
+  property independently, amplitude, inversion, invalid input, sample-rate
+  independence, stationary/short/interrupted strokes, sharp turns, arbiter
+  publication and reset.
+- `tests/unit/TestSpeedRendering.cpp` — Digital and Realistic pixels: neutral
+  identity, both master directions, size/opacity/flow/spacing independently,
+  pressure combined with speed, and authored document weights.

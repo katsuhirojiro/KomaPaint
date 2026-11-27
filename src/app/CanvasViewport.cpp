@@ -894,6 +894,8 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
     StrokeRuntime runtime;
     runtime.color = color.rgba();
     runtime.erase = effectiveErase;
+    runtime.speed = m_inputSettings ? m_inputSettings->speedDynamicsConfig()
+                                    : input::SpeedDynamicsConfig{};
     // A native selection is already a validated immutable definition. Only
     // legacy presets are migrated; a missing native selection never gets here.
     if (!document) {
@@ -1092,7 +1094,8 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
     InputSample initSample{
         sample.docX, sample.docY, sample.pressure,
         sample.tiltX, sample.tiltY, sample.rotationRadians,
-        sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation
+        sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation,
+        sample.speedNormalized
     };
     m_stabilizer.begin(initSample);
     if (!m_stroke->begin(initSample)) {
@@ -1120,7 +1123,8 @@ void CanvasViewport::continueStrokeSample(const input::PointerSample& sample)
     const InputSample filtered = m_stabilizer.filter({
         sample.docX, sample.docY, sample.pressure,
         sample.tiltX, sample.tiltY, sample.rotationRadians,
-        sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation
+        sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation,
+        sample.speedNormalized
     });
     const double tiltMag = filtered.hasTilt
         ? std::clamp(std::hypot(filtered.tiltX, filtered.tiltY) / 90.0, 0.0, 1.0)
@@ -1158,7 +1162,8 @@ void CanvasViewport::endStrokeSample(const input::PointerSample& sample)
     const InputSample endSample{
         sample.docX, sample.docY, sample.pressure,
         sample.tiltX, sample.tiltY, sample.rotationRadians,
-        sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation
+        sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation,
+        sample.speedNormalized
     };
     const bool ok = materialStroke
         ? m_materialStroke->end({sample.docX, sample.docY,

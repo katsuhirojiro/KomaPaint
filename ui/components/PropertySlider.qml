@@ -20,6 +20,9 @@ Item {
     id: root
 
     property string label: ""
+    // Plain-language explanation, shown on hover, keyboard focus and touch
+    // (tap the question mark). Every speed control supplies one.
+    property string help: ""
     property string unit: ""
     property int from: 0
     property int to: 100
@@ -40,6 +43,9 @@ Item {
     implicitHeight: 40
     implicitWidth: 200
     opacity: enabled && available ? 1 : KP.disabledOpacity
+    Accessible.role: Accessible.Slider
+    Accessible.name: label
+    Accessible.description: help
 
     function clamp(v) { return Math.max(from, Math.min(to, Math.round(v))) }
     function positionFor(v) {
@@ -54,19 +60,81 @@ Item {
     }
     function commit(v) { const next = clamp(v); if (next !== value) edited(next) }
 
-    Text {
-        id: caption
+    Row {
+        id: captionRow
         anchors.left: parent.left
         anchors.right: field.left
         anchors.rightMargin: KP.gapM
         anchors.top: parent.top
         height: KP.controlHeightSmall + 2
-        text: root.label
-        color: KP.text
-        font.pixelSize: KP.fontS + 1
-        font.family: KP.fontUi
-        verticalAlignment: Text.AlignVCenter
-        elide: Text.ElideRight
+        spacing: 4
+
+        Text {
+            id: caption
+            width: Math.max(0, captionRow.width - (helpBadge.visible ? helpBadge.width + captionRow.spacing : 0))
+            height: parent.height
+            text: root.label
+            color: KP.text
+            font.pixelSize: KP.fontS + 1
+            font.family: KP.fontUi
+            verticalAlignment: Text.AlignVCenter
+            elide: Text.ElideRight
+        }
+
+        Rectangle {
+            id: helpBadge
+            visible: root.help.length > 0
+            width: 15
+            height: 15
+            radius: width / 2
+            anchors.verticalCenter: parent.verticalCenter
+            color: helpArea.containsMouse || helpTip.pinned ? KP.accent : "transparent"
+            border.width: 1
+            border.color: helpArea.containsMouse || helpTip.pinned ? KP.accent : KP.textMuted
+
+            Text {
+                anchors.centerIn: parent
+                text: "?"
+                color: helpArea.containsMouse || helpTip.pinned ? KP.textOnAccent : KP.textMuted
+                font.pixelSize: 10
+                font.bold: true
+                font.family: KP.fontUi
+            }
+
+            MouseArea {
+                id: helpArea
+                anchors.fill: parent
+                anchors.margins: -4
+                hoverEnabled: true
+                onClicked: helpTip.pinned = !helpTip.pinned
+            }
+        }
+    }
+
+    ToolTip {
+        id: helpTip
+        property bool pinned: false
+        text: root.help
+        visible: root.help.length > 0 &&
+                 (helpArea.containsMouse || pinned || railMouse.activeFocus || field.activeFocus)
+        delay: 0
+        timeout: -1
+        x: Math.max(0, Math.min(parent.width - implicitWidth, captionRow.x))
+        y: captionRow.y + captionRow.height + 2
+        contentItem: Text {
+            text: helpTip.text
+            color: KP.text
+            font.pixelSize: KP.fontS
+            font.family: KP.fontUi
+            wrapMode: Text.Wrap
+            width: 250
+        }
+        background: Rectangle {
+            color: KP.floatingBg
+            border.width: 1
+            border.color: KP.border
+            radius: KP.radiusS
+        }
     }
 
     KpNumberField {

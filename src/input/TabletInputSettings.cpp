@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <QStringList>
 
 namespace komapaint::input {
 namespace {
@@ -90,6 +91,15 @@ void TabletInputSettings::loadFromSettings()
     m_eraserEndEnabled = m_settings->value(QStringLiteral("input/eraserEndEnabled"), true).toBool();
     m_hoverOutlineEnabled = m_settings->value(QStringLiteral("input/hoverOutlineEnabled"), true).toBool();
     m_tiltCursorEnabled = m_settings->value(QStringLiteral("input/tiltCursorEnabled"), true).toBool();
+    m_speedDynamics = std::clamp(m_settings->value(QStringLiteral("input/speedDynamics"), 0).toInt(), -100, 100);
+    m_speedAffectsSize = m_settings->value(QStringLiteral("input/speedAffectsSize"), true).toBool();
+    m_speedAffectsOpacity = m_settings->value(QStringLiteral("input/speedAffectsOpacity"), true).toBool();
+    m_speedAffectsFlow = m_settings->value(QStringLiteral("input/speedAffectsFlow"), false).toBool();
+    m_speedAffectsSpacing = m_settings->value(QStringLiteral("input/speedAffectsSpacing"), false).toBool();
+    m_speedInvertSize = m_settings->value(QStringLiteral("input/speedInvertSize"), false).toBool();
+    m_speedInvertOpacity = m_settings->value(QStringLiteral("input/speedInvertOpacity"), false).toBool();
+    m_speedInvertFlow = m_settings->value(QStringLiteral("input/speedInvertFlow"), false).toBool();
+    m_speedInvertSpacing = m_settings->value(QStringLiteral("input/speedInvertSpacing"), false).toBool();
     emit configChanged();
 }
 
@@ -114,6 +124,15 @@ bool TabletInputSettings::saveToSettings()
     m_settings->setValue(QStringLiteral("input/eraserEndEnabled"), m_eraserEndEnabled);
     m_settings->setValue(QStringLiteral("input/hoverOutlineEnabled"), m_hoverOutlineEnabled);
     m_settings->setValue(QStringLiteral("input/tiltCursorEnabled"), m_tiltCursorEnabled);
+    m_settings->setValue(QStringLiteral("input/speedDynamics"), m_speedDynamics);
+    m_settings->setValue(QStringLiteral("input/speedAffectsSize"), m_speedAffectsSize);
+    m_settings->setValue(QStringLiteral("input/speedAffectsOpacity"), m_speedAffectsOpacity);
+    m_settings->setValue(QStringLiteral("input/speedAffectsFlow"), m_speedAffectsFlow);
+    m_settings->setValue(QStringLiteral("input/speedAffectsSpacing"), m_speedAffectsSpacing);
+    m_settings->setValue(QStringLiteral("input/speedInvertSize"), m_speedInvertSize);
+    m_settings->setValue(QStringLiteral("input/speedInvertOpacity"), m_speedInvertOpacity);
+    m_settings->setValue(QStringLiteral("input/speedInvertFlow"), m_speedInvertFlow);
+    m_settings->setValue(QStringLiteral("input/speedInvertSpacing"), m_speedInvertSpacing);
     return m_settings->sync();
 }
 
@@ -303,6 +322,99 @@ void TabletInputSettings::setTiltCursorEnabled(bool enabled)
     emit configChanged();
 }
 
+void TabletInputSettings::setSpeedDynamics(int percent)
+{
+    const int clamped = std::clamp(percent, -100, 100);
+    if (m_speedDynamics == clamped) return;
+    m_speedDynamics = clamped;
+    emit configChanged();
+}
+
+QString TabletInputSettings::speedDynamicsSummary() const
+{
+    if (m_speedDynamics == 0) {
+        return QStringLiteral("Speed is neutral. A stroke looks the same whether you draw slowly or quickly, and your pen pressure keeps working as usual.");
+    }
+    const bool slowStrong = m_speedDynamics < 0;
+    QStringList selected;
+    if (m_speedAffectsSize) selected << QStringLiteral("size");
+    if (m_speedAffectsOpacity) selected << QStringLiteral("opacity");
+    if (m_speedAffectsFlow) selected << QStringLiteral("flow");
+    if (m_speedAffectsSpacing) selected << QStringLiteral("spacing");
+    if (selected.isEmpty()) {
+        return QStringLiteral("Speed is set, but no property responds yet. Turn on at least one property below. Your pen pressure is never replaced.");
+    }
+    const QString direction = slowStrong
+        ? QStringLiteral("Slower strokes become thicker or stronger, and faster strokes become thinner or lighter.")
+        : QStringLiteral("Slower strokes become thinner or lighter, and faster strokes become thicker or stronger.");
+    return direction + QStringLiteral(" Responding: %1. Your pen pressure still applies on its own.")
+        .arg(selected.join(QStringLiteral(", ")));
+}
+
+void TabletInputSettings::setSpeedAffectsSize(bool enabled)
+{
+    if (m_speedAffectsSize == enabled) return;
+    m_speedAffectsSize = enabled;
+    emit configChanged();
+}
+void TabletInputSettings::setSpeedAffectsOpacity(bool enabled)
+{
+    if (m_speedAffectsOpacity == enabled) return;
+    m_speedAffectsOpacity = enabled;
+    emit configChanged();
+}
+void TabletInputSettings::setSpeedAffectsFlow(bool enabled)
+{
+    if (m_speedAffectsFlow == enabled) return;
+    m_speedAffectsFlow = enabled;
+    emit configChanged();
+}
+void TabletInputSettings::setSpeedAffectsSpacing(bool enabled)
+{
+    if (m_speedAffectsSpacing == enabled) return;
+    m_speedAffectsSpacing = enabled;
+    emit configChanged();
+}
+void TabletInputSettings::setSpeedInvertSize(bool inverted)
+{
+    if (m_speedInvertSize == inverted) return;
+    m_speedInvertSize = inverted;
+    emit configChanged();
+}
+void TabletInputSettings::setSpeedInvertOpacity(bool inverted)
+{
+    if (m_speedInvertOpacity == inverted) return;
+    m_speedInvertOpacity = inverted;
+    emit configChanged();
+}
+void TabletInputSettings::setSpeedInvertFlow(bool inverted)
+{
+    if (m_speedInvertFlow == inverted) return;
+    m_speedInvertFlow = inverted;
+    emit configChanged();
+}
+void TabletInputSettings::setSpeedInvertSpacing(bool inverted)
+{
+    if (m_speedInvertSpacing == inverted) return;
+    m_speedInvertSpacing = inverted;
+    emit configChanged();
+}
+
+SpeedDynamicsConfig TabletInputSettings::speedDynamicsConfig() const noexcept
+{
+    SpeedDynamicsConfig config;
+    config.master = speedMasterFromPercent(m_speedDynamics);
+    config.sizeEnabled = m_speedAffectsSize;
+    config.opacityEnabled = m_speedAffectsOpacity;
+    config.flowEnabled = m_speedAffectsFlow;
+    config.spacingEnabled = m_speedAffectsSpacing;
+    config.sizeInverted = m_speedInvertSize;
+    config.opacityInverted = m_speedInvertOpacity;
+    config.flowInverted = m_speedInvertFlow;
+    config.spacingInverted = m_speedInvertSpacing;
+    return config;
+}
+
 QVariantMap TabletInputSettings::toVariantMap() const
 {
     return {
@@ -323,7 +435,16 @@ QVariantMap TabletInputSettings::toVariantMap() const
         {QStringLiteral("barrelButton2Action"), m_barrelButton2Action},
         {QStringLiteral("eraserEndEnabled"), m_eraserEndEnabled},
         {QStringLiteral("hoverOutlineEnabled"), m_hoverOutlineEnabled},
-        {QStringLiteral("tiltCursorEnabled"), m_tiltCursorEnabled}
+        {QStringLiteral("tiltCursorEnabled"), m_tiltCursorEnabled},
+        {QStringLiteral("speedDynamics"), m_speedDynamics},
+        {QStringLiteral("speedAffectsSize"), m_speedAffectsSize},
+        {QStringLiteral("speedAffectsOpacity"), m_speedAffectsOpacity},
+        {QStringLiteral("speedAffectsFlow"), m_speedAffectsFlow},
+        {QStringLiteral("speedAffectsSpacing"), m_speedAffectsSpacing},
+        {QStringLiteral("speedInvertSize"), m_speedInvertSize},
+        {QStringLiteral("speedInvertOpacity"), m_speedInvertOpacity},
+        {QStringLiteral("speedInvertFlow"), m_speedInvertFlow},
+        {QStringLiteral("speedInvertSpacing"), m_speedInvertSpacing}
     };
 }
 
@@ -347,7 +468,16 @@ QVariantMap TabletInputSettings::defaultVariantMap() const
         {QStringLiteral("barrelButton2Action"), QStringLiteral("pan")},
         {QStringLiteral("eraserEndEnabled"), true},
         {QStringLiteral("hoverOutlineEnabled"), true},
-        {QStringLiteral("tiltCursorEnabled"), true}
+        {QStringLiteral("tiltCursorEnabled"), true},
+        {QStringLiteral("speedDynamics"), 0},
+        {QStringLiteral("speedAffectsSize"), true},
+        {QStringLiteral("speedAffectsOpacity"), true},
+        {QStringLiteral("speedAffectsFlow"), false},
+        {QStringLiteral("speedAffectsSpacing"), false},
+        {QStringLiteral("speedInvertSize"), false},
+        {QStringLiteral("speedInvertOpacity"), false},
+        {QStringLiteral("speedInvertFlow"), false},
+        {QStringLiteral("speedInvertSpacing"), false}
     };
 }
 
@@ -371,6 +501,15 @@ bool TabletInputSettings::applyVariantMap(const QVariantMap& map)
     setEraserEndEnabled(map.value(QStringLiteral("eraserEndEnabled"), m_eraserEndEnabled).toBool());
     setHoverOutlineEnabled(map.value(QStringLiteral("hoverOutlineEnabled"), m_hoverOutlineEnabled).toBool());
     setTiltCursorEnabled(map.value(QStringLiteral("tiltCursorEnabled"), m_tiltCursorEnabled).toBool());
+    setSpeedDynamics(map.value(QStringLiteral("speedDynamics"), m_speedDynamics).toInt());
+    setSpeedAffectsSize(map.value(QStringLiteral("speedAffectsSize"), m_speedAffectsSize).toBool());
+    setSpeedAffectsOpacity(map.value(QStringLiteral("speedAffectsOpacity"), m_speedAffectsOpacity).toBool());
+    setSpeedAffectsFlow(map.value(QStringLiteral("speedAffectsFlow"), m_speedAffectsFlow).toBool());
+    setSpeedAffectsSpacing(map.value(QStringLiteral("speedAffectsSpacing"), m_speedAffectsSpacing).toBool());
+    setSpeedInvertSize(map.value(QStringLiteral("speedInvertSize"), m_speedInvertSize).toBool());
+    setSpeedInvertOpacity(map.value(QStringLiteral("speedInvertOpacity"), m_speedInvertOpacity).toBool());
+    setSpeedInvertFlow(map.value(QStringLiteral("speedInvertFlow"), m_speedInvertFlow).toBool());
+    setSpeedInvertSpacing(map.value(QStringLiteral("speedInvertSpacing"), m_speedInvertSpacing).toBool());
     return saveToSettings();
 }
 

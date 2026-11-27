@@ -24,11 +24,20 @@ Rectangle {
     readonly property bool hasSubToolProps: library.hasCollections && !painting
     readonly property bool realisticEngine: Workspace.realisticEngine
     readonly property var nativeControls: library.nativeControls
+    readonly property var inputSettings: Workspace.inputSettings
     function hint(tool) {
         if (tool === "zoom") return qsTr("Click to zoom in. Alt-click or right-click to zoom out.")
         if (tool === "hand") return qsTr("Drag to move the view.")
         if (tool === "eyedropper") return qsTr("Click or drag on the artwork to pick the drawing colour.")
         return qsTr("Select a tool to adjust its properties.")
+    }
+
+    // Coalesce slider drags and checkbox clicks into one settings write.
+    Timer {
+        id: speedSaveTimer
+        interval: 350
+        repeat: false
+        onTriggered: if (panel.inputSettings) panel.inputSettings.saveToSettings()
     }
 
     ColumnLayout {
@@ -1057,6 +1066,163 @@ Rectangle {
                                 to: 100
                                 value: panel.brush.stabilization
                                 onEdited: function(v) { panel.brush.stabilization = v }
+                            }
+                        }
+                    }
+                }
+
+                PanelSection {
+                    objectName: "speedDynamicsSection"
+                    width: parent.width
+                    title: qsTr("Speed Dynamics")
+                    hint: panel.inputSettings && panel.inputSettings.speedDynamics !== 0
+                          ? qsTr("active") : qsTr("neutral")
+                    contentTopMargin: KP.gapS
+                    contentBottomMargin: KP.gapS
+
+                    Item {
+                        width: parent.width
+                        height: speedDynamicsColumn.height
+                        Column {
+                            id: speedDynamicsColumn
+                            width: parent.width
+                            spacing: KP.gapXS
+
+                            PropertySlider {
+                                objectName: "speedDynamicsSlider"
+                                width: parent.width
+                                label: qsTr("Speed influence")
+                                from: -100
+                                to: 100
+                                value: panel.inputSettings ? panel.inputSettings.speedDynamics : 0
+                                resetValue: 0
+                                help: qsTr("Moves the link between how fast you draw and how the brush behaves. Centre means speed changes nothing. Move left for slow strokes to come out thicker and stronger, or right for fast strokes to come out thicker and stronger. Press and hold Shift for fine tuning; double-click to return to neutral.")
+                                onEdited: function(v) {
+                                    if (!panel.inputSettings) return
+                                    panel.inputSettings.speedDynamics = v
+                                    speedSaveTimer.restart()
+                                }
+                            }
+
+                            Text {
+                                objectName: "speedDynamicsSummary"
+                                width: parent.width
+                                text: panel.inputSettings ? panel.inputSettings.speedDynamicsSummary : ""
+                                color: KP.textMuted
+                                font.pixelSize: KP.fontXS
+                                font.family: KP.fontUi
+                                wrapMode: Text.Wrap
+                                lineHeight: 1.15
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: qsTr("Your pressure-sensitive pen still uses its real pressure. Speed is added on top and never replaces it.")
+                                color: KP.textSubtle
+                                font.pixelSize: KP.fontXS
+                                font.family: KP.fontUi
+                                wrapMode: Text.Wrap
+                            }
+
+                            HelpCheckBox {
+                                objectName: "speedAffectsSize"
+                                width: parent.width
+                                text: qsTr("Let speed change size")
+                                help: qsTr("When on, the Speed influence slider can make slow or fast strokes wider or narrower. Turn it off to keep this brush at one width no matter how fast you draw.")
+                                checked: panel.inputSettings ? panel.inputSettings.speedAffectsSize : true
+                                onToggled: {
+                                    if (!panel.inputSettings) return
+                                    panel.inputSettings.speedAffectsSize = checked
+                                    speedSaveTimer.restart()
+                                }
+                            }
+                            HelpCheckBox {
+                                objectName: "speedInvertSize"
+                                width: parent.width
+                                visible: panel.inputSettings && panel.inputSettings.speedAffectsSize
+                                text: qsTr("Size: use the opposite direction")
+                                help: qsTr("Flip only the size response. With the master on the slow-strong side this makes slow strokes thinner while the other chosen properties still get stronger.")
+                                checked: panel.inputSettings ? panel.inputSettings.speedInvertSize : false
+                                onToggled: {
+                                    if (!panel.inputSettings) return
+                                    panel.inputSettings.speedInvertSize = checked
+                                    speedSaveTimer.restart()
+                                }
+                            }
+                            HelpCheckBox {
+                                objectName: "speedAffectsOpacity"
+                                width: parent.width
+                                text: qsTr("Let speed change opacity")
+                                help: qsTr("When on, speed can make a stroke more or less solid. Turn it off when the paint should keep the same opacity from the first mark to the last.")
+                                checked: panel.inputSettings ? panel.inputSettings.speedAffectsOpacity : true
+                                onToggled: {
+                                    if (!panel.inputSettings) return
+                                    panel.inputSettings.speedAffectsOpacity = checked
+                                    speedSaveTimer.restart()
+                                }
+                            }
+                            HelpCheckBox {
+                                objectName: "speedInvertOpacity"
+                                width: parent.width
+                                visible: panel.inputSettings && panel.inputSettings.speedAffectsOpacity
+                                text: qsTr("Opacity: use the opposite direction")
+                                help: qsTr("Flip only the opacity response, so a stroke can become more solid as it speeds up while its size still follows the master direction.")
+                                checked: panel.inputSettings ? panel.inputSettings.speedInvertOpacity : false
+                                onToggled: {
+                                    if (!panel.inputSettings) return
+                                    panel.inputSettings.speedInvertOpacity = checked
+                                    speedSaveTimer.restart()
+                                }
+                            }
+                            HelpCheckBox {
+                                objectName: "speedAffectsFlow"
+                                width: parent.width
+                                text: qsTr("Let speed change flow")
+                                help: qsTr("Flow is how much paint each mark releases. Turn this on for a dry brush that loads up or runs dry as your speed changes.")
+                                checked: panel.inputSettings ? panel.inputSettings.speedAffectsFlow : false
+                                onToggled: {
+                                    if (!panel.inputSettings) return
+                                    panel.inputSettings.speedAffectsFlow = checked
+                                    speedSaveTimer.restart()
+                                }
+                            }
+                            HelpCheckBox {
+                                objectName: "speedInvertFlow"
+                                width: parent.width
+                                visible: panel.inputSettings && panel.inputSettings.speedAffectsFlow
+                                text: qsTr("Flow: use the opposite direction")
+                                help: qsTr("Flip only the flow response without changing size or opacity.")
+                                checked: panel.inputSettings ? panel.inputSettings.speedInvertFlow : false
+                                onToggled: {
+                                    if (!panel.inputSettings) return
+                                    panel.inputSettings.speedInvertFlow = checked
+                                    speedSaveTimer.restart()
+                                }
+                            }
+                            HelpCheckBox {
+                                objectName: "speedAffectsSpacing"
+                                width: parent.width
+                                text: qsTr("Let speed change spacing")
+                                help: qsTr("Spacing is the distance between the brush's marks. Turn this on for a stroke that becomes denser or more broken up with speed. It changes the texture, not the brush width.")
+                                checked: panel.inputSettings ? panel.inputSettings.speedAffectsSpacing : false
+                                onToggled: {
+                                    if (!panel.inputSettings) return
+                                    panel.inputSettings.speedAffectsSpacing = checked
+                                    speedSaveTimer.restart()
+                                }
+                            }
+                            HelpCheckBox {
+                                objectName: "speedInvertSpacing"
+                                width: parent.width
+                                visible: panel.inputSettings && panel.inputSettings.speedAffectsSpacing
+                                text: qsTr("Spacing: use the opposite direction")
+                                help: qsTr("Flip only the spacing response, so slower strokes can break up while faster strokes lay marks closer together.")
+                                checked: panel.inputSettings ? panel.inputSettings.speedInvertSpacing : false
+                                onToggled: {
+                                    if (!panel.inputSettings) return
+                                    panel.inputSettings.speedInvertSpacing = checked
+                                    speedSaveTimer.restart()
+                                }
                             }
                         }
                     }

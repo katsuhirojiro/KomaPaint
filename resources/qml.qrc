@@ -32,6 +32,7 @@
         <file alias="components/ColorWheel.qml">../ui/components/ColorWheel.qml</file>
         <file alias="components/PaintMixerView.qml">../ui/components/PaintMixerView.qml</file>
         <file alias="components/PropertySlider.qml">../ui/components/PropertySlider.qml</file>
+        <file alias="components/HelpCheckBox.qml">../ui/components/HelpCheckBox.qml</file>
         <file alias="components/SegmentedChoice.qml">../ui/components/SegmentedChoice.qml</file>
         <file alias="components/PreferencesDialog.qml">../ui/components/PreferencesDialog.qml</file>
         <file alias="components/KomaSettingsDialog.qml">../ui/components/KomaSettingsDialog.qml</file>

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PointerInput.h"
+#include "SpeedDynamics.h"
 
 #include <QObject>
 #include <QPointer>
@@ -34,6 +35,16 @@ class TabletInputSettings : public QObject {
     Q_PROPERTY(bool eraserEndEnabled READ eraserEndEnabled WRITE setEraserEndEnabled NOTIFY configChanged)
     Q_PROPERTY(bool hoverOutlineEnabled READ hoverOutlineEnabled WRITE setHoverOutlineEnabled NOTIFY configChanged)
     Q_PROPERTY(bool tiltCursorEnabled READ tiltCursorEnabled WRITE setTiltCursorEnabled NOTIFY configChanged)
+    Q_PROPERTY(int speedDynamics READ speedDynamics WRITE setSpeedDynamics NOTIFY configChanged)
+    Q_PROPERTY(QString speedDynamicsSummary READ speedDynamicsSummary NOTIFY configChanged)
+    Q_PROPERTY(bool speedAffectsSize READ speedAffectsSize WRITE setSpeedAffectsSize NOTIFY configChanged)
+    Q_PROPERTY(bool speedAffectsOpacity READ speedAffectsOpacity WRITE setSpeedAffectsOpacity NOTIFY configChanged)
+    Q_PROPERTY(bool speedAffectsFlow READ speedAffectsFlow WRITE setSpeedAffectsFlow NOTIFY configChanged)
+    Q_PROPERTY(bool speedAffectsSpacing READ speedAffectsSpacing WRITE setSpeedAffectsSpacing NOTIFY configChanged)
+    Q_PROPERTY(bool speedInvertSize READ speedInvertSize WRITE setSpeedInvertSize NOTIFY configChanged)
+    Q_PROPERTY(bool speedInvertOpacity READ speedInvertOpacity WRITE setSpeedInvertOpacity NOTIFY configChanged)
+    Q_PROPERTY(bool speedInvertFlow READ speedInvertFlow WRITE setSpeedInvertFlow NOTIFY configChanged)
+    Q_PROPERTY(bool speedInvertSpacing READ speedInvertSpacing WRITE setSpeedInvertSpacing NOTIFY configChanged)
 
     // Diagnostics & device inspection
     Q_PROPERTY(QVariantList detectedDevices READ detectedDevices NOTIFY diagnosticsChanged)
@@ -46,7 +57,7 @@ public:
 
     void attachSettings(Settings* settings);
     void loadFromSettings();
-    bool saveToSettings();
+    Q_INVOKABLE bool saveToSettings();
 
     InputConfig toInputConfig() const noexcept;
 
@@ -104,6 +115,30 @@ public:
     bool tiltCursorEnabled() const { return m_tiltCursorEnabled; }
     void setTiltCursorEnabled(bool enabled);
 
+    // Application-level Speed Dynamics. These are the artist's own settings
+    // and never modify the selected brush document.
+    int speedDynamics() const { return m_speedDynamics; }
+    void setSpeedDynamics(int percent);
+    QString speedDynamicsSummary() const;
+    bool speedAffectsSize() const { return m_speedAffectsSize; }
+    void setSpeedAffectsSize(bool enabled);
+    bool speedAffectsOpacity() const { return m_speedAffectsOpacity; }
+    void setSpeedAffectsOpacity(bool enabled);
+    bool speedAffectsFlow() const { return m_speedAffectsFlow; }
+    void setSpeedAffectsFlow(bool enabled);
+    bool speedAffectsSpacing() const { return m_speedAffectsSpacing; }
+    void setSpeedAffectsSpacing(bool enabled);
+    bool speedInvertSize() const { return m_speedInvertSize; }
+    void setSpeedInvertSize(bool inverted);
+    bool speedInvertOpacity() const { return m_speedInvertOpacity; }
+    void setSpeedInvertOpacity(bool inverted);
+    bool speedInvertFlow() const { return m_speedInvertFlow; }
+    void setSpeedInvertFlow(bool inverted);
+    bool speedInvertSpacing() const { return m_speedInvertSpacing; }
+    void setSpeedInvertSpacing(bool inverted);
+
+    SpeedDynamicsConfig speedDynamicsConfig() const noexcept;
+
     Q_INVOKABLE QVariantMap toVariantMap() const;
     Q_INVOKABLE QVariantMap defaultVariantMap() const;
     Q_INVOKABLE bool applyVariantMap(const QVariantMap& map);
@@ -156,6 +191,15 @@ private:
     bool m_eraserEndEnabled = true;
     bool m_hoverOutlineEnabled = true;
     bool m_tiltCursorEnabled = true;
+    int m_speedDynamics = 0;
+    bool m_speedAffectsSize = true;
+    bool m_speedAffectsOpacity = true;
+    bool m_speedAffectsFlow = false;
+    bool m_speedAffectsSpacing = false;
+    bool m_speedInvertSize = false;
+    bool m_speedInvertOpacity = false;
+    bool m_speedInvertFlow = false;
+    bool m_speedInvertSpacing = false;
 
     QVariantList m_detectedDevices;
     QString m_winTabStatus;
