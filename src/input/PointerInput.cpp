@@ -521,16 +521,6 @@ ProcessResult PointerStrokeArbiter::process(const RawPointerEvent& raw,
     PointerSample sample = normalize(raw, docX, docY);
     m_telemetry.recordNormalization(clockNowNs() - tNormStart);
 
-    // Compute normalized speed from chronological dt and distance.
-    if (m_hasPrevDocPos && raw.timestampNs > m_lastTimestampNs && m_lastTimestampNs > 0) {
-        const double dist = std::hypot(sample.docX - m_prevDocX, sample.docY - m_prevDocY);
-        const double dtSec = clampRange(static_cast<double>(raw.timestampNs - m_lastTimestampNs) * 1.0e-9,
-                                        0.0001, 0.25);
-        const double instSpeed = clamp01((dist / dtSec) / m_config.referenceMaxSpeedPxPerSec);
-        m_smoothedSpeed = m_smoothedSpeed * 0.4 + instSpeed * 0.6;
-        sample.speedNormalized = m_smoothedSpeed;
-    }
-
     if (isStylusType(raw.pointerType)) {
         const BarrelAction action = detectBarrelAction(m_activeButtons, raw.buttons);
         res.triggeredBarrelAction = action;
@@ -547,7 +537,7 @@ ProcessResult PointerStrokeArbiter::process(const RawPointerEvent& raw,
     case PointerPhase::Hover:
         break;
 
-    case PointerPhase::Down:
+    case PointerPhase::Down: {
         if (m_strokeActive) {
             // Missing release on previous stroke: gracefully commit previous before starting new.
             res.shouldEndPreviousStroke = true;
@@ -558,35 +548,35 @@ ProcessResult PointerStrokeArbiter::process(const RawPointerEvent& raw,
         m_activePointerId = raw.pointerId;
         m_activeBackend = raw.backend;
         m_activePointerType = raw.pointerType;
-        m_smoothedSpeed = 0.0;
-        m_prevDocX = sample.docX;
-        m_prevDocY = sample.docY;
-        m_hasPrevDocPos = true;
+        SpeedTrackerConfig speedConfig;
+        speedConfig.referenceMaxSpeedPxPerSec = m_config.referenceMaxSpeedPxPerSec;
+        m_speedTracker.setConfig(speedConfig);
+        m_speedTracker.begin(raw.timestampNs, sample.docX, sample.docY);
+        sample.speedNormalized = 0.0;
         res.shouldBeginStroke = true;
         break;
+    }
 
     case PointerPhase::Move:
         if (m_strokeActive) {
             if (raw.pointerId == m_activePointerId || isStylusType(raw.pointerType) ||
                 raw.pointerType == PointerType::Mouse) {
+                sample.speedNormalized = m_speedTracker.update(raw.timestampNs, sample.docX, sample.docY);
                 res.shouldExtendStroke = true;
-                m_prevDocX = sample.docX;
-                m_prevDocY = sample.docY;
-                m_hasPrevDocPos = true;
             }
         }
         break;
 
     case PointerPhase::Up:
         if (m_strokeActive) {
+            sample.speedNormalized = m_speedTracker.update(raw.timestampNs, sample.docX, sample.docY);
             res.shouldEndStroke = true;
             m_strokeActive = false;
             m_activeDeviceId = 0;
             m_activePointerId = 0;
             m_activeBackend = InputBackend::Unknown;
             m_activePointerType = PointerType::Unknown;
-            m_hasPrevDocPos = false;
-            m_smoothedSpeed = 0.0;
+            m_speedTracker.reset();
         }
         break;
 
@@ -601,8 +591,7 @@ ProcessResult PointerStrokeArbiter::process(const RawPointerEvent& raw,
             m_activePointerId = 0;
             m_activeBackend = InputBackend::Unknown;
             m_activePointerType = PointerType::Unknown;
-            m_hasPrevDocPos = false;
-            m_smoothedSpeed = 0.0;
+            m_speedTracker.reset();
             m_telemetry.recordRecoveredStroke();
         }
         break;
@@ -615,8 +604,7 @@ ProcessResult PointerStrokeArbiter::process(const RawPointerEvent& raw,
             m_activePointerId = 0;
             m_activeBackend = InputBackend::Unknown;
             m_activePointerType = PointerType::Unknown;
-            m_hasPrevDocPos = false;
-            m_smoothedSpeed = 0.0;
+            m_speedTracker.reset();
             m_telemetry.recordRecoveredStroke();
         }
         break;
@@ -640,8 +628,7 @@ bool PointerStrokeArbiter::handleDeviceDisconnected(std::uint64_t deviceId) noex
         m_activePointerId = 0;
         m_activeBackend = InputBackend::Unknown;
         m_activePointerType = PointerType::Unknown;
-        m_hasPrevDocPos = false;
-        m_smoothedSpeed = 0.0;
+        m_speedTracker.reset();
         m_stylusInProximity = false;
         m_telemetry.recordRecoveredStroke();
         return true;
@@ -659,8 +646,7 @@ bool PointerStrokeArbiter::handleFocusLost() noexcept
     m_activePointerId = 0;
     m_activeBackend = InputBackend::Unknown;
     m_activePointerType = PointerType::Unknown;
-    m_hasPrevDocPos = false;
-    m_smoothedSpeed = 0.0;
+    m_speedTracker.reset();
     m_telemetry.recordRecoveredStroke();
     return true;
 }
@@ -681,8 +667,7 @@ void PointerStrokeArbiter::markStrokeEndedExternally() noexcept
     m_activePointerId = 0;
     m_activeBackend = InputBackend::Unknown;
     m_activePointerType = PointerType::Unknown;
-    m_hasPrevDocPos = false;
-    m_smoothedSpeed = 0.0;
+    m_speedTracker.reset();
 }
 
 void PointerStrokeArbiter::reset() noexcept
@@ -697,10 +682,7 @@ void PointerStrokeArbiter::reset() noexcept
     m_activeButtons = NoButton;
     m_eraserLatchedByBarrel = false;
     m_lastTimestampNs = 0;
-    m_hasPrevDocPos = false;
-    m_prevDocX = 0.0;
-    m_prevDocY = 0.0;
-    m_smoothedSpeed = 0.0;
+    m_speedTracker.reset();
     m_stylusInProximity = false;
     m_lastStylusActivityNs = 0;
     m_lastStylusBackend = InputBackend::Unknown;

@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "SpeedTracker.h"
+
 namespace komapaint::input {
 
 enum class PointerType : std::uint8_t {
@@ -321,10 +323,7 @@ private:
     bool m_eraserLatchedByBarrel = false;
 
     std::uint64_t m_lastTimestampNs = 0;
-    bool m_hasPrevDocPos = false;
-    double m_prevDocX = 0.0;
-    double m_prevDocY = 0.0;
-    double m_smoothedSpeed = 0.0;
+    SpeedTracker m_speedTracker{};
 
     bool m_stylusInProximity = false;
     std::uint64_t m_lastStylusActivityNs = 0;

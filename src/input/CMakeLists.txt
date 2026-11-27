@@ -2,6 +2,8 @@
 add_library(komapaint_input_core STATIC
     PointerInput.cpp
     PointerInput.h
+    SpeedDynamics.h
+    SpeedTracker.h
 )
 
 target_include_directories(komapaint_input_core PUBLIC
