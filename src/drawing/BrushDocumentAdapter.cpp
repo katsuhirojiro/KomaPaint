@@ -129,6 +129,10 @@ struct ResolvedValues {
     double pressureOpacity;
     double pressureFlow;
     double pressureGamma;
+    double speedSize;
+    double speedOpacity;
+    double speedFlow;
+    double speedSpacing;
     std::shared_ptr<const brush::ResponseCurve> pressureSizeCurve;
     std::shared_ptr<const brush::ResponseCurve> pressureOpacityCurve;
     std::shared_ptr<const brush::ResponseCurve> pressureFlowCurve;
@@ -177,6 +181,10 @@ ResolvedValues resolve(const brush::LegacyBrush& b) {
     v.pressureOpacity = b.pressureOpacity;
     v.pressureFlow = b.pressureFlow;
     v.pressureGamma = b.pressureGamma;
+    v.speedSize = b.speedSize;
+    v.speedOpacity = b.speedOpacity;
+    v.speedFlow = b.speedFlow;
+    v.speedSpacing = b.speedSpacing;
     v.pressureSizeCurve.reset();
     v.pressureOpacityCurve.reset();
     v.pressureFlowCurve.reset();
@@ -257,6 +265,10 @@ ResolvedValues resolve(const brush::BrushDocument& doc) {
         : 100.0 - bindingAmount(doc, "opacity", brush::Signal::Pressure) * 100.0;
     v.pressureFlow = storedOrBound(doc, "pressure-flow", "flow", brush::Signal::Pressure, 100.0);
     v.pressureGamma = stored(doc, "pressure-gamma");
+    v.speedSize = stored(doc, "speed-size");
+    v.speedOpacity = stored(doc, "speed-opacity");
+    v.speedFlow = stored(doc, "speed-flow");
+    v.speedSpacing = stored(doc, "speed-spacing");
     auto authoredCurve = [&](const char* parameter) -> std::shared_ptr<const brush::ResponseCurve> {
         for (const auto& binding : doc.dynamics) {
             if (binding.parameter != parameter || binding.signal != brush::Signal::Pressure) continue;
@@ -300,6 +312,15 @@ ResolvedValues resolve(const brush::BrushDocument& doc) {
     return v;
 }
 
+input::SpeedDynamicsConfig resolvedSpeed(const StrokeRuntime& runtime, const ResolvedValues& v) {
+    input::SpeedDynamicsConfig config = runtime.speed;
+    config.sizeWeight *= std::clamp(v.speedSize / 100.0, 0.0, 1.0);
+    config.opacityWeight *= std::clamp(v.speedOpacity / 100.0, 0.0, 1.0);
+    config.flowWeight *= std::clamp(v.speedFlow / 100.0, 0.0, 1.0);
+    config.spacingWeight *= std::clamp(v.speedSpacing / 100.0, 0.0, 1.0);
+    return input::sanitizedSpeedConfig(config);
+}
+
 BrushDefinition digitalFrom(const ResolvedValues& v, double tipShapeValue,
                             const StrokeRuntime& runtime, bool erase) {
     BrushDefinition definition;
@@ -329,6 +350,7 @@ BrushDefinition digitalFrom(const ResolvedValues& v, double tipShapeValue,
     definition.taperOut = std::clamp(v.taperOut / 100.0, 0.0, 1.0);
     definition.spacingJitter = std::clamp(v.spacingJitter / 100.0, 0.0, 1.0);
     definition.strokeDelay = std::clamp(v.strokeDelay / 100.0, 0.0, 1.0);
+    definition.speed = resolvedSpeed(runtime, v);
     definition.antialias = v.antialias;
     definition.bristleCount = std::clamp(v.bristleCount, 0, 512);
     definition.bristleSpread = std::clamp(v.bristleSpread, 0.0, 1.0);
@@ -340,7 +362,8 @@ BrushDefinition digitalFrom(const ResolvedValues& v, double tipShapeValue,
 // The material record, from resolved values. Shared by both inputs for the
 // same reason as the digital one.
 material::BrushDefinition materialFrom(material::BrushDefinition preset,
-                                       const ResolvedValues& v, bool erase) {
+                                       const ResolvedValues& v, const StrokeRuntime& runtime,
+                                       bool erase) {
     const bool wasRound = preset.tip == material::TipGeometry::Round;
     preset.size = v.size;
     preset.reservoirCapacity = preset.effectiveReservoirCapacity();
@@ -365,6 +388,7 @@ material::BrushDefinition materialFrom(material::BrushDefinition preset,
     preset.releaseRate *= v.flow / 100.0;
     preset.contactTransfer *= v.opacity / 100.0 * (erase ? v.flow / 100.0 : 1.0);
     preset.autoReloadOnStroke = !v.persistentReservoir;
+    preset.speed = resolvedSpeed(runtime, v);
     if (v.bristleCount > 0) {
         // An explicit bristle bundle wins over the preset's tip geometry, so the
         // same authored count reaches both renderers.
@@ -437,14 +461,14 @@ material::BrushDefinition materialDefinition(const material::BrushDefinition& pr
                                              const brush::LegacyBrush& legacy,
                                              const StrokeRuntime& runtime) {
     const ResolvedValues v = resolve(legacy);
-    return materialFrom(preset, v, runtime.erase || legacy.erase);
+    return materialFrom(preset, v, runtime, runtime.erase || legacy.erase);
 }
 
 material::BrushDefinition materialDefinition(const material::BrushDefinition& preset,
                                              const brush::BrushDocument& document,
                                              const StrokeRuntime& runtime) {
     const ResolvedValues v = resolve(document);
-    return materialFrom(preset, v, runtime.erase);
+    return materialFrom(preset, v, runtime, runtime.erase);
 }
 
 void assignInitialPaint(material::BrushDefinition* definition,
@@ -549,6 +573,7 @@ SparseTileStore::WriteResult DocumentStroke::paintStamp(SparseTileStore& store,
     context.input.rotationRadians = 0.0;
     context.input.directionRadians = 0.0;
     context.input.distance = m_distance;
+    context.input.speed = sample.speed;
     context.sizePixels = brush.size;
     context.brushSeed = m_document->seed;
     context.strokeSeed = m_strokeSeed;

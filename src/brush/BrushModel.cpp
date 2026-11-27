@@ -877,6 +877,10 @@ BrushDocument BrushDocument::fromLegacy(const LegacyBrush& legacy, std::string b
     put("follow-rotation", legacy.stylusRotation ? 1.0 : 0.0);
     put("tilt-angle", legacy.tiltAngle ? 1.0 : 0.0);
     put("persistent-reservoir", legacy.persistentReservoir ? 1.0 : 0.0);
+    put("speed-size", legacy.speedSize);
+    put("speed-opacity", legacy.speedOpacity);
+    put("speed-flow", legacy.speedFlow);
+    put("speed-spacing", legacy.speedSpacing);
 
     if (legacy.realisticEngine) {
         put("paint-load", legacy.paintLoad);
@@ -958,6 +962,10 @@ LegacyBrush BrushDocument::toLegacy() const {
     legacy.stylusRotation = take("follow-rotation", 0) != 0.0;
     legacy.tiltAngle = take("tilt-angle", 0) != 0.0;
     legacy.persistentReservoir = take("persistent-reservoir", 0) != 0.0;
+    legacy.speedSize = take("speed-size", 60);
+    legacy.speedOpacity = take("speed-opacity", 35);
+    legacy.speedFlow = take("speed-flow", 35);
+    legacy.speedSpacing = take("speed-spacing", 25);
     legacy.realisticEngine = engine == Engine::Realistic;
 
     legacy.paintLoad = take("paint-load", 88);

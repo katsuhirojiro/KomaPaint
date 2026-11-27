@@ -2894,6 +2894,25 @@ SparseTileStore::WriteResult MaterialDab::apply(MaterialTileStore& store,
 } catch (const std::bad_alloc&) { return SparseTileStore::WriteResult::AllocationFailed; }
   catch (const std::length_error&) { return SparseTileStore::WriteResult::AllocationFailed; }
 
+namespace {
+
+BrushDefinition speedAdjustedBrush(const BrushDefinition& brush, double speed) noexcept
+{
+    const input::SpeedFactors factors = input::speedFactors(brush.speed, speed);
+    if (factors.neutral()) return brush;
+    BrushDefinition adjusted = brush;
+    adjusted.size = std::clamp(brush.size * factors.size, double(brush::MinBrushDiameter), double(brush::MaxBrushDiameter));
+    // Material brushes do not carry a separate opacity or flow scalar; paint
+    // amount is release rate times contact transfer. Use those two real inputs
+    // rather than inventing a parallel material model.
+    adjusted.contactTransfer = std::clamp(brush.contactTransfer * factors.opacity, 0.0, 1.0);
+    adjusted.releaseRate = std::clamp(brush.releaseRate * factors.flow, 0.0, 1.0);
+    adjusted.spacingRatio = std::clamp(brush.spacingRatio * factors.spacing, 0.05, 1.0);
+    return adjusted;
+}
+
+} // namespace
+
 MaterialStroke::MaterialStroke(SparseTileStore& surfacePixels, BrushDefinition brush,
                                BrushReservoir& reservoir, const MaterialEngine& engine,
                                const MediumProfile& medium, const SurfaceProfile& surface)
@@ -2923,17 +2942,18 @@ MaterialStroke::MaterialStroke(MaterialTileStore& surfaceMaterial, BrushDefiniti
     }
 }
 
-SparseTileStore::WriteResult MaterialStroke::eraseMaterialDab(MaterialSample sample) try
+SparseTileStore::WriteResult MaterialStroke::eraseMaterialDab(const BrushDefinition& brush,
+                                                              MaterialSample sample) try
 {
     using Result = SparseTileStore::WriteResult;
     if (!m_surfaceMaterial) return Result::InvalidPixel;
     auto& store = *m_surfaceMaterial;
     const auto& geometry = store.geometry();
     if (sample.input.pressure <= 0.0) return Result::Unchanged;
-    const double angle = m_brush.rotationRadians + sample.input.rotationRadians;
+    const double angle = brush.rotationRadians + sample.input.rotationRadians;
     const double ca = std::cos(angle), sa = std::sin(angle);
-    const double rx = m_brush.size * 0.5;
-    const double ry = rx / m_brush.aspect;
+    const double rx = brush.size * 0.5;
+    const double ry = rx / brush.aspect;
     const double bound = std::max(rx, ry) + 1.0;
     if (!std::isfinite(angle) || !std::isfinite(bound)) return Result::InvalidPixel;
     const auto bounds = geometry.rasterBounds(sample.x - bound, sample.y - bound,
@@ -2947,13 +2967,13 @@ SparseTileStore::WriteResult MaterialStroke::eraseMaterialDab(MaterialSample sam
     Result failure = Result::Unchanged;
     for (auto y = top; y < bottom && failure == Result::Unchanged; ++y) {
         for (auto x = left; x < right; ++x) {
-            double contact = dabContactAt(m_brush, x, y, sample.x, sample.y, ca, sa, rx, ry, 1.0).contact;
+            double contact = dabContactAt(brush, x, y, sample.x, sample.y, ca, sa, rx, ry, 1.0).contact;
             if (contact <= 0.0) continue;
-            if (m_brush.pixelMask) {
-                contact *= clamp01(m_brush.pixelMask(m_brush.pixelMaskContext, x, y));
+            if (brush.pixelMask) {
+                contact *= clamp01(brush.pixelMask(brush.pixelMaskContext, x, y));
                 if (contact <= 0.0) continue;
             }
-            const double coverage = clamp01(contact * sample.input.pressure * m_brush.contactTransfer);
+            const double coverage = clamp01(contact * sample.input.pressure * brush.contactTransfer);
             if (coverage <= 0.0) continue;
             const auto result = store.scaleCell({x, y}, 1.0 - coverage);
             if (result == MaterialTileStore::Result::Changed) changed = true;
@@ -2974,6 +2994,12 @@ SparseTileStore::WriteResult MaterialStroke::eraseMaterialDab(MaterialSample sam
 } catch (const std::bad_alloc&) { return SparseTileStore::WriteResult::AllocationFailed; }
   catch (const std::length_error&) { return SparseTileStore::WriteResult::AllocationFailed; }
 
+double MaterialStroke::spacingFor(const MaterialSample& sample) const noexcept
+{
+    const BrushDefinition adjusted = speedAdjustedBrush(m_brush, sample.input.speed);
+    return std::max(0.5, adjusted.size * adjusted.spacingRatio);
+}
+
 bool MaterialStroke::stamp(MaterialSample sample)
 {
     using Result = SparseTileStore::WriteResult;
@@ -2985,17 +3011,18 @@ bool MaterialStroke::stamp(MaterialSample sample)
         m_failureReason = Result::InvalidPixel;
         return false;
     }
+    const BrushDefinition adjusted = speedAdjustedBrush(m_brush, sample.input.speed);
     const auto& geometry = m_surfacePixels ? m_surfacePixels->geometry() : m_surfaceMaterial->geometry();
-    const double reach = m_brush.size * 4.0 + 1.0;
+    const double reach = std::max(m_brush.size, adjusted.size) * 4.0 + 1.0;
     if (sample.x < -reach || sample.y < -reach
         || sample.x > double(geometry.width()) + reach
         || sample.y > double(geometry.height()) + reach)
         return true;
     const auto result = m_eraseMaterial
-        ? eraseMaterialDab(sample)
+        ? eraseMaterialDab(adjusted, sample)
         : m_surfacePixels
-            ? m_dab.apply(*m_surfacePixels, m_brush, m_reservoir, sample.x, sample.y, sample.input)
-            : m_dab.apply(*m_surfaceMaterial, m_brush, m_reservoir, sample.x, sample.y, sample.input);
+            ? m_dab.apply(*m_surfacePixels, adjusted, m_reservoir, sample.x, sample.y, sample.input)
+            : m_dab.apply(*m_surfaceMaterial, adjusted, m_reservoir, sample.x, sample.y, sample.input);
     if (result == Result::Unchanged || result == Result::Changed) return true;
     m_failed = true;
     m_failureReason = result;
@@ -3012,6 +3039,7 @@ bool MaterialStroke::begin(MaterialSample sample)
             return false;
         }
     }
+    m_spacing = spacingFor(sample);
     if (!stamp(sample)) return false;
     m_previous = sample;
     m_started = true;
@@ -3045,7 +3073,8 @@ bool MaterialStroke::extend(MaterialSample sample)
     // dabs. This prevents off-canvas coordinates from causing overflow or
     // work proportional to the cursor's distance outside the artwork.
     const auto& geometry = m_surfacePixels ? m_surfacePixels->geometry() : m_surfaceMaterial->geometry();
-    const double reach = m_brush.size * 4.0 + 1.0;
+    const double reach = std::max(m_brush.size,
+        speedAdjustedBrush(m_brush, sample.input.speed).size) * 4.0 + 1.0;
     double enter = 0.0, leave = 1.0;
     if (!clipAxis(m_previous.x, dx, -reach, double(geometry.width()) + reach, enter, leave)
         || !clipAxis(m_previous.y, dy, -reach, double(geometry.height()) + reach, enter, leave)) {
@@ -3061,7 +3090,7 @@ bool MaterialStroke::extend(MaterialSample sample)
         MaterialSample dabSample = interpolate(m_previous, sample, t);
         if (m_brush.followDirection) dabSample.input.rotationRadians += tangentAngle;
         if (!stamp(dabSample)) return false;
-        const double next = distance + m_spacing;
+        const double next = distance + spacingFor(dabSample);
         if (!(next > distance)) {
             m_failed = true;
             m_failureReason = SparseTileStore::WriteResult::InvalidPixel;

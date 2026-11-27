@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../canvas/SparseTileStore.h"
+#include "input/SpeedDynamics.h"
 
 #include <array>
 #include <cstdint>
@@ -140,6 +141,8 @@ struct BrushDefinition {
     double pressureTransfer = 0.5;
     double contactPressureScale = 0.35;
     double speedTransfer = 0.0;
+    // Application-level Speed Dynamics, applied per stamp by MaterialStroke.
+    input::SpeedDynamicsConfig speed;
     double tiltTransfer = 0.0;
     double tiltFlattening = 0.35;
     double contactTransfer = 1.0;
@@ -371,7 +374,8 @@ public:
     SparseTileStore::WriteResult failureReason() const noexcept { return m_failureReason; }
 private:
     bool stamp(MaterialSample sample);
-    SparseTileStore::WriteResult eraseMaterialDab(MaterialSample sample);
+    double spacingFor(const MaterialSample& sample) const noexcept;
+    SparseTileStore::WriteResult eraseMaterialDab(const BrushDefinition& brush, MaterialSample sample);
     SparseTileStore* m_surfacePixels = nullptr;
     MaterialTileStore* m_surfaceMaterial = nullptr;
     BrushDefinition m_brush;

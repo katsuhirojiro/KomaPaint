@@ -8,7 +8,26 @@ namespace komapaint {
 namespace {
 double clamp01(double n) { return std::clamp(n, 0.0, 1.0); }
 unsigned scale(unsigned value, unsigned factor) { return (value * factor + 127U) / 255U; }
-bool valid(InputSample p) { return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.pressure); }
+bool valid(InputSample p) {
+    return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.pressure) &&
+           std::isfinite(p.speed);
+}
+
+// One place applies the Speed Dynamics factors. Size changes the footprint
+// (and therefore the spacing step), opacity and flow scale the mark, and
+// spacing changes how closely the marks are laid down. The multipliers are
+// independent of pressure: a real stylus keeps its own pressure response.
+BrushDefinition withSpeed(const BrushDefinition& brush, double speed) noexcept
+{
+    const input::SpeedFactors factors = input::speedFactors(brush.speed, speed);
+    if (factors.neutral()) return brush;
+    BrushDefinition adjusted = brush;
+    adjusted.size = std::clamp(brush.size * factors.size, double(brush::MinBrushDiameter), double(brush::MaxBrushDiameter));
+    adjusted.opacity = std::clamp(brush.opacity * factors.opacity, 0.0, 1.0);
+    adjusted.flow = std::clamp(brush.flow * factors.flow, 0.0, 1.0);
+    adjusted.spacing = std::clamp(brush.spacing * factors.spacing, 0.05, 1.0);
+    return adjusted;
+}
 
 // The one place that turns pressure and tilt into a dab diameter. Both the
 // rasterizer and the stroke's spacing use it, so the distance between stamps
@@ -574,11 +593,12 @@ double BrushStroke::spacingFor(const InputSample& sample) const
     // Spacing is a fraction of the diameter that will actually be stamped at
     // this point. Pressure-to-size and tilt therefore shorten or lengthen the
     // step as the input changes, instead of leaving a nominal-size gap.
-    const double diameter = BrushRasterizer::effectiveDiameter(m_brush, sample);
+    const BrushDefinition adjusted = withSpeed(m_brush, sample.speed);
+    const double diameter = BrushRasterizer::effectiveDiameter(adjusted, sample);
     if (!(std::isfinite(diameter) && diameter > 0.0)) return 0.0;
     // Existing lower bound, kept only as a guard against a zero step. The
     // artist's percentage is otherwise used exactly as stored.
-    return std::max(0.25, diameter * m_brush.spacing);
+    return std::max(0.25, diameter * adjusted.spacing);
 }
 
 void BrushStroke::updateCarry(InputSample p)
@@ -619,8 +639,8 @@ void BrushStroke::updateCarry(InputSample p)
 bool BrushStroke::stamp(InputSample p, double taper) {
     if (taper <= 0.01) return true;   // the very tip of a taper paints nothing
     updateCarry(p);
-    BrushDefinition placed = m_brush;
-    if (taper < 1.0) placed.size = std::max(1.0, m_brush.size * taper);
+    BrushDefinition placed = withSpeed(m_brush, p.speed);
+    if (taper < 1.0) placed.size = std::max(1.0, placed.size * taper);
     const auto result = m_sink
         ? m_sink(m_store, placed, p, m_strokeAngle, m_carryPremul, m_hasCarry, m_sinkContext)
         : BrushRasterizer::dab(m_store, placed, p, m_strokeAngle, m_carryPremul, m_hasCarry);
@@ -771,6 +791,7 @@ bool BrushStroke::extend(InputSample p) {
         interp.tiltY = m_previous.tiltY + (p.tiltY - m_previous.tiltY) * t;
         interp.rotationRadians = m_previous.rotationRadians + (p.rotationRadians - m_previous.rotationRadians) * t;
         interp.tangentialPressure = m_previous.tangentialPressure + (p.tangentialPressure - m_previous.tangentialPressure) * t;
+        interp.speed = m_previous.speed + (p.speed - m_previous.speed) * t;
         interp.hasTilt = m_previous.hasTilt || p.hasTilt;
         interp.hasRotation = m_previous.hasRotation || p.hasRotation;
         place(interp, segmentStart + at);

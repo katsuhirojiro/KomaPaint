@@ -33,6 +33,9 @@ namespace komapaint {
 struct StrokeRuntime {
     std::uint32_t color = 0xff000000;  // straight ARGB
     bool erase = false;                // eraser tool, or a boundary eraser
+    // Personal Speed Dynamics settings. The adapter multiplies the brush's own
+    // creator weights before the engines see them.
+    input::SpeedDynamicsConfig speed;
 };
 
 namespace drawing {

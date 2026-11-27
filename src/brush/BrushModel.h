@@ -199,6 +199,12 @@ struct LegacyBrush {
     double dryingSpeed = 115;
     double pressureToAmount = 62;
     double pressureToContact = 35;
+    // Creator default response weights for the application Speed Dynamics
+    // control. Zero means this brush does not respond on that property.
+    double speedSize = 60;
+    double speedOpacity = 35;
+    double speedFlow = 35;
+    double speedSpacing = 25;
     bool persistentReservoir = false;
 };
 

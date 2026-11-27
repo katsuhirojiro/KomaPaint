@@ -20,7 +20,8 @@ constexpr std::string_view kBrushValues[] = {
     "texture-strength", "texture-scale", "texture-rotation", "texture-offset-x", "texture-offset-y",
     "texture-contrast", "texture-depth",
     "hue-variation", "saturation-variation", "brightness-variation",
-    "bristle-count", "bristle-spread"
+    "bristle-count", "bristle-spread",
+    "speed-size", "speed-opacity", "speed-flow", "speed-spacing"
 };
 
 constexpr std::string_view kRandomValues[] = {
@@ -227,20 +228,24 @@ DigitalCapabilityReport inspectDigitalBrush(const brush::BrushDocument& doc) {
 
     for (const auto& binding : doc.dynamics) {
         if (binding.amount == 0.0) continue;
-        const char* explicitKey = nullptr;
+        std::string explicitKey;
         if (binding.signal == Signal::Pressure) {
             if (binding.parameter == "size") explicitKey = "pressure-size";
             if (binding.parameter == "opacity") explicitKey = "pressure-opacity";
             if (binding.parameter == "flow") explicitKey = "pressure-flow";
         } else if (binding.signal == Signal::Tilt && binding.parameter == "size") {
             explicitKey = "tilt-size";
+        } else if (binding.signal == Signal::Speed &&
+                   (binding.parameter == "size" || binding.parameter == "opacity" ||
+                    binding.parameter == "flow" || binding.parameter == "spacing")) {
+            explicitKey = "speed-" + binding.parameter;
         }
         double amount = binding.amount * 100;
         if (binding.parameter == "opacity") amount = 100 - amount;
         // A curve replaces the pressure-gamma shape, so any authored response
         // works as long as the explicit strength agrees with the binding and
         // the stroke loop can evaluate it per stamp.
-        const bool supported = explicitKey && binding.perStamp && binding.amount <= 1.0 &&
+        const bool supported = !explicitKey.empty() && binding.perStamp && binding.amount <= 1.0 &&
             (!doc.parameters.contains(explicitKey) ||
              std::abs(doc.parameters.value(explicitKey, 0.0) - amount) <= 1.0e-9);
         if (!supported) {

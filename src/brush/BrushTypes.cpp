@@ -77,6 +77,7 @@ constexpr std::pair<const char*, Signal> kSignals[] = {
     {"progress", Signal::Progress},
     {"time", Signal::Time},
     {"random", Signal::Random},
+    {"speed", Signal::Speed},
 };
 
 constexpr std::pair<const char*, Distribution> kDistributions[] = {

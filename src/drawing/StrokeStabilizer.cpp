@@ -26,6 +26,10 @@ InputSample StrokeStabilizer::filter(InputSample raw)
     m_current.x += (raw.x - m_current.x) * m_weight;
     m_current.y += (raw.y - m_current.y) * m_weight;
     m_current.pressure += (raw.pressure - m_current.pressure) * m_weight;
+    // Stabilisation smooths geometry, not the speed signal. Speed Dynamics has
+    // its own time-based smoothing and must react to the pointer that produced
+    // this sample.
+    m_current.speed = raw.speed;
     if (raw.hasTilt) {
         m_current.tiltX = m_current.hasTilt ? m_current.tiltX + (raw.tiltX - m_current.tiltX) * m_weight : raw.tiltX;
         m_current.tiltY = m_current.hasTilt ? m_current.tiltY + (raw.tiltY - m_current.tiltY) * m_weight : raw.tiltY;

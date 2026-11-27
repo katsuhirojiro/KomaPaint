@@ -1,5 +1,6 @@
 #pragma once
 #include "brush/BrushTypes.h"
+#include "input/SpeedDynamics.h"
 #include "canvas/SparseTileStore.h"
 #include <cstdint>
 #include <deque>
@@ -31,6 +32,7 @@ struct BrushDefinition {
     double taperIn = 0.0;        // distance ramp at the start, as a share of size
     double taperOut = 0.0;       // distance ramp at the end, as a share of size
     double spacingJitter = 0.0;  // 0..1 random variation of each spacing step
+    input::SpeedDynamicsConfig speed; // artist direction + authored property weights
     double strokeDelay = 0.0;    // distance the painted line trails the pointer, as a share of size
     std::uint32_t randomSeed = 0; // deterministic spacing/scatter seed for this stroke
 
@@ -91,6 +93,7 @@ struct InputSample {
     double tiltY = 0.0;
     double rotationRadians = 0.0;
     double tangentialPressure = 0.0;
+    double speed = 0.0;            // normalized pointer speed from SpeedTracker
     bool hasTilt = false;
     bool hasRotation = false;
 };

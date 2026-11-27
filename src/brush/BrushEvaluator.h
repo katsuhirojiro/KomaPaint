@@ -32,6 +32,7 @@ struct InputSignalSample {
     double distance = 0.0;        // document pixels travelled so far
     double progress = 0.0;        // 0..1 through the stroke
     double time = 0.0;            // seconds since the stroke began
+    double speed = 0.0;           // 0..1 normalized pointer speed
 };
 
 // Everything the caller knows about the stamp being placed.

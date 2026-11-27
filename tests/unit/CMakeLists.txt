@@ -100,6 +100,18 @@ target_link_libraries(test_brush_document_engine PRIVATE komapaint::drawing)
 set_target_properties(test_brush_document_engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_brush_document_engine COMMAND test_brush_document_engine)
+
+# Speed Dynamics signal math and rendering, both through the production paths.
+add_executable(test_speed_dynamics TestSpeedDynamics.cpp)
+target_link_libraries(test_speed_dynamics PRIVATE komapaint::input_core)
+set_target_properties(test_speed_dynamics PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_speed_dynamics COMMAND test_speed_dynamics)
+add_executable(test_speed_rendering TestSpeedRendering.cpp)
+target_link_libraries(test_speed_rendering PRIVATE komapaint::drawing)
+set_target_properties(test_speed_rendering PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_speed_rendering COMMAND test_speed_rendering)
 add_executable(test_digital_capabilities TestDigitalCapabilities.cpp)
 target_link_libraries(test_digital_capabilities PRIVATE komapaint::drawing)
 set_target_properties(test_digital_capabilities PROPERTIES

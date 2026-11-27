@@ -71,6 +71,7 @@ double signalOf(Signal signal, const InputSignalSample& in) noexcept {
     case Signal::Progress: return clamp01(in.progress);
     case Signal::Time: return clamp01(in.time);
     case Signal::Random: return 0.5;   // resolved per stamp by the caller's seed
+    case Signal::Speed: return clamp01(in.speed);
     }
     return 0.5;
 }

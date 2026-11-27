@@ -51,7 +51,8 @@ enum class GeneratorKind {
 
 // Input signals a property can respond to (Part 5.11).
 enum class Signal {
-    Pressure, Tilt, Rotation, Velocity, Direction, Distance, Progress, Time, Random
+    Pressure, Tilt, Rotation, Velocity, Direction, Distance, Progress, Time, Random,
+    Speed
 };
 
 // Shape of a randomization range (Part 6).
