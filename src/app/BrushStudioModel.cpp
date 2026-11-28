@@ -4,7 +4,10 @@
 #include "../canvas/MemoryAvailability.h"
 #include "drawing/DigitalBrushCapabilities.h"
 
+#include <QBuffer>
 #include <QFileInfo>
+#include <QImage>
+#include <QTransform>
 #include <QImageReader>
 #include <QLocale>
 #include <QUuid>
@@ -212,6 +215,7 @@ bool BrushStudioModel::setDocument(const BrushDocument& document) {
     return edit("Open brush", [&] {
         m_document = document;
         m_selectedIndex = m_document.components.empty() ? -1 : 0;
+        m_tipOriginals.clear();
     }, EditMode::Replace, &document);
 }
 
@@ -223,6 +227,7 @@ bool BrushStudioModel::replaceDocument(BrushDocument&& document, EditMode mode, 
     return edit(label, [&] {
         m_document = std::move(document);
         m_selectedIndex = m_document.components.empty() ? -1 : 0;
+        m_tipOriginals.clear();
     }, mode);
 }
 
@@ -574,21 +579,384 @@ bool BrushStudioModel::importTipImage(const QUrl& url) try {
     for (int row = 0; row < resource.height; ++row)
         std::memcpy(buffer.data() + std::size_t(row) * stride, image.constScanLine(row), stride);
     resource.setPixels(std::move(buffer));
-    return edit("Import tip image", [&] {
+    const auto componentId = m_document.components[index].id;
+    const auto original = resource;
+    const bool imported = edit("Import tip image", [&] {
         auto& component = m_document.components[index];
         const auto oldResource = component.resourceId;
         resource.id = m_document.allocateId("r");
         component.resourceId = resource.id;
-        if (!m_document.addResource(std::move(resource))) return false;
+        if (!m_document.addResource(resource)) return false;
         // Do not rewrite a source shared with another component or an undo step.
         if (!oldResource.empty() && m_document.resourceUsage(oldResource) == 0)
             std::erase_if(m_document.resources, [&](const auto& asset) { return asset.id == oldResource; });
         return true;
     });
+    if (imported) m_tipOriginals[componentId] = original;
+    return imported;
 } catch (const std::bad_alloc&) {
     return fail(tr("Not enough memory to import the tip image."));
 } catch (const std::length_error&) {
     return fail(tr("This tip image is too large to import on this system."));
+}
+
+bool BrushStudioModel::importTipPng(const QString& base64, const QString& name,
+                                      bool addAsNew, const QString& replaceId, bool colourTip) try {
+    const auto bytes = QByteArray::fromBase64(base64.toLatin1());
+    if (bytes.isEmpty()) return fail(tr("The selected artwork could not be encoded as a tip."));
+    const auto image = QImage::fromData(bytes, "PNG");
+    if (image.isNull()) return fail(tr("The selected artwork could not be read as a tip."));
+    return applyTipImage(image, name, addAsNew, replaceId, colourTip, "Create tip from selection");
+} catch (const std::bad_alloc&) {
+    return fail(tr("Not enough memory to store the selected tip."));
+} catch (const std::length_error&) {
+    return fail(tr("This tip is too large for this system."));
+}
+
+bool BrushStudioModel::applyTipImage(const QImage& source, const QString& name, bool addAsNew,
+                                     const QString& replaceId, bool colourTip, const char* label,
+                                     bool rememberOriginal) {
+    if (source.isNull() || source.width() <= 0 || source.height() <= 0)
+        return fail(tr("The selected artwork is empty."));
+    auto converted = source.convertToFormat(QImage::Format_RGBA8888);
+    if (converted.isNull()) return fail(tr("Not enough memory to prepare the selected tip."));
+
+    int targetIndex = -1;
+    if (addAsNew) {
+        targetIndex = -1;
+    } else if (!replaceId.isEmpty()) {
+        for (int index = 0; index < componentCount(); ++index) {
+            if (QString::fromStdString(m_document.components[std::size_t(index)].id) == replaceId) {
+                targetIndex = index;
+                break;
+            }
+        }
+        if (targetIndex < 0) return fail(tr("That tip is no longer in this brush. Choose another destination."));
+    } else {
+        targetIndex = m_selectedIndex;
+        if (targetIndex < 0) return fail(tr("Select the tip you want to replace first."));
+    }
+
+    brush::BrushResource resource;
+    resource.name = name.isEmpty() ? "Brush tip" : name.toStdString();
+    resource.kind = colourTip ? brush::ResourceKind::Rgba8 : brush::ResourceKind::Grayscale8;
+    resource.width = converted.width();
+    resource.height = converted.height();
+    const auto bytes = resource.expectedBytes();
+    if (!bytes || bytes > std::numeric_limits<std::uint32_t>::max())
+        return fail(tr("That tip is too large to store in a .kb brush."));
+    std::vector<std::uint8_t> buffer(bytes);
+    for (int y = 0; y < converted.height(); ++y) {
+        const auto* row = converted.constScanLine(y);
+        for (int x = 0; x < converted.width(); ++x) {
+            const auto* rgba = row + x * 4;
+            const auto index = std::size_t(y) * std::size_t(converted.width()) + std::size_t(x);
+            if (colourTip) {
+                buffer[index * 4] = rgba[0];
+                buffer[index * 4 + 1] = rgba[1];
+                buffer[index * 4 + 2] = rgba[2];
+                buffer[index * 4 + 3] = rgba[3];
+            } else {
+                // Coverage tips read their value as opacity. A colour selection
+                // therefore becomes an alpha outline unless the caller chose the
+                // darkness mode, which already wrote luminance into alpha.
+                buffer[index] = rgba[3];
+            }
+        }
+    }
+    resource.setPixels(std::move(buffer));
+
+    bool applied = false;
+    if (addAsNew) {
+        applied = edit(label, [&] {
+            BrushComponent component;
+            component.id = m_document.allocateId("c");
+            component.kind = colourTip ? ComponentKind::Image : ComponentKind::Tip;
+            component.name = name.isEmpty() ? tr("Brush tip").toStdString() : name.toStdString();
+            resource.id = m_document.allocateId("r");
+            component.resourceId = resource.id;
+            if (!m_document.addResource(resource)) return false;
+            m_document.addComponent(std::move(component));
+            m_selectedIndex = componentCount() - 1;
+            if (rememberOriginal) m_tipOriginals[m_document.components.back().id] = resource;
+            return true;
+        });
+    } else {
+        applied = edit(label, [&] {
+            auto& target = m_document.components[std::size_t(targetIndex)];
+            if (target.kind == ComponentKind::ProceduralShape) {
+                target.kind = colourTip ? ComponentKind::Image : ComponentKind::Tip;
+                target.parameters.erase("tip-shape");
+            } else if (colourTip && target.kind == ComponentKind::Tip) {
+                target.kind = ComponentKind::Image;
+            } else if (!colourTip) {
+                target.kind = ComponentKind::Tip;
+            }
+            const auto oldResource = target.resourceId;
+            resource.id = m_document.allocateId("r");
+            target.resourceId = resource.id;
+            if (!m_document.addResource(resource)) return false;
+            if (!oldResource.empty() && m_document.resourceUsage(oldResource) == 0)
+                std::erase_if(m_document.resources, [&](const auto& asset) { return asset.id == oldResource; });
+            if (rememberOriginal) m_tipOriginals[target.id] = resource;
+            return true;
+        });
+    }
+    return applied;
+}
+
+bool BrushStudioModel::newDraftFromTipPng(const QString& base64, const QString& name, bool colourTip) {
+    if (!newDraft()) return false;
+    if (m_document.components.empty()) return fail(tr("The new brush has no tip to replace."));
+    const auto id = QString::fromStdString(m_document.components.front().id);
+    if (!importTipPng(base64, name, false, id, colourTip)) return false;
+    if (!name.trimmed().isEmpty()) setName(name);
+    return true;
+}
+
+QVariantList BrushStudioModel::tipComponents() const {
+    QVariantList list;
+    for (int index = 0; index < componentCount(); ++index) {
+        const auto& component = m_document.components[std::size_t(index)];
+        if (!isColourStamp(component.kind) && component.kind != ComponentKind::Tip) continue;
+        const auto* resource = m_document.resource(component.resourceId);
+        list.append(QVariantMap{{QStringLiteral("id"), QString::fromStdString(component.id)},
+                                {QStringLiteral("name"), QString::fromStdString(component.name)},
+                                {QStringLiteral("colour"), isColourStamp(component.kind)},
+                                {QStringLiteral("width"), resource ? resource->width : 0},
+                                {QStringLiteral("height"), resource ? resource->height : 0}});
+    }
+    return list;
+}
+
+bool BrushStudioModel::canResetTipToOriginal() const {
+    const auto* component = selectedComponentData();
+    return component && m_tipOriginals.contains(component->id);
+}
+
+QString BrushStudioModel::stashedDraftName() const {
+    return m_stashed ? m_stashed->name : QString();
+}
+
+bool BrushStudioModel::stashCurrentDraft() {
+    if (m_stashed) {
+        // Preserve the oldest distinct draft, but never let a second unsaved
+        // draft disappear behind it.
+        return m_modified
+            ? fail(tr("A previous unsaved brush is already kept. Restore or save it before starting another."))
+            : true;
+    }
+    if (!m_modified) return true;
+    try {
+        m_stashed = StashedDraft{m_document, name(), true};
+    } catch (const std::bad_alloc&) {
+        return fail(tr("Not enough memory to keep the previous brush draft."));
+    }
+    emit stashChanged();
+    return true;
+}
+
+bool BrushStudioModel::restoreStashedDraft() {
+    if (!m_stashed) return fail(tr("There is no previous brush draft to restore."));
+    brush::BrushDocument document = m_stashed->document;
+    m_stashed.reset();
+    const bool restored = replaceDocument(std::move(document), EditMode::Replace, "Restore previous brush");
+    if (restored) {
+        m_modified = true;
+        emit documentChanged();
+    }
+    emit stashChanged();
+    return restored;
+}
+
+QImage BrushStudioModel::selectedTipImage(bool* colour) const {
+    const auto* component = selectedComponentData();
+    const auto* resource = selectedResource();
+    if (colour) *colour = component && isColourStamp(component->kind);
+    if (!component || !resource || resource->width <= 0 || resource->height <= 0 ||
+        resource->pixels().empty()) return {};
+    QImage image(resource->width, resource->height, QImage::Format_RGBA8888);
+    if (image.isNull()) return {};
+    const auto& pixels = resource->pixels();
+    const bool isColour = isColourStamp(component->kind);
+    for (int y = 0; y < resource->height; ++y) {
+        auto* row = image.scanLine(y);
+        for (int x = 0; x < resource->width; ++x) {
+            const auto index = std::size_t(y) * std::size_t(resource->width) + std::size_t(x);
+            auto* rgba = row + x * 4;
+            if (resource->kind == brush::ResourceKind::Grayscale8 ||
+                resource->kind == brush::ResourceKind::Alpha8) {
+                const auto coverage = index < pixels.size() ? pixels[index] : 0U;
+                rgba[0] = rgba[1] = rgba[2] = 255;
+                rgba[3] = coverage;
+            } else {
+                if (index * 4 + 3 >= pixels.size()) continue;
+                rgba[0] = pixels[index * 4];
+                rgba[1] = pixels[index * 4 + 1];
+                rgba[2] = pixels[index * 4 + 2];
+                rgba[3] = pixels[index * 4 + 3];
+                if (!isColour) {
+                    // Colour is discarded for a coverage tip, but transparency
+                    // is the coverage artists authored.
+                    rgba[3] = pixels[index * 4 + 3];
+                }
+            }
+        }
+    }
+    return image;
+}
+
+bool BrushStudioModel::editTip(const QString& operation, double amount) {
+    bool colour = false;
+    auto image = selectedTipImage(&colour);
+    if (image.isNull()) return fail(tr("Select a bitmap tip with stored pixels first."));
+    const auto* component = selectedComponentData();
+    const auto* resource = selectedResource();
+    if (!component || !resource) return fail(tr("Select a bitmap tip with stored pixels first."));
+    if (!m_tipOriginals.contains(component->id)) m_tipOriginals[component->id] = *resource;
+
+    auto clamp8 = [](double value) { return std::uint8_t(std::clamp(std::lround(value), 0L, 255L)); };
+    if (operation == QStringLiteral("flip-horizontal")) {
+        image = image.mirrored(true, false);
+    } else if (operation == QStringLiteral("flip-vertical")) {
+        image = image.mirrored(false, true);
+    } else if (operation == QStringLiteral("rotate-left")) {
+        image = image.transformed(QTransform().rotate(-90));
+    } else if (operation == QStringLiteral("rotate-right")) {
+        image = image.transformed(QTransform().rotate(90));
+    } else if (operation == QStringLiteral("crop")) {
+        int left = image.width(), top = image.height(), right = -1, bottom = -1;
+        for (int y = 0; y < image.height(); ++y) {
+            const auto* row = image.constScanLine(y);
+            for (int x = 0; x < image.width(); ++x) {
+                if (row[x * 4 + 3] == 0) continue;
+                left = std::min(left, x);
+                top = std::min(top, y);
+                right = std::max(right, x);
+                bottom = std::max(bottom, y);
+            }
+        }
+        if (right < left || bottom < top) return fail(tr("This tip is fully transparent, so there is nothing to crop to."));
+        image = image.copy(left, top, right - left + 1, bottom - top + 1);
+    } else if (operation == QStringLiteral("invert")) {
+        for (int y = 0; y < image.height(); ++y) {
+            auto* row = image.scanLine(y);
+            for (int x = 0; x < image.width(); ++x) {
+                auto* rgba = row + x * 4;
+                if (colour) {
+                    rgba[0] = 255 - rgba[0];
+                    rgba[1] = 255 - rgba[1];
+                    rgba[2] = 255 - rgba[2];
+                } else {
+                    rgba[3] = 255 - rgba[3];
+                }
+            }
+        }
+    } else if (operation == QStringLiteral("contrast")) {
+        const double factor = 1.0 + std::clamp(amount, -100.0, 200.0) / 100.0;
+        for (int y = 0; y < image.height(); ++y) {
+            auto* row = image.scanLine(y);
+            for (int x = 0; x < image.width(); ++x) {
+                auto* rgba = row + x * 4;
+                if (colour) {
+                    for (int c = 0; c < 3; ++c)
+                        rgba[c] = clamp8((rgba[c] - 128.0) * factor + 128.0);
+                } else {
+                    rgba[3] = clamp8((rgba[3] - 128.0) * factor + 128.0);
+                }
+            }
+        }
+    } else if (operation == QStringLiteral("transparency")) {
+        const double factor = 1.0 - std::clamp(amount, 0.0, 100.0) / 100.0;
+        for (int y = 0; y < image.height(); ++y) {
+            auto* row = image.scanLine(y);
+            for (int x = 0; x < image.width(); ++x)
+                row[x * 4 + 3] = clamp8(row[x * 4 + 3] * factor);
+        }
+    } else if (operation == QStringLiteral("grayscale")) {
+        for (int y = 0; y < image.height(); ++y) {
+            auto* row = image.scanLine(y);
+            for (int x = 0; x < image.width(); ++x) {
+                auto* rgba = row + x * 4;
+                const auto luminance = clamp8(0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2]);
+                rgba[0] = rgba[1] = rgba[2] = luminance;
+            }
+        }
+    } else if (operation == QStringLiteral("alpha")) {
+        // Extract a coverage outline. If the artwork is fully opaque, its
+        // darkness becomes the outline rather than producing an empty tip.
+        bool opaque = true;
+        for (int y = 0; y < image.height(); ++y) {
+            const auto* row = image.constScanLine(y);
+            for (int x = 0; x < image.width(); ++x)
+                if (row[x * 4 + 3] != 255) { opaque = false; break; }
+        }
+        for (int y = 0; y < image.height(); ++y) {
+            auto* row = image.scanLine(y);
+            for (int x = 0; x < image.width(); ++x) {
+                auto* rgba = row + x * 4;
+                const auto coverage = opaque
+                    ? clamp8(255.0 - (0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2]))
+                    : rgba[3];
+                rgba[0] = rgba[1] = rgba[2] = 255;
+                rgba[3] = coverage;
+            }
+        }
+    } else {
+        return fail(tr("That tip edit is not available."));
+    }
+    if (image.isNull() || image.width() <= 0 || image.height() <= 0)
+        return fail(tr("That tip edit produced no usable image."));
+    return applyTipImage(image, QString::fromStdString(component->name), false,
+                         QString::fromStdString(component->id), colour, "Edit tip", false);
+}
+
+bool BrushStudioModel::resizeTip(int width, int height) {
+    if (width <= 0 || height <= 0) return fail(tr("Enter a tip width and height greater than zero."));
+    bool colour = false;
+    auto image = selectedTipImage(&colour);
+    if (image.isNull()) return fail(tr("Select a bitmap tip with stored pixels first."));
+    const auto* component = selectedComponentData();
+    if (!component) return fail(tr("Select a bitmap tip with stored pixels first."));
+    if (std::uint64_t(width) * std::uint64_t(height) > std::numeric_limits<std::size_t>::max() / 8 ||
+        !systemMemoryAvailable(std::size_t(width) * std::size_t(height) * 8))
+        return fail(tr("There is not enough memory for a tip that size."));
+    const auto scaled = image.scaled(width, height, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    if (scaled.isNull()) return fail(tr("The tip could not be resized to that size."));
+    return applyTipImage(scaled, QString::fromStdString(component->name), false,
+                         QString::fromStdString(component->id), colour, "Resize tip", false);
+}
+
+bool BrushStudioModel::resetTipToOriginal() {
+    const auto* component = selectedComponentData();
+    if (!component || !m_tipOriginals.contains(component->id))
+        return fail(tr("This tip has no imported original to return to."));
+    const auto& original = m_tipOriginals[component->id];
+    const bool colour = isColourStamp(component->kind);
+    // Build an image from the stored resource without going through the live
+    // pixels, which may be a later revision.
+    QImage image(original.width, original.height, QImage::Format_RGBA8888);
+    if (image.isNull()) return fail(tr("There is not enough memory to restore this tip."));
+    for (int y = 0; y < original.height; ++y) {
+        auto* row = image.scanLine(y);
+        for (int x = 0; x < original.width; ++x) {
+            const auto index = std::size_t(y) * std::size_t(original.width) + std::size_t(x);
+            auto* rgba = row + x * 4;
+            if (original.kind == brush::ResourceKind::Grayscale8 ||
+                original.kind == brush::ResourceKind::Alpha8) {
+                rgba[0] = rgba[1] = rgba[2] = 255;
+                rgba[3] = index < original.pixels().size() ? original.pixels()[index] : 0U;
+            } else if (index * 4 + 3 < original.pixels().size()) {
+                rgba[0] = original.pixels()[index * 4];
+                rgba[1] = original.pixels()[index * 4 + 1];
+                rgba[2] = original.pixels()[index * 4 + 2];
+                rgba[3] = original.pixels()[index * 4 + 3];
+            }
+        }
+    }
+    return applyTipImage(image, QString::fromStdString(component->name), false,
+                         QString::fromStdString(component->id), colour,
+                         "Reset tip to imported artwork", false);
 }
 
 QVariantMap BrushStudioModel::loadSelectedPixels() const {
@@ -663,7 +1031,9 @@ bool BrushStudioModel::setTipPixels(const QVariantList& rgba, int width, int hei
         }
     }
     resource.setPixels(std::move(buffer));
-    return edit("Paint tip", [&] {
+    const auto componentId = m_document.components[std::size_t(m_selectedIndex)].id;
+    const auto original = resource;
+    const bool painted = edit("Paint tip", [&] {
         auto& selected = m_document.components[std::size_t(m_selectedIndex)];
         const auto oldResource = selected.resourceId;
         resource.id = m_document.allocateId("r");
@@ -673,6 +1043,8 @@ bool BrushStudioModel::setTipPixels(const QVariantList& rgba, int width, int hei
             std::erase_if(m_document.resources, [&](const auto& asset) { return asset.id == oldResource; });
         return true;
     });
+    if (painted && !m_tipOriginals.contains(componentId)) m_tipOriginals[componentId] = original;
+    return painted;
 } catch (const std::bad_alloc&) {
     return fail(tr("Not enough memory to store the painted tip."));
 } catch (const std::length_error&) {

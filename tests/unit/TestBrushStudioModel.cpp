@@ -7,6 +7,7 @@
 // against a second copy of the same expectations.
 #include <QtTest/QtTest>
 
+#include <QBuffer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -49,6 +50,9 @@ private slots:
     void componentOrderAndSelectionFollowTheDocument();
     void componentModesDescribeRealResources();
     void importsTipPixelsAsOneUndoableEdit();
+    void importsASelectionTipAsAnotherTip();
+    void tipEditsAreUndoableAndResetToImported();
+    void previousDraftSurvivesANewBrush();
     void paintsPixelsAndLinksMasks();
     void groupsPickModeAndMembers();
     void regroupedComponentsStayConsistentThroughSave();
@@ -290,6 +294,113 @@ void TestBrushStudioModel::importsTipPixelsAsOneUndoableEdit() {
     BrushStudioModel reloaded;
     QVERIFY(reloaded.openDraft(saved));
     QVERIFY(reloaded.document() == after);
+}
+
+void TestBrushStudioModel::importsASelectionTipAsAnotherTip() {
+    QImage image(2, 1, QImage::Format_RGBA8888);
+    image.setPixelColor(0, 0, QColor(255, 95, 29, 255));
+    image.setPixelColor(1, 0, QColor(0, 0, 255, 64));
+    QByteArray png;
+    QBuffer buffer(&png);
+    QVERIFY(buffer.open(QIODevice::WriteOnly));
+    QVERIFY(image.save(&buffer, "PNG"));
+    const QString base64 = QString::fromLatin1(png.toBase64());
+
+    BrushStudioModel model;
+    QCOMPARE(model.componentCount(), 1);
+    QVERIFY(model.importTipPng(base64, QStringLiteral("Painted leaf"), true, {}, true));
+    QCOMPARE(model.componentCount(), 2);
+    QCOMPARE(model.selectedIndex(), 1);
+    QCOMPARE(stringField(model.selectedComponent(), "kindLabel"), QStringLiteral("Image"));
+    QCOMPARE(model.tipComponents().size(), 1);
+    QVERIFY(model.document().validate().ok());
+    const auto* resource = model.selectedResource();
+    QVERIFY(resource);
+    QVERIFY(resource->kind == brush::ResourceKind::Rgba8);
+    QCOMPARE(resource->width, 2);
+    QCOMPARE(resource->height, 1);
+    // The original procedural tip is untouched and still paints.
+    QVERIFY(model.document().component("c1"));
+    model.undo();
+    QCOMPARE(model.componentCount(), 1);
+    model.redo();
+    QCOMPARE(model.componentCount(), 2);
+
+    // Replacing the original procedural tip converts it into a coverage tip
+    // without adding another component.
+    QVERIFY(model.importTipPng(base64, QStringLiteral("Outline"), false, QStringLiteral("c1"), false));
+    QCOMPARE(model.componentCount(), 2);
+    QCOMPARE(model.document().components.front().kind, brush::ComponentKind::Tip);
+    QCOMPARE(model.document().components.front().parameters.value("tip-shape", -1.0), -1.0);
+    model.setSelectedIndex(0);
+    QVERIFY(model.selectedResource());
+    QVERIFY(model.selectedResource()->kind == brush::ResourceKind::Grayscale8);
+    QVERIFY(model.document().validate().ok());
+}
+
+void TestBrushStudioModel::tipEditsAreUndoableAndResetToImported() {
+    QImage image(3, 1, QImage::Format_RGBA8888);
+    image.setPixelColor(0, 0, QColor(255, 0, 0, 255));
+    image.setPixelColor(1, 0, QColor(0, 0, 0, 0));
+    image.setPixelColor(2, 0, QColor(0, 0, 255, 128));
+    QByteArray png;
+    QBuffer buffer(&png);
+    QVERIFY(buffer.open(QIODevice::WriteOnly));
+    QVERIFY(image.save(&buffer, "PNG"));
+    BrushStudioModel model;
+    QVERIFY(model.importTipPng(QString::fromLatin1(png.toBase64()), QStringLiteral("Edit me"),
+                               false, QStringLiteral("c1"), true));
+    model.setSelectedIndex(0);
+    QVERIFY(model.canResetTipToOriginal());
+    const auto original = model.loadSelectedPixels();
+    QCOMPARE(original.value(QStringLiteral("width")).toInt(), 3);
+
+    QVERIFY(model.editTip(QStringLiteral("flip-horizontal")));
+    const auto flipped = model.loadSelectedPixels().value(QStringLiteral("rgba")).toList();
+    QCOMPARE(flipped.at(0).toUInt(), original.value(QStringLiteral("rgba")).toList().at(2).toUInt());
+    QCOMPARE(flipped.at(2).toUInt(), original.value(QStringLiteral("rgba")).toList().at(0).toUInt());
+    QVERIFY(model.canUndo());
+    QVERIFY(model.editTip(QStringLiteral("crop")));
+    QCOMPARE(model.selectedResource()->width, 2);
+    QVERIFY(model.editTip(QStringLiteral("transparency"), 50.0));
+    QVERIFY(model.resetTipToOriginal());
+    QCOMPARE(model.selectedResource()->width, 3);
+    QCOMPARE(model.loadSelectedPixels().value(QStringLiteral("rgba")).toList(),
+             original.value(QStringLiteral("rgba")).toList());
+
+    // Reset is one more undo step; undo returns to the edited revision.
+    model.undo();
+    QCOMPARE(model.selectedResource()->width, 2);
+}
+
+void TestBrushStudioModel::previousDraftSurvivesANewBrush() {
+    QImage image(2, 2, QImage::Format_RGBA8888);
+    image.fill(QColor(20, 120, 200, 255));
+    QByteArray png;
+    QBuffer buffer(&png);
+    QVERIFY(buffer.open(QIODevice::WriteOnly));
+    QVERIFY(image.save(&buffer, "PNG"));
+    const QString base64 = QString::fromLatin1(png.toBase64());
+
+    BrushStudioModel model;
+    model.setName(QStringLiteral("Working leaf"));
+    QVERIFY(model.stashCurrentDraft());
+    QVERIFY(model.hasStashedDraft());
+    QCOMPARE(model.stashedDraftName(), QStringLiteral("Working leaf"));
+    QVERIFY(model.newDraftFromTipPng(base64, QStringLiteral("New bark"), true));
+    QCOMPARE(model.name(), QStringLiteral("New bark"));
+    QVERIFY(model.hasStashedDraft());
+    QCOMPARE(model.stashedDraftName(), QStringLiteral("Working leaf"));
+    QVERIFY(model.restoreStashedDraft());
+    QCOMPARE(model.name(), QStringLiteral("Working leaf"));
+    QVERIFY(!model.hasStashedDraft());
+
+    // A second unsaved draft cannot silently replace the kept one.
+    QVERIFY(model.stashCurrentDraft());
+    model.setName(QStringLiteral("Second draft"));
+    QVERIFY(!model.stashCurrentDraft());
+    QVERIFY(model.hasStashedDraft());
+    QCOMPARE(model.stashedDraftName(), QStringLiteral("Working leaf"));
 }
 
 void TestBrushStudioModel::paintsPixelsAndLinksMasks() {

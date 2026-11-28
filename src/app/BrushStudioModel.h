@@ -12,6 +12,7 @@
 #include "../brush/BrushFormat.h"
 #include "../brush/BrushModel.h"
 
+#include <QImage>
 #include <QObject>
 #include <QString>
 #include <QUrl>
@@ -20,6 +21,8 @@
 
 #include <cstddef>
 #include <list>
+#include <map>
+#include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -36,6 +39,10 @@ class BrushStudioModel : public QObject {
     Q_PROPERTY(QVariantList components READ components NOTIFY componentsChanged)
     Q_PROPERTY(QVariantMap selectedComponent READ selectedComponent NOTIFY componentsChanged)
     Q_PROPERTY(bool canImportTipImage READ canImportTipImage NOTIFY componentsChanged)
+    Q_PROPERTY(bool canResetTipToOriginal READ canResetTipToOriginal NOTIFY selectionChanged)
+    Q_PROPERTY(QVariantList tipComponents READ tipComponents NOTIFY componentsChanged)
+    Q_PROPERTY(bool hasStashedDraft READ hasStashedDraft NOTIFY stashChanged)
+    Q_PROPERTY(QString stashedDraftName READ stashedDraftName NOTIFY stashChanged)
     Q_PROPERTY(int componentCount READ componentCount NOTIFY componentsChanged)
     Q_PROPERTY(int hiddenComponentCount READ hiddenComponentCount NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList groups READ groups NOTIFY componentsChanged)
@@ -88,6 +95,30 @@ public:
     const brush::BrushResource* selectedResource() const;
     bool canImportTipImage() const;
     Q_INVOKABLE bool importTipImage(const QUrl& url);
+    // Create Brush Tip from Selection hands over a lossless PNG (base64) so QML
+    // never needs a second image representation. Add keeps every existing tip;
+    // replace targets one component, or the selected component when empty.
+    Q_INVOKABLE bool importTipPng(const QString& base64, const QString& name,
+                                  bool addAsNew, const QString& replaceId = {},
+                                  bool colourTip = false);
+    // A fresh draft whose first tip is the imported picture. Used by "Create a
+    // new brush" after the previous unsaved draft has been stashed.
+    Q_INVOKABLE bool newDraftFromTipPng(const QString& base64, const QString& name,
+                                        bool colourTip = false);
+    QVariantList tipComponents() const;
+    // Non-destructive edits of the selected bitmap tip. Every operation is one
+    // undo step and writes a new resource; the imported source stays available
+    // for reset until a different document is opened.
+    bool canResetTipToOriginal() const;
+    Q_INVOKABLE bool editTip(const QString& operation, double amount = 0.0);
+    Q_INVOKABLE bool resizeTip(int width, int height);
+    Q_INVOKABLE bool resetTipToOriginal();
+    // A previous unsaved brush is kept in memory rather than discarded when
+    // "Create a new brush" starts a fresh draft. It can be restored once.
+    Q_INVOKABLE bool stashCurrentDraft();
+    Q_INVOKABLE bool restoreStashedDraft();
+    bool hasStashedDraft() const { return m_stashed.has_value(); }
+    QString stashedDraftName() const;
     // Replaces the selected component's resource with pixels painted in Studio.
     // The list is flat RGBA8888 (r,g,b,a per pixel), row-major. Coverage kinds
     // read alpha, or luminance when the canvas is opaque.
@@ -183,6 +214,7 @@ signals:
     void exposureChanged();
     void historyChanged();
     void errorChanged();
+    void stashChanged();
 
 private:
     enum class EditMode { Change, Replace, LoadSaved };
@@ -215,9 +247,23 @@ private:
     void clearError();
     bool historyMemoryError();
     void markSaved() noexcept;
+    bool applyTipImage(const QImage& image, const QString& name, bool addAsNew,
+                       const QString& replaceId, bool colourTip, const char* label,
+                       bool rememberOriginal = true);
+    bool replaceSelectedResource(const brush::BrushResource& resource, const char* label);
+    QImage selectedTipImage(bool* colour) const;
 
     brush::BrushDocument m_document;
     QString m_error;
+    // Session-only originals for non-destructive tip editing. They are not
+    // serialised: reopening a saved brush starts from what the file contains.
+    std::map<std::string, brush::BrushResource> m_tipOriginals;
+    struct StashedDraft {
+        brush::BrushDocument document;
+        QString name;
+        bool modified = true;
+    };
+    std::optional<StashedDraft> m_stashed;
     int m_selectedIndex = -1;
     bool m_modified = false;
 

@@ -19,7 +19,7 @@ Item {
     property bool colourTip: !!(draft.selectedComponent && draft.selectedComponent.colour)
     property string paintColour: "#ffffff"
     readonly property int sourceSize: 256
-    implicitHeight: 312
+    implicitHeight: 372
 
     function loadPixels() {
         colourTip = !!(draft.selectedComponent && draft.selectedComponent.colour)
@@ -181,6 +181,183 @@ Item {
                         onClicked: { editor.paintColour = parent.modelData; editor.erasing = false }
                     }
                 }
+            }
+        }
+
+        // Non-destructive adjustments of the imported tip. Each action is one
+        // undo step and writes a new resource; Reset returns to the pixels that
+        // were imported, not to a saved approximation of them.
+        Flow {
+            Layout.fillWidth: true
+            spacing: KP.gapXS
+            visible: editor.draft.selectedIndex >= 0
+            KpButton {
+                objectName: "brushTipCrop"
+                small: true
+                label: qsTr("Crop")
+                tip: qsTr("Trim fully transparent edges from this tip")
+                onClicked: editor.draft.editTip("crop")
+            }
+            KpButton {
+                objectName: "brushTipRotateLeft"
+                small: true
+                label: qsTr("Rotate left")
+                tip: qsTr("Turn this tip a quarter turn to the left")
+                onClicked: editor.draft.editTip("rotate-left")
+            }
+            KpButton {
+                objectName: "brushTipRotateRight"
+                small: true
+                label: qsTr("Rotate right")
+                tip: qsTr("Turn this tip a quarter turn to the right")
+                onClicked: editor.draft.editTip("rotate-right")
+            }
+            KpButton {
+                objectName: "brushTipFlipH"
+                small: true
+                label: qsTr("Flip across")
+                tip: qsTr("Mirror this tip left to right")
+                onClicked: editor.draft.editTip("flip-horizontal")
+            }
+            KpButton {
+                objectName: "brushTipFlipV"
+                small: true
+                label: qsTr("Flip down")
+                tip: qsTr("Mirror this tip top to bottom")
+                onClicked: editor.draft.editTip("flip-vertical")
+            }
+            KpButton {
+                objectName: "brushTipInvert"
+                small: true
+                label: qsTr("Invert")
+                tip: qsTr("Invert the tip's colours, or its coverage for an outline tip")
+                onClicked: editor.draft.editTip("invert")
+            }
+            KpButton {
+                objectName: "brushTipGrayscale"
+                small: true
+                label: qsTr("Grayscale")
+                tip: qsTr("Turn the tip's colours into matching greys without changing transparency")
+                onClicked: editor.draft.editTip("grayscale")
+            }
+            KpButton {
+                objectName: "brushTipAlpha"
+                small: true
+                label: qsTr("Keep outline")
+                tip: qsTr("Turn a colour tip into an outline tip. Fully opaque artwork uses its darkness as the outline.")
+                onClicked: editor.draft.editTip("alpha")
+            }
+            KpButton {
+                objectName: "brushTipReset"
+                small: true
+                label: qsTr("Reset to artwork")
+                tip: qsTr("Return to the pixels imported from the illustration. Earlier edits stay in undo history.")
+                enabled: editor.draft.canResetTipToOriginal
+                onClicked: editor.draft.resetTipToOriginal()
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: KP.gapS
+            visible: editor.draft.selectedIndex >= 0
+            Text {
+                text: qsTr("Contrast")
+                color: KP.textMuted
+                font.family: KP.fontUi
+                font.pixelSize: KP.fontXS
+            }
+            Slider {
+                id: contrastRail
+                objectName: "brushTipContrast"
+                Layout.fillWidth: true
+                from: -50
+                to: 100
+                value: 0
+                stepSize: 1
+                Accessible.name: qsTr("Tip contrast")
+                Accessible.description: qsTr("Strengthen or soften the tip's light and dark values. The change is applied when you let go.")
+                ToolTip.text: Accessible.description
+                ToolTip.visible: pressed || activeFocus
+                ToolTip.delay: 500
+                onPressedChanged: if (!pressed && value !== 0) {
+                    editor.draft.editTip("contrast", value)
+                    value = 0
+                }
+            }
+            Text {
+                text: qsTr("Fade")
+                color: KP.textMuted
+                font.family: KP.fontUi
+                font.pixelSize: KP.fontXS
+            }
+            Slider {
+                id: fadeRail
+                objectName: "brushTipTransparency"
+                Layout.fillWidth: true
+                from: 0
+                to: 100
+                value: 0
+                stepSize: 1
+                Accessible.name: qsTr("Tip fade")
+                Accessible.description: qsTr("Reduce the tip's opacity. The change is applied when you let go.")
+                ToolTip.text: Accessible.description
+                ToolTip.visible: pressed || activeFocus
+                ToolTip.delay: 500
+                onPressedChanged: if (!pressed && value > 0) {
+                    editor.draft.editTip("transparency", value)
+                    value = 0
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: KP.gapS
+            visible: editor.draft.selectedIndex >= 0
+            Text {
+                text: qsTr("Size")
+                color: KP.textMuted
+                font.family: KP.fontUi
+                font.pixelSize: KP.fontXS
+            }
+            SpinBox {
+                id: tipWidth
+                objectName: "brushTipResizeWidth"
+                from: 1
+                to: 16384
+                value: editor.draft.selectedComponent.resourceWidth > 0 ? editor.draft.selectedComponent.resourceWidth : 32
+                Accessible.name: qsTr("Tip width")
+                Accessible.description: qsTr("Width of the stored tip image in pixels.")
+                ToolTip.text: Accessible.description
+                ToolTip.visible: hovered || activeFocus
+                ToolTip.delay: 500
+            }
+            Text {
+                text: qsTr("×")
+                color: KP.textMuted
+                font.family: KP.fontUi
+                font.pixelSize: KP.fontXS
+            }
+            SpinBox {
+                id: tipHeight
+                objectName: "brushTipResizeHeight"
+                from: 1
+                to: 16384
+                value: editor.draft.selectedComponent.resourceHeight > 0 ? editor.draft.selectedComponent.resourceHeight : 32
+                Accessible.name: qsTr("Tip height")
+                Accessible.description: qsTr("Height of the stored tip image in pixels.")
+                ToolTip.text: Accessible.description
+                ToolTip.visible: hovered || activeFocus
+                ToolTip.delay: 500
+            }
+            KpButton {
+                objectName: "brushTipResize"
+                small: true
+                label: qsTr("Resize")
+                tip: qsTr("Resize the stored tip image. The brush preview updates immediately.")
+                enabled: tipWidth.value > 0 && tipHeight.value > 0
+                onClicked: editor.draft.resizeTip(tipWidth.value, tipHeight.value)
             }
         }
 
