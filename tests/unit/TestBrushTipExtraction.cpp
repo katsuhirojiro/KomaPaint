@@ -56,7 +56,12 @@ void TestBrushTipExtraction::currentLayerWithoutSelectionTrimsTransparency()
 {
     CanvasDocument document;
     document.setSize({64, 64});
+    QCOMPARE(document.width(), 64);
+    QCOMPARE(document.height(), 64);
+    QVERIFY(document.layers()->layerAt(0));
+    QCOMPARE(document.layers()->layerAt(0)->tiles().geometry().width(), std::int64_t(64));
     put(document, 0, 10, 12, 0xFFFF0000);
+    QVERIFY(!document.layers()->layerAt(0)->tiles().allocatedTilePoints().empty());
     put(document, 0, 11, 12, 0xFF00FF00);
 
     brushtip::Request request;
