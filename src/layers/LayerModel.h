@@ -17,6 +17,9 @@ class LayerModel : public QAbstractListModel
     // Bound from QML (LayersPanel currentIndex); must be a property so the
     // binding tracks activeLayerIndexChanged instead of reading a method.
     Q_PROPERTY(int activeLayerIndex READ activeLayerIndex WRITE setActiveLayerIndex NOTIFY activeLayerIndexChanged)
+    // Multi-layer operations (Create Brush Tip from Selection, future merge
+    // commands) need a real selected set, not a guess from the active row.
+    Q_PROPERTY(QVariantList selectedLayerRows READ selectedLayerRows NOTIFY layerSelectionChanged)
 
 public:
     enum Roles { NameRole = Qt::UserRole + 1, VisibleRole, LockedRole, OpacityRole, IndexRole, BlendModeRole, ColorLabelRole };
@@ -32,6 +35,10 @@ public:
     Q_INVOKABLE Layer* layerAt(int row) const;
     Q_INVOKABLE int    activeLayerIndex() const { return m_active; }
     Q_INVOKABLE void   setActiveLayerIndex(int row);
+    QVariantList selectedLayerRows() const;
+    Q_INVOKABLE void setSelectedLayerRows(const QVariantList& rows);
+    Q_INVOKABLE void selectLayerRow(int row, bool additive);
+    Q_INVOKABLE bool isLayerRowSelected(int row) const;
 
     Q_INVOKABLE void addLayer();
     Q_INVOKABLE void removeLayer(int row);
@@ -39,6 +46,7 @@ public:
 
 signals:
     void activeLayerIndexChanged(int index);
+    void layerSelectionChanged();
 
 private:
     void onLayerChanged(Layer* layer, const QList<int>& roles);
@@ -47,6 +55,7 @@ private:
     QSize m_canvasSize{1600, 1200};
     QList<Layer*> m_layers;
     int           m_active = -1;
+    QList<int>    m_selectedRows;
 };
 
 }  // namespace komapaint

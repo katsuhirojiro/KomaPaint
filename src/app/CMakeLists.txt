@@ -10,6 +10,8 @@ add_library(komapaint_app STATIC
     BrushStudioModel.h
     BrushStudioPad.cpp
     BrushStudioPad.h
+    BrushTipExtraction.cpp
+    BrushTipExtraction.h
     CanvasToolExecutor.cpp
     CanvasToolExecutor.h
     ToolSettings.h

@@ -1,5 +1,7 @@
 #include "LayerModel.h"
 
+#include <algorithm>
+
 namespace komapaint {
 
 LayerModel::LayerModel(QObject* parent, bool createDefaultLayer) : QAbstractListModel(parent)
@@ -11,6 +13,7 @@ LayerModel::LayerModel(QObject* parent, bool createDefaultLayer) : QAbstractList
     l->setIndex(0);
     m_layers.append(l);
     m_active = 0;
+    m_selectedRows = {0};
     connect(l, &Layer::nameChanged,       this, [this,l]{ onLayerChanged(l, {NameRole}); });
     connect(l, &Layer::visibilityChanged, this, [this,l]{ onLayerChanged(l, {VisibleRole}); });
     connect(l, &Layer::lockedChanged,     this, [this,l]{ onLayerChanged(l, {LockedRole}); });
@@ -81,7 +84,53 @@ void LayerModel::setActiveLayerIndex(int row)
 {
     if (row < 0 || row >= m_layers.size() || row == m_active) return;
     m_active = row;
+    m_selectedRows = {row};
     emit activeLayerIndexChanged(m_active);
+    emit layerSelectionChanged();
+}
+
+QVariantList LayerModel::selectedLayerRows() const
+{
+    QVariantList rows;
+    rows.reserve(m_selectedRows.size());
+    for (int row : m_selectedRows) rows.append(row);
+    return rows;
+}
+
+void LayerModel::setSelectedLayerRows(const QVariantList& rows)
+{
+    QList<int> next;
+    for (const auto& value : rows) {
+        bool ok = false;
+        const int row = value.toInt(&ok);
+        if (ok && row >= 0 && row < m_layers.size() && !next.contains(row)) next.append(row);
+    }
+    std::sort(next.begin(), next.end());
+    if (next == m_selectedRows) return;
+    m_selectedRows = std::move(next);
+    emit layerSelectionChanged();
+}
+
+void LayerModel::selectLayerRow(int row, bool additive)
+{
+    if (row < 0 || row >= m_layers.size()) return;
+    if (!additive) {
+        if (m_active != row) {
+            m_active = row;
+            emit activeLayerIndexChanged(m_active);
+        }
+        setSelectedLayerRows({row});
+        return;
+    }
+    if (m_selectedRows.contains(row)) m_selectedRows.removeAll(row);
+    else m_selectedRows.append(row);
+    std::sort(m_selectedRows.begin(), m_selectedRows.end());
+    emit layerSelectionChanged();
+}
+
+bool LayerModel::isLayerRowSelected(int row) const
+{
+    return m_selectedRows.contains(row);
 }
 
 void LayerModel::addLayer()
@@ -104,7 +153,9 @@ void LayerModel::addLayer()
     endInsertRows();
     if (m_active < 0) {
         m_active = row;
+        m_selectedRows = {row};
         emit activeLayerIndexChanged(m_active);
+        emit layerSelectionChanged();
     }
 }
 
@@ -124,6 +175,8 @@ void LayerModel::removeLayer(int row)
     endRemoveRows();
     // Removing the active row may leave the numeric index unchanged while
     // replacing the selected object. Consumers need to re-read layerAt().
+    m_selectedRows = m_active >= 0 ? QList<int>{m_active} : QList<int>{};
+    emit layerSelectionChanged();
     if (m_active != previousActive || row == previousActive) emit activeLayerIndexChanged(m_active);
 }
 
@@ -140,6 +193,8 @@ void LayerModel::moveLayer(int from, int to)
     else if (from > m_active && to <= m_active) ++m_active;
     for (int i = 0; i < m_layers.size(); ++i) m_layers[i]->setIndex(i);
     endMoveRows();
+    m_selectedRows = m_active >= 0 ? QList<int>{m_active} : QList<int>{};
+    emit layerSelectionChanged();
     if (m_active != previousActive) emit activeLayerIndexChanged(m_active);
 }
 

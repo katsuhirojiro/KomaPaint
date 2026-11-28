@@ -21,12 +21,15 @@
 #include <unistd.h>
 #endif
 
+#include "BrushTipExtraction.h"
 #include "FileAssociation.h"
 #include "ToolCycle.h"
 #include "../core/Settings.h"
 #include "../files/DocumentFile.h"
 
+#include <QBuffer>
 #include <QFileInfo>
+#include <QImage>
 #include <QUrl>
 
 #include <QHash>
@@ -1319,6 +1322,78 @@ void WorkspaceState::clearDiagnosticLog()
 {
     QFile file(diagnosticLogPath());
     if (file.exists()) file.remove();
+}
+
+QVariantMap WorkspaceState::brushTipSourceInfo() const
+{
+    QVariantMap info;
+    if (!m_document) {
+        info.insert(QStringLiteral("reason"), QStringLiteral("Open an illustration first."));
+        return info;
+    }
+    std::vector<int> rows;
+    if (m_document->layers()) {
+        for (const auto& value : m_document->layers()->selectedLayerRows()) rows.push_back(value.toInt());
+    }
+    const auto available = brushtip::availability(*m_document, rows);
+    info.insert(QStringLiteral("hasDocument"), true);
+    info.insert(QStringLiteral("hasSelection"), available.hasSelection);
+    info.insert(QStringLiteral("currentLayer"), available.currentLayer);
+    info.insert(QStringLiteral("selectedLayers"), available.selectedLayers && available.selectedLayerCount > 1);
+    info.insert(QStringLiteral("mergedVisible"), available.mergedVisible);
+    info.insert(QStringLiteral("selectedLayerCount"), available.selectedLayerCount);
+    info.insert(QStringLiteral("currentLayerName"), available.currentLayerName);
+    info.insert(QStringLiteral("reason"), available.reason);
+    info.insert(QStringLiteral("title"), m_document->title());
+    return info;
+}
+
+QVariantMap WorkspaceState::createBrushTipSource(const QString& source, bool useSelection,
+                                                 const QString& coverage) const
+{
+    QVariantMap result;
+    if (!m_document) {
+        result.insert(QStringLiteral("error"), QStringLiteral("Open an illustration first."));
+        return result;
+    }
+    brushtip::Request request;
+    if (!brushtip::parseSource(source, &request.source)) {
+        result.insert(QStringLiteral("error"), QStringLiteral("That artwork source is not available."));
+        return result;
+    }
+    if (!brushtip::parseCoverage(coverage, &request.coverage)) {
+        result.insert(QStringLiteral("error"), QStringLiteral("That tip style is not available."));
+        return result;
+    }
+    request.useSelection = useSelection;
+    if (m_document->layers()) {
+        for (const auto& value : m_document->layers()->selectedLayerRows())
+            request.layerRows.push_back(value.toInt());
+    }
+    auto extracted = brushtip::extract(*m_document, request);
+    if (!extracted.ok()) {
+        result.insert(QStringLiteral("error"), extracted.error);
+        return result;
+    }
+    QByteArray png;
+    QBuffer buffer(&png);
+    if (!buffer.open(QIODevice::WriteOnly) || !extracted.image.save(&buffer, "PNG")) {
+        result.insert(QStringLiteral("error"), QStringLiteral("There is not enough memory to encode the brush tip."));
+        return result;
+    }
+    result.insert(QStringLiteral("ok"), true);
+    result.insert(QStringLiteral("png"), QString::fromLatin1(png.toBase64()));
+    result.insert(QStringLiteral("width"), extracted.image.width());
+    result.insert(QStringLiteral("height"), extracted.image.height());
+    result.insert(QStringLiteral("name"), QStringLiteral("Brush tip from %1").arg(m_document->title()));
+    result.insert(QStringLiteral("source"), brushtip::sourceName(request.source));
+    result.insert(QStringLiteral("coverage"), brushtip::coverageName(request.coverage));
+    result.insert(QStringLiteral("usedSelection"), request.useSelection && m_document->hasSelection());
+    result.insert(QStringLiteral("sourceX"), extracted.sourceRect.x());
+    result.insert(QStringLiteral("sourceY"), extracted.sourceRect.y());
+    result.insert(QStringLiteral("sourceWidth"), extracted.sourceRect.width());
+    result.insert(QStringLiteral("sourceHeight"), extracted.sourceRect.height());
+    return result;
 }
 
 }  // namespace komapaint

@@ -114,6 +114,15 @@ public:
     Q_INVOKABLE void expandSelection(int px) { if (m_document) m_document->expandSelection(px); }
     Q_INVOKABLE void contractSelection(int px) { if (m_document) m_document->contractSelection(px); }
     Q_INVOKABLE void featherSelection(int px) { if (m_document) m_document->featherSelection(px); }
+    // ---- Create Brush Tip from Selection ---------------------------------
+    // Reports which extraction sources genuinely have artwork. The dialog uses
+    // this instead of offering an option that would produce a transparent tip.
+    Q_INVOKABLE QVariantMap brushTipSourceInfo() const;
+    // Returns {ok, error, png, width, height, name, sourceRect, source,
+    // coverage}. PNG is base64-encoded so QML can carry it without a second
+    // image type. The document, selection and brush library are never changed.
+    Q_INVOKABLE QVariantMap createBrushTipSource(const QString& source, bool useSelection,
+                                                 const QString& coverage) const;
     QString currentFile() const { return m_currentFile; }
     QVariantList projectTabs() const;
     int activeTab() const { return m_activeTab; }
