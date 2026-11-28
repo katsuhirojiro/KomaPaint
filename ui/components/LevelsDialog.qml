@@ -64,6 +64,15 @@ KpDialog {
                     wrapMode: Text.WordWrap
                 }
 
+                Text {
+                    Layout.fillWidth: true
+                    text: qsTr("Histogram: how much of the artwork sits at each tone, from shadows on the left to highlights on the right. The two markers are the current black and white points.")
+                    color: KP.textSubtle
+                    font.family: KP.fontUi
+                    font.pixelSize: KP.fontXS
+                    wrapMode: Text.WordWrap
+                }
+
                 // ---- Histogram ------------------------------------------------
                 Rectangle {
                     Layout.fillWidth: true
