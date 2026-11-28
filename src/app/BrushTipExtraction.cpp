@@ -282,8 +282,10 @@ Result extract(const CanvasDocument& document, const Request& request)
             }
             const std::int64_t startX = std::max<std::int64_t>(rect.left(), tileBounds->left);
             const std::int64_t startY = std::max<std::int64_t>(rect.top(), tileBounds->top);
-            const std::int64_t endX = std::min<std::int64_t>(rect.right(), tileBounds->left + tileWidth);
-            const std::int64_t endY = std::min<std::int64_t>(rect.bottom(), tileBounds->top + tileHeight);
+            const std::int64_t endX = std::min<std::int64_t>(rect.left() + rect.width(),
+                                                             tileBounds->left + tileWidth);
+            const std::int64_t endY = std::min<std::int64_t>(rect.top() + rect.height(),
+                                                             tileBounds->top + tileHeight);
             for (std::int64_t y = startY; y < endY; ++y) {
                 for (std::int64_t x = startX; x < endX; ++x) {
                     const auto localX = x - tileBounds->left;
