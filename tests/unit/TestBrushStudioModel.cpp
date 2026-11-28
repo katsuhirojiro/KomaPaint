@@ -1226,6 +1226,17 @@ void TestBrushStudioModel::textureLayersAreEditableUndoableAndKeepTheirImage() {
     model.redo();
     QCOMPARE(model.document().textureLayers.front().strength, 0.4);
 
+    // A slider drag is one undo step, not one step per pixel of travel.
+    model.beginStep(QStringLiteral("Drag texture strength"));
+    QVERIFY(model.setTextureLayerSetting(paperId, QStringLiteral("strength"), 0.3));
+    QVERIFY(model.setTextureLayerSetting(paperId, QStringLiteral("strength"), 0.2));
+    model.commitStep();
+    QCOMPARE(model.document().textureLayers.front().strength, 0.2);
+    model.undo();
+    QCOMPARE(model.document().textureLayers.front().strength, 0.4);
+    model.redo();
+    QCOMPARE(model.document().textureLayers.front().strength, 0.2);
+
     // Placement and advanced controls are real fields, not decoration.
     QVERIFY(model.setTextureLayerPlacement(paperId, 2));
     QCOMPARE(model.document().textureLayers.front().placement, brush::TexturePlacement::Canvas);
