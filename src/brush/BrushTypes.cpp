@@ -55,6 +55,12 @@ constexpr std::pair<const char*, SelectionMode> kSelectionModes[] = {
     {"combination", SelectionMode::Combination},
 };
 
+constexpr std::pair<const char*, TexturePlacement> kTexturePlacements[] = {
+    {"tip", TexturePlacement::Tip},
+    {"stroke", TexturePlacement::Stroke},
+    {"canvas", TexturePlacement::Canvas},
+};
+
 constexpr std::pair<const char*, GeneratorKind> kGenerators[] = {
     {"continuous", GeneratorKind::Continuous},
     {"stamp", GeneratorKind::Stamp},
@@ -128,6 +134,11 @@ const char* toString(ComponentBlend value) noexcept {
 const char* toString(SelectionMode value) noexcept {
     return kSelectionModes[static_cast<std::size_t>(value)].first;
 }
+const char* toString(TexturePlacement value) noexcept {
+    return kTexturePlacements[value == TexturePlacement::Stroke ? 1
+                              : value == TexturePlacement::Canvas ? 2 : 0].first;
+}
+
 const char* toString(GeneratorKind value) noexcept {
     return kGenerators[static_cast<std::size_t>(value)].first;
 }
@@ -154,6 +165,10 @@ bool parseEngine(std::string_view text, Engine* out) noexcept { return parseFrom
 bool parseComponentKind(std::string_view text, ComponentKind* out) noexcept { return parseFromTable(text, kComponentKinds, out); }
 bool parseComponentBlend(std::string_view text, ComponentBlend* out) noexcept { return parseFromTable(text, kBlends, out); }
 bool parseSelectionMode(std::string_view text, SelectionMode* out) noexcept { return parseFromTable(text, kSelectionModes, out); }
+bool parseTexturePlacement(std::string_view text, TexturePlacement* out) noexcept {
+    return parseFromTable(text, kTexturePlacements, out);
+}
+
 bool parseGeneratorKind(std::string_view text, GeneratorKind* out) noexcept { return parseFromTable(text, kGenerators, out); }
 bool parseSignal(std::string_view text, Signal* out) noexcept { return parseFromTable(text, kSignals, out); }
 bool parseDistribution(std::string_view text, Distribution* out) noexcept { return parseFromTable(text, kDistributions, out); }

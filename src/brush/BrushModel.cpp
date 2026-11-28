@@ -149,6 +149,9 @@ bool BrushDocument::idInUse(std::string_view candidate) const {
     for (const auto& r : resources) {
         if (r.id == candidate) return true;
     }
+    for (const auto& t : textureLayers) {
+        if (t.id == candidate) return true;
+    }
     return false;
 }
 
@@ -171,6 +174,7 @@ std::string BrushDocument::allocateId(std::string_view prefix) {
     for (const auto& g : groups) consider(g.id);
     for (const auto& g : generators) consider(g.id);
     for (const auto& r : resources) consider(r.id);
+    for (const auto& t : textureLayers) consider(t.id);
 
     std::string candidate;
     do {
@@ -283,6 +287,58 @@ bool BrushDocument::duplicateComponent(std::string_view componentId, std::string
     std::string created = newId ? copy.id : std::string{};
     if (!addComponent(std::move(copy), index + 1)) return false;
     if (newId) *newId = std::move(created);
+    return true;
+}
+
+// ---- Texture layers ---------------------------------------------------------
+
+BrushTextureLayer* BrushDocument::textureLayer(std::string_view layerId) {
+    for (auto& layer : textureLayers) {
+        if (layer.id == layerId) return &layer;
+    }
+    return nullptr;
+}
+
+const BrushTextureLayer* BrushDocument::textureLayer(std::string_view layerId) const {
+    for (const auto& layer : textureLayers) {
+        if (layer.id == layerId) return &layer;
+    }
+    return nullptr;
+}
+
+int BrushDocument::textureLayerIndex(std::string_view layerId) const {
+    for (std::size_t i = 0; i < textureLayers.size(); ++i) {
+        if (textureLayers[i].id == layerId) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+bool BrushDocument::addTextureLayer(BrushTextureLayer layer, int index) {
+    if (layer.id.empty()) layer.id = allocateId("t");
+    if (idInUse(layer.id)) return false;
+    if (layer.resourceId.empty() || !resource(layer.resourceId)) return false;
+    if (index < 0 || static_cast<std::size_t>(index) > textureLayers.size())
+        textureLayers.push_back(std::move(layer));
+    else
+        textureLayers.insert(textureLayers.begin() + index, std::move(layer));
+    return true;
+}
+
+bool BrushDocument::removeTextureLayer(std::string_view layerId) {
+    const int index = textureLayerIndex(layerId);
+    if (index < 0) return false;
+    textureLayers.erase(textureLayers.begin() + index);
+    return true;
+}
+
+bool BrushDocument::moveTextureLayer(std::string_view layerId, int newIndex) {
+    const int index = textureLayerIndex(layerId);
+    if (index < 0) return false;
+    const int clamped = std::clamp(newIndex, 0, static_cast<int>(textureLayers.size()) - 1);
+    if (clamped == index) return true;
+    BrushTextureLayer moved = textureLayers[static_cast<std::size_t>(index)];
+    textureLayers.erase(textureLayers.begin() + index);
+    textureLayers.insert(textureLayers.begin() + clamped, std::move(moved));
     return true;
 }
 
@@ -551,6 +607,9 @@ int BrushDocument::resourceUsage(std::string_view resourceId) const {
     for (const auto& c : components) {
         if (c.resourceId == resourceId) ++count;
     }
+    for (const auto& t : textureLayers) {
+        if (t.resourceId == resourceId) ++count;
+    }
     return count;
 }
 
@@ -588,6 +647,11 @@ ValidationResult BrushDocument::validate() const {
         if (r.id.empty()) result.addError("missing-id", "A resource has no id.");
         else if (!seen.insert(r.id).second)
             result.addError("duplicate-id", "The id '" + r.id + "' is used twice.");
+    }
+    for (const auto& t : textureLayers) {
+        if (t.id.empty()) result.addError("missing-id", "A texture layer has no id.");
+        else if (!seen.insert(t.id).second)
+            result.addError("duplicate-id", "The id '" + t.id + "' is used twice.");
     }
 
     if (components.empty()) {
@@ -808,6 +872,32 @@ ValidationResult BrushDocument::validate() const {
         }
     }
 
+    // Texture layers: a layer without pixels or with a non-finite value is a
+    // broken brush, not a control the renderer can safely ignore.
+    for (const auto& t : textureLayers) {
+        if (t.resourceId.empty() || !resource(t.resourceId)) {
+            result.addError("texture-missing-resource",
+                            "Texture layer '" + t.id + "' has no stored texture image.");
+        }
+        if (!std::isfinite(t.strength) || t.strength < 0.0 || t.strength > 1.0 ||
+            !std::isfinite(t.scale) || t.scale < 0.05 || t.scale > 20.0 ||
+            !std::isfinite(t.rotationDegrees) || t.rotationDegrees < -180.0 || t.rotationDegrees > 180.0 ||
+            !std::isfinite(t.offsetX) || t.offsetX < -2.0 || t.offsetX > 2.0 ||
+            !std::isfinite(t.offsetY) || t.offsetY < -2.0 || t.offsetY > 2.0 ||
+            !std::isfinite(t.contrast) || t.contrast < 0.0 || t.contrast > 2.0 ||
+            !std::isfinite(t.variation) || t.variation < 0.0 || t.variation > 1.0) {
+            result.addError("texture-range", "Texture layer '" + t.id + "' has a value outside its range.");
+        }
+        if (t.blend != ComponentBlend::Normal && t.blend != ComponentBlend::Multiply &&
+            t.blend != ComponentBlend::Screen && t.blend != ComponentBlend::Overlay) {
+            result.addError("texture-blend", "Texture layer '" + t.id + "' has an unsupported blending mode.");
+        }
+        if (t.placement != TexturePlacement::Tip && t.placement != TexturePlacement::Stroke &&
+            t.placement != TexturePlacement::Canvas) {
+            result.addError("texture-placement", "Texture layer '" + t.id + "' has an unknown placement.");
+        }
+    }
+
     // Resources.
     for (const auto& r : resources) {
         if (!r.expectedBytes()) {
@@ -820,7 +910,7 @@ ValidationResult BrushDocument::validate() const {
         }
         if (resourceUsage(r.id) == 0) {
             result.addWarning("unused-resource",
-                              "Resource '" + r.id + "' is stored but no component uses it.");
+                              "Resource '" + r.id + "' is stored but no component or texture layer uses it.");
         }
     }
 

@@ -128,6 +128,28 @@ BitmapSample sampleBitmap(const brush::BrushResource& bitmap, double u, double v
                                                (straight(green) << 8) | straight(blue)) : 0U};
 }
 
+// A texture layer repeats instead of fading to zero outside one tile. Bitmap
+// tips and legacy masks keep the original non-repeating sample exactly.
+BitmapSample sampleTexture(const brush::BrushResource& bitmap, double u, double v) noexcept {
+    auto wrap = [](double value) {
+        value = std::fmod(value + 1.0, 2.0);
+        if (value < 0.0) value += 2.0;
+        return value - 1.0;
+    };
+    const double wu = wrap(u);
+    const double wv = wrap(v);
+    if (bitmap.kind == brush::ResourceKind::Rgba8) {
+        // A colour texture keeps its source pixels; the grain is its perceived
+        // brightness, held back by transparency. Grayscale stays a direct read.
+        const auto sample = sampleBitmap(bitmap, wu, wv, true);
+        const unsigned rgb = sample.colour;
+        const double luma = (54.0 * ((rgb >> 16) & 255U) + 183.0 * ((rgb >> 8) & 255U) +
+                             19.0 * (rgb & 255U)) / 255.0;
+        return {clamp01(sample.coverage * luma / 255.0), 0U};
+    }
+    return sampleBitmap(bitmap, wu, wv, false);
+}
+
 struct Batch {
     SparseTileStore& store;
     explicit Batch(SparseTileStore& s) : store(s) { s.beginBatch(); }
@@ -309,6 +331,19 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
                    (b.bitmapColour && bitmap->kind != brush::ResourceKind::Rgba8))) return R::InvalidPixel;
     if (b.maskTip && (!b.maskTip->expectedBytes() || b.maskTip->pixels().size() != b.maskTip->expectedBytes()))
         return R::InvalidPixel;
+    if (b.textureGates) {
+        for (const auto& gate : *b.textureGates) {
+            if (!gate.image || !gate.image->expectedBytes() ||
+                gate.image->pixels().size() != gate.image->expectedBytes()) return R::InvalidPixel;
+            if (!std::isfinite(gate.strength) || gate.strength < 0.0 || gate.strength > 1.0 ||
+                !std::isfinite(gate.scale) || gate.scale <= 0.0 ||
+                !std::isfinite(gate.rotationRadians) || !std::isfinite(gate.offsetX) ||
+                !std::isfinite(gate.offsetY) || !std::isfinite(gate.contrast) ||
+                gate.contrast < 0.0 || gate.contrast > 2.0 ||
+                !std::isfinite(gate.variation) || gate.variation < 0.0 || gate.variation > 1.0)
+                return R::InvalidPixel;
+        }
+    }
     if (!std::isfinite(b.maskScale) || b.maskScale <= 0.0 || !std::isfinite(b.maskRotationRadians) ||
         !std::isfinite(b.maskOffsetX) || !std::isfinite(b.maskOffsetY) || !std::isfinite(b.maskStrength) ||
         !std::isfinite(b.maskContrast) || !std::isfinite(b.maskDepth))
@@ -349,6 +384,57 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
     const double invBand = 1.0 / std::max(1.0, softness * radiusPlusHalf);
     const double opacityFlowPressure = b.opacity * b.flow * pressureAlpha * pressureFlowScale;
     if (opacityFlowPressure <= 0.0) return R::Unchanged;
+
+    struct ResolvedTexture {
+        const brush::BrushResource* image = nullptr;
+        double strength = 0.0;
+        double scale = 1.0;
+        double cosR = 1.0;
+        double sinR = 0.0;
+        double offsetX = 0.0;
+        double offsetY = 0.0;
+        double contrast = 1.0;
+        bool invert = false;
+        double jitterX = 0.0;
+        double jitterY = 0.0;
+        brush::TexturePlacement placement = brush::TexturePlacement::Tip;
+        brush::ComponentBlend blend = brush::ComponentBlend::Multiply;
+    };
+    // Reused across dabs on the same stroke thread: a tablet stamp must not
+    // allocate a fresh vector 100+ times a second. The contents are rebuilt
+    // from the immutable stroke gates on every call.
+    static thread_local std::vector<ResolvedTexture> textures;
+    textures.clear();
+    if (b.textureGates) {
+        textures.reserve(b.textureGates->size());
+        std::size_t layerIndex = 0;
+        for (const auto& gate : *b.textureGates) {
+            ResolvedTexture resolved;
+            resolved.image = gate.image;
+            resolved.strength = gate.strength;
+            resolved.scale = gate.scale;
+            resolved.offsetX = gate.offsetX;
+            resolved.offsetY = gate.offsetY;
+            resolved.contrast = gate.contrast;
+            resolved.invert = gate.invert;
+            resolved.placement = gate.placement;
+            resolved.blend = gate.blend;
+            const double angle = gate.rotationRadians +
+                (gate.placement == brush::TexturePlacement::Stroke ? strokeAngle : 0.0);
+            resolved.cosR = std::cos(-angle);
+            resolved.sinR = std::sin(-angle);
+            if (gate.variation > 0.0) {
+                const auto x = hash2d(static_cast<std::int64_t>(layerIndex) * 2 + 1,
+                                      static_cast<std::int64_t>(b.stampSeed), 91U);
+                const auto y = hash2d(static_cast<std::int64_t>(layerIndex) * 2 + 2,
+                                      static_cast<std::int64_t>(b.stampSeed), 137U);
+                resolved.jitterX = ((x & 1023U) / 1023.0 - 0.5) * 2.0 * gate.variation;
+                resolved.jitterY = ((y & 1023U) / 1023.0 - 0.5) * 2.0 * gate.variation;
+            }
+            textures.push_back(resolved);
+            ++layerIndex;
+        }
+    }
 
     const double blendFactor = clamp01(b.blendStrength);
     const bool blending = !b.erase && blendFactor > 0.0;
@@ -508,6 +594,62 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
                         coverage *= clamp01(gate);
                         if (coverage <= 0.0) continue;
                     }
+                    for (const auto& texture : textures) {
+                        double u = 0.0, v = 0.0;
+                        if (texture.placement == brush::TexturePlacement::Canvas) {
+                            const double gx = static_cast<double>(x) + 0.5 + texture.offsetX * radius;
+                            const double gy = static_cast<double>(y) + 0.5 + texture.offsetY * radius;
+                            u = (gx * texture.cosR - gy * texture.sinR) / (radius * texture.scale);
+                            v = (gx * texture.sinR + gy * texture.cosR) / (radius * texture.scale);
+                        } else if (texture.placement == brush::TexturePlacement::Stroke) {
+                            const double gx = static_cast<double>(x) + 0.5 - b.strokeOriginX +
+                                              texture.offsetX * radius;
+                            const double gy = static_cast<double>(y) + 0.5 - b.strokeOriginY +
+                                              texture.offsetY * radius;
+                            u = (gx * texture.cosR - gy * texture.sinR) / (radius * texture.scale);
+                            v = (gx * texture.sinR + gy * texture.cosR) / (radius * texture.scale);
+                        } else {
+                            const double gx = dx - texture.offsetX * radius;
+                            const double gy = dy - texture.offsetY * radius;
+                            u = (gx * texture.cosR - gy * texture.sinR) / (radius * texture.scale);
+                            v = (gx * texture.sinR + gy * texture.cosR) / (radius * texture.scale);
+                        }
+                        double gate = sampleTexture(*texture.image, u + texture.jitterX,
+                                                    v + texture.jitterY).coverage;
+                        if (texture.invert) gate = 1.0 - gate;
+                        gate = clamp01(0.5 + (gate - 0.5) * texture.contrast);
+                        double strength = texture.strength;
+                        // Pressure changes texture only when the device actually
+                        // supplied pressure; a mouse is never treated as a stylus.
+                        if (b.textureGates && p.hasPressure) {
+                            const auto& authored = (*b.textureGates)[
+                                static_cast<std::size_t>(&texture - textures.data())];
+                            if (authored.pressureStrength)
+                                strength *= 0.35 + 0.65 * clamp01(p.pressure);
+                        }
+                        switch (texture.blend) {
+                        case brush::ComponentBlend::Screen:
+                            gate = 1.0 - strength * gate;
+                            break;
+                        case brush::ComponentBlend::Overlay: {
+                            const double curve = gate < 0.5
+                                ? 2.0 * gate * gate
+                                : 1.0 - 2.0 * (1.0 - gate) * (1.0 - gate);
+                            gate = 1.0 - strength * (1.0 - curve);
+                            break;
+                        }
+                        case brush::ComponentBlend::Normal:
+                            gate = 1.0 - strength * (1.0 - gate) * 0.65;
+                            break;
+                        case brush::ComponentBlend::Multiply:
+                        default:
+                            gate = 1.0 - strength * (1.0 - gate);
+                            break;
+                        }
+                        coverage *= clamp01(gate);
+                        if (coverage <= 0.0) break;
+                    }
+                    if (coverage <= 0.0) continue;
                     if (b.pixelMask) {
                         coverage *= clamp01(b.pixelMask(b.pixelMaskContext, x, y));
                         if (coverage <= 0.0) continue;

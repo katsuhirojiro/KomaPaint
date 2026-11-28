@@ -195,6 +195,67 @@ void testRoundTrip() {
     CHECK(restored.component("c3")->transform.rotationDegrees == 30.0);
 }
 
+void testTextureLayersRoundTripInTheirOwnChunk() {
+    BrushDocument doc = makeDocument();
+    BrushTextureLayer paper;
+    paper.id = "t1";
+    paper.name = "Paper tooth";
+    paper.resourceId = "p1";
+    paper.enabled = false;
+    paper.strength = 0.42;
+    paper.scale = 2.5;
+    paper.rotationDegrees = -32.0;
+    paper.offsetX = -0.25;
+    paper.offsetY = 0.75;
+    paper.contrast = 1.4;
+    paper.invert = true;
+    paper.variation = 0.3;
+    paper.placement = TexturePlacement::Canvas;
+    paper.blend = ComponentBlend::Screen;
+    paper.pressureStrength = true;
+    CHECK(doc.addTextureLayer(paper));
+
+    BrushTextureLayer stroke;
+    stroke.id = "t2";
+    stroke.name = "Stroke streaks";
+    stroke.resourceId = "p2";
+    stroke.placement = TexturePlacement::Stroke;
+    stroke.blend = ComponentBlend::Overlay;
+    CHECK(doc.addTextureLayer(stroke));
+    CHECK(doc.validate().ok());
+
+    const auto bytes = encodeBrush(doc);
+    const std::string tag(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    CHECK(tag.find("TXLY") != std::string::npos);
+
+    BrushDocument restored;
+    DecodeResult result;
+    CHECK(decodeBrush(bytes.data(), bytes.size(), &restored, &result));
+    CHECK(result.ok);
+    CHECK(result.ignoredChunks.empty());
+    CHECK(restored == doc);
+    CHECK(restored.textureLayers.size() == 2);
+    CHECK(restored.textureLayers[0].name == "Paper tooth");
+    CHECK(restored.textureLayers[0].enabled == false);
+    CHECK(restored.textureLayers[0].strength == 0.42);
+    CHECK(restored.textureLayers[0].scale == 2.5);
+    CHECK(restored.textureLayers[0].rotationDegrees == -32.0);
+    CHECK(restored.textureLayers[0].placement == TexturePlacement::Canvas);
+    CHECK(restored.textureLayers[0].blend == ComponentBlend::Screen);
+    CHECK(restored.textureLayers[0].pressureStrength);
+    CHECK(restored.textureLayers[1].placement == TexturePlacement::Stroke);
+    CHECK(restored.resourceUsage("p1") == doc.resourceUsage("p1"));
+    CHECK(restored.resourceUsage("p2") == doc.resourceUsage("p2"));
+
+    // Reordering is part of the saved stack, not an accident of ids.
+    CHECK(restored.moveTextureLayer("t2", 0));
+    const auto reordered = encodeBrush(restored);
+    BrushDocument again;
+    DecodeResult second;
+    CHECK(decodeBrush(reordered.data(), reordered.size(), &again, &second));
+    CHECK(again.textureLayers.front().id == "t2");
+}
+
 void testLargeBrushDiametersRoundTrip() {
     auto brush = makeDocument();
     for (const double size : {12000.5, double(MaxBrushDiameter)}) {
@@ -532,6 +593,7 @@ void testEmptyDocumentIsStorable() {
 
 int main() {
     testRoundTrip();
+    testTextureLayersRoundTripInTheirOwnChunk();
     testLargeBrushDiametersRoundTrip();
     testDeterministicBytes();
     testRejectsForeignData();

@@ -997,6 +997,151 @@ void testRealisticDocumentPaintsThroughTheMaterialEngine() {
     CHECK(surface.pixel({36, 24}).value_or(0) != 0);
 }
 
+BrushResource halfTexture(std::string id, bool darkLeft) {
+    BrushResource resource;
+    resource.id = std::move(id);
+    resource.name = "half grain";
+    resource.kind = ResourceKind::Grayscale8;
+    resource.width = 8;
+    resource.height = 8;
+    std::vector<std::uint8_t> bytes(64, 255);
+    for (int y = 0; y < 8; ++y)
+        for (int x = 0; x < 4; ++x)
+            bytes[std::size_t(y) * 8 + std::size_t(x)] = darkLeft ? 0 : 255;
+    for (int y = 0; y < 8; ++y)
+        for (int x = 4; x < 8; ++x)
+            bytes[std::size_t(y) * 8 + std::size_t(x)] = darkLeft ? 255 : 0;
+    resource.setPixels(std::move(bytes));
+    return resource;
+}
+
+BrushDocument textureDocument(bool darkLeft) {
+    LegacyBrush legacy;
+    legacy.size = 24;
+    legacy.opacity = 100;
+    legacy.flow = 100;
+    legacy.spacing = 10;
+    legacy.hardness = 100;
+    legacy.pressureSize = 0;
+    legacy.pressureOpacity = 0;
+    legacy.pressureFlow = 0;
+    auto document = BrushDocument::fromLegacy(legacy, "brush-texture", "Texture");
+    CHECK(document.addResource(halfTexture("r1", darkLeft)));
+    BrushTextureLayer layer;
+    layer.id = "t1";
+    layer.name = "Grain";
+    layer.resourceId = "r1";
+    layer.strength = 1.0;
+    layer.scale = 1.0;
+    layer.placement = TexturePlacement::Tip;
+    layer.blend = ComponentBlend::Multiply;
+    CHECK(document.addTextureLayer(layer));
+    return document;
+}
+
+void testTextureLayersReachTheProductionPixels() {
+    StrokeRuntime runtime;
+    runtime.color = 0xff000000;
+    SparseTileStore store(kWidth, kHeight);
+    auto document = textureDocument(true);
+    drawing::DocumentStroke stroke(store, document,
+                                   drawing::digitalDefinition(document, runtime), 4u);
+    CHECK(stroke.begin({48, 48, 1.0, 0, 0, 0, 0, false, false, 0, false}));
+    CHECK(stroke.end({48, 48, 1.0, 0, 0, 0, 0, false, false, 0, false}));
+    CHECK(!stroke.failed());
+    CHECK(store.pixel({48, 48}).value_or(0) != 0U);
+    CHECK((store.pixel({40, 48}).value_or(0) >> 24) == 0U); // dark grain removed paint
+    CHECK((store.pixel({56, 48}).value_or(0) >> 24) != 0U);
+
+    // Disabling a layer leaves the same brush painting a solid mark.
+    document.textureLayers.front().enabled = false;
+    SparseTileStore disabled(kWidth, kHeight);
+    drawing::DocumentStroke plain(disabled, document,
+                                  drawing::digitalDefinition(document, runtime), 4u);
+    CHECK(plain.begin({48, 48, 1.0}));
+    CHECK(plain.end({48, 48, 1.0}));
+    CHECK((disabled.pixel({40, 48}).value_or(0) >> 24) != 0U);
+
+    // Two independent layers combine; inverse grains close both halves.
+    auto combined = textureDocument(true);
+    auto inverse = halfTexture("r2", false);
+    CHECK(combined.addResource(inverse));
+    BrushTextureLayer second;
+    second.id = "t2";
+    second.resourceId = "r2";
+    second.strength = 1.0;
+    second.scale = 1.0;
+    second.placement = TexturePlacement::Tip;
+    second.blend = ComponentBlend::Multiply;
+    CHECK(combined.addTextureLayer(second));
+    SparseTileStore both(kWidth, kHeight);
+    drawing::DocumentStroke two(both, combined,
+                                drawing::digitalDefinition(combined, runtime), 4u);
+    CHECK(two.begin({48, 48, 1.0}));
+    CHECK(two.end({48, 48, 1.0}));
+    CHECK((both.pixel({40, 48}).value_or(0) >> 24) == 0U);
+    CHECK((both.pixel({56, 48}).value_or(0) >> 24) == 0U);
+}
+
+void testTexturePressureNeedsGenuinePressureAndOptIn() {
+    StrokeRuntime runtime;
+    runtime.color = 0xff000000;
+    auto document = textureDocument(true);
+    document.textureLayers.front().pressureStrength = true;
+    auto paint = [&](double pressure, bool genuine) {
+        SparseTileStore store(kWidth, kHeight);
+        drawing::DocumentStroke stroke(store, document,
+                                       drawing::digitalDefinition(document, runtime), 12u);
+        InputSample sample{48, 48, pressure, 0, 0, 0, 0, false, false, 0, genuine};
+        CHECK(stroke.begin(sample));
+        CHECK(stroke.end(sample));
+        return store.pixel({40, 48}).value_or(0) >> 24;
+    };
+    const auto light = paint(0.1, true);
+    const auto heavy = paint(0.9, true);
+    CHECK(light > 0U);
+    CHECK(heavy < light); // more pressure removes more paint through the grain
+    // Without device pressure the same control does nothing: no synthesized 1.0.
+    CHECK(paint(0.1, false) == paint(0.9, false));
+
+    document.textureLayers.front().pressureStrength = false;
+    CHECK(paint(0.1, true) == paint(0.9, true));
+}
+
+void testTexturePlacementAndVariationAreReal() {
+    StrokeRuntime runtime;
+    runtime.color = 0xff000000;
+    auto paint = [&](TexturePlacement placement, std::uint32_t seed) {
+        auto document = textureDocument(true);
+        document.textureLayers.front().placement = placement;
+        SparseTileStore store(kWidth, kHeight);
+        drawing::DocumentStroke stroke(store, document,
+                                       drawing::digitalDefinition(document, runtime), seed);
+        CHECK(stroke.begin({20, 30, 1.0}));
+        for (int i = 1; i < 20; ++i) CHECK(stroke.extend({20.0 + i * 3.0, 30.0 + i, 1.0}));
+        CHECK(stroke.end({77, 49, 1.0}));
+        CHECK(!stroke.failed());
+        return hashOf(pixelsOf(store));
+    };
+    const auto tip = paint(TexturePlacement::Tip, 8u);
+    const auto stroke = paint(TexturePlacement::Stroke, 8u);
+    const auto canvas = paint(TexturePlacement::Canvas, 8u);
+    CHECK(tip != stroke);
+    CHECK(tip != canvas);
+
+    auto varied = textureDocument(true);
+    varied.textureLayers.front().variation = 1.0;
+    auto paintVaried = [&](std::uint32_t seed) {
+        SparseTileStore store(kWidth, kHeight);
+        drawing::DocumentStroke stroke(store, varied,
+                                       drawing::digitalDefinition(varied, runtime), seed);
+        CHECK(stroke.begin({48, 48, 1.0}));
+        CHECK(stroke.end({48, 48, 1.0}));
+        return hashOf(pixelsOf(store));
+    };
+    CHECK(paintVaried(1u) != paintVaried(2u));
+}
+
 void testInvalidStrokeIsReportedNotSilent() {
     // A size below the engine's minimum must fail loudly, exactly as the flat
     // path does, rather than painting nothing.
@@ -1033,6 +1178,9 @@ int main() {
     testAntialiasingCanBeDisabled();
     testStrokeDelayTrailsThePointer();
     testRealisticDocumentPaintsThroughTheMaterialEngine();
+    testTextureLayersReachTheProductionPixels();
+    testTexturePressureNeedsGenuinePressureAndOptIn();
+    testTexturePlacementAndVariationAreReal();
     testInvalidStrokeIsReportedNotSilent();
     testBitmapTipPaintsActualPixels();
     testMasksAndComponentBlendsReachPixels();

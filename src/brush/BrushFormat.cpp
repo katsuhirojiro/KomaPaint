@@ -317,6 +317,27 @@ void encodeRandomization(const BrushDocument& doc, Writer* w) {
     }
 }
 
+void encodeTextureLayers(const BrushDocument& doc, Writer* w) {
+    w->u32Size(doc.textureLayers.size());
+    for (const auto& layer : doc.textureLayers) {
+        w->text(layer.id);
+        w->text(layer.name);
+        w->text(layer.resourceId);
+        w->boolean(layer.enabled);
+        w->f64(layer.strength);
+        w->f64(layer.scale);
+        w->f64(layer.rotationDegrees);
+        w->f64(layer.offsetX);
+        w->f64(layer.offsetY);
+        w->f64(layer.contrast);
+        w->boolean(layer.invert);
+        w->f64(layer.variation);
+        w->text(toString(layer.placement));
+        w->text(toString(layer.blend));
+        w->boolean(layer.pressureStrength);
+    }
+}
+
 void encodeExposed(const BrushDocument& doc, Writer* w) {
     w->u32Size(doc.exposed.size());
     for (const auto& p : doc.exposed) {
@@ -399,6 +420,11 @@ std::vector<std::uint8_t> encodeBrush(const BrushDocument& document) {
         encodeExposed(document, &chunk);
         writeChunk(&payload, "EXPO", chunk);
     }
+    {
+        Writer chunk;
+        encodeTextureLayers(document, &chunk);
+        writeChunk(&payload, "TXLY", chunk);
+    }
 
     for (const auto& chunk : document.opaqueChunks) {
         if (chunk.tag.size() != 4) throw std::invalid_argument("Invalid .kb extension tag");
@@ -469,6 +495,7 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
     bool seenDynamics = false;
     bool seenRandomization = false;
     bool seenExposed = false;
+    bool seenTextureLayers = false;
 
     while (reader.remaining() > 0) {
         std::string tag;
@@ -718,6 +745,41 @@ bool decodeBrush(const std::uint8_t* data, std::size_t size, BrushDocument* out,
                 p.maximumOverride = r.f64();
                 if (!r.ok()) { report->error = reason("bad-exposed", "EXPO entry is truncated"); return false; }
                 doc.exposed.push_back(std::move(p));
+            }
+        } else if (tag == "TXLY") {
+            if (seenTextureLayers) { report->error = reason("duplicate-chunk", "two TXLY chunks"); return false; }
+            seenTextureLayers = true;
+            const std::uint32_t count = r.u32();
+            if (count > r.remaining()) {
+                report->error = reason("bad-texture", "TXLY declares more texture layers than it holds");
+                return false;
+            }
+            for (std::uint32_t i = 0; i < count; ++i) {
+                BrushTextureLayer layer;
+                if (!r.text(&layer.id) || !r.text(&layer.name) || !r.text(&layer.resourceId)) {
+                    report->error = reason("bad-texture", "TXLY entry is incomplete");
+                    return false;
+                }
+                layer.enabled = r.boolean();
+                layer.strength = r.f64();
+                layer.scale = r.f64();
+                layer.rotationDegrees = r.f64();
+                layer.offsetX = r.f64();
+                layer.offsetY = r.f64();
+                layer.contrast = r.f64();
+                layer.invert = r.boolean();
+                layer.variation = r.f64();
+                if (!readEnum(r, parseTexturePlacement, &layer.placement)) {
+                    report->error = reason("bad-texture", "TXLY declares an unknown placement");
+                    return false;
+                }
+                if (!readEnum(r, parseComponentBlend, &layer.blend)) {
+                    report->error = reason("bad-texture", "TXLY declares an unknown blending mode");
+                    return false;
+                }
+                layer.pressureStrength = r.boolean();
+                if (!r.ok()) { report->error = reason("bad-texture", "TXLY entry is truncated"); return false; }
+                doc.textureLayers.push_back(std::move(layer));
             }
         } else {
             report->ignoredChunks.push_back(tag);

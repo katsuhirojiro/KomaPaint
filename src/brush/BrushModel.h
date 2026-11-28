@@ -53,6 +53,32 @@ struct BrushComponent {
     bool operator==(const BrushComponent&) const = default;
 };
 
+// One independent texture layer. A layer points at one shared pixel resource,
+// so two layers can reuse the same paper grain without copying it. The values
+// are the artist-facing controls in Brush Studio -> Texture; the production
+// Digital rasterizer is the consumer. Realistic preserves them but paints its
+// physical paper instead (Studio says so).
+struct BrushTextureLayer {
+    std::string id;
+    std::string name = "Texture";
+    std::string resourceId;
+    bool enabled = true;
+    double strength = 0.65;       // 0..1, how much grain removes paint
+    double scale = 1.0;           // 1 = natural texture size inside the tip
+    double rotationDegrees = 0.0; // -180..180
+    double offsetX = 0.0;         // fraction of the brush radius
+    double offsetY = 0.0;
+    double contrast = 1.0;        // 0..2, 1 = unchanged
+    bool invert = false;          // swap light and dark grain
+    double variation = 0.0;       // 0..1, per-stamp placement variation
+    TexturePlacement placement = TexturePlacement::Tip;
+    ComponentBlend blend = ComponentBlend::Multiply;
+    // Optional: a pressure-capable pen deepens the grain. Never enabled by
+    // default and never derived from a mouse or a synthesized 1.0.
+    bool pressureStrength = false;
+    bool operator==(const BrushTextureLayer&) const = default;
+};
+
 // How a set of components is chosen from, and how it composites.
 struct ComponentGroup {
     std::string id;
@@ -235,6 +261,10 @@ public:
     std::vector<DynamicsBinding> dynamics;
     std::vector<RandomizationRule> randomization;
     std::vector<ExposedProperty> exposed;
+    // Ordered texture stack. Empty is the original brush behaviour: only a
+    // component's optional mask gates paint. Layers are independent of the
+    // component graph and apply to every mark the brush makes.
+    std::vector<BrushTextureLayer> textureLayers;
     std::vector<BrushResource> resources;
     ParamBag parameters;              // brush-scope values
     std::uint16_t formatFlags = 0;
@@ -282,6 +312,14 @@ public:
     bool expose(ExposedProperty property);                    // replaces same param
     bool unexpose(std::string_view parameter);
     std::vector<const ExposedProperty*> visibleExposed() const; // ordered by section/order
+
+    // ---- texture layers ----------------------------------------------------
+    BrushTextureLayer* textureLayer(std::string_view layerId);
+    const BrushTextureLayer* textureLayer(std::string_view layerId) const;
+    int textureLayerIndex(std::string_view layerId) const;
+    bool addTextureLayer(BrushTextureLayer layer, int index = -1);
+    bool removeTextureLayer(std::string_view layerId);
+    bool moveTextureLayer(std::string_view layerId, int newIndex);
 
     // ---- resources ---------------------------------------------------------
     BrushResource* resource(std::string_view resourceId);

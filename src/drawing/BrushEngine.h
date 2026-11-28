@@ -5,12 +5,32 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <vector>
 
 namespace komapaint {
 namespace brush { struct BrushResource; }
 // Digital brush tips: crisp/soft round, anchored grain texture, multi-tuft
 // bristle, directional pencil/graphite, and organic stipple/scatter.
 enum class BrushTip { Round, Textured, Bristle, Graphite, Stipple };
+
+// One image texture gate in the brush-wide texture stack. The rasterizer
+// evaluates these after the legacy single component mask, so existing brushes
+// keep exactly the mark they had. `strength == 0` or a null image is a layer
+// that stays in the file but does not affect paint.
+struct TextureGate {
+    const brush::BrushResource* image = nullptr;
+    double strength = 0.0;
+    double scale = 1.0;
+    double rotationRadians = 0.0;
+    double offsetX = 0.0;       // fraction of the brush radius
+    double offsetY = 0.0;
+    double contrast = 1.0;
+    bool invert = false;
+    double variation = 0.0;     // 0..1 per-stamp placement variation
+    brush::TexturePlacement placement = brush::TexturePlacement::Tip;
+    brush::ComponentBlend blend = brush::ComponentBlend::Multiply;
+    bool pressureStrength = false; // only honoured when the device reports pressure
+};
 
 struct BrushDefinition {
     double size = 16;             // document pixels
@@ -80,6 +100,12 @@ struct BrushDefinition {
     double maskContrast = 1.0;     // 1 = unchanged, >1 hardens the grain
     double maskDepth = 1.0;        // 0 = solid, 1 = dark grain removes paint
     bool maskInvert = false;
+    // The brush-wide texture stack. Shared and immutable for one stroke, so a
+    // per-stamp copy does not allocate or reload images. Null means no layers.
+    std::shared_ptr<const std::vector<TextureGate>> textureGates;
+    double strokeOriginX = 0.0;    // stroke-space anchor for Stroke placement
+    double strokeOriginY = 0.0;
+    std::uint32_t stampSeed = 0;   // deterministic Variation per stamp
     // Normal reproduces the original deposit; Multiply/Screen/Overlay blend
     // the source colour with paint already on the layer.
     brush::ComponentBlend blend = brush::ComponentBlend::Normal;
@@ -97,6 +123,7 @@ struct InputSample {
     bool hasRotation = false;
     // Trailing so existing aggregate initialisers keep their meaning.
     double speed = 0.0;            // normalized pointer speed from SpeedTracker
+    bool hasPressure = false;      // genuine device pressure, never a synthesized 1.0
 };
 
 // Stateless tip mask, sensor response and paint deposition helpers.

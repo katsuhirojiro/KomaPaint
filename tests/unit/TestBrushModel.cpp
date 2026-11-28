@@ -561,6 +561,64 @@ void testLegacyMigrationIsLosslessForTheOldFields() {
     CHECK(back.waterAmount == legacy.waterAmount);
 }
 
+void testTextureLayerStackIsIndependentAndValidated() {
+    BrushDocument doc("Texture");
+    doc.addResource(makeResource("r1", 8, 8));
+    doc.addResource(makeResource("r2", 8, 8));
+    CHECK(doc.resourceUsage("r1") == 0);
+
+    BrushTextureLayer first;
+    first.name = "Paper";
+    first.resourceId = "r1";
+    CHECK(doc.addTextureLayer(first));
+    CHECK(doc.textureLayers.front().id == "t1");
+    CHECK(doc.resourceUsage("r1") == 1);
+
+    BrushTextureLayer second;
+    second.name = "Canvas";
+    second.resourceId = "r2";
+    second.placement = TexturePlacement::Canvas;
+    second.blend = ComponentBlend::Overlay;
+    CHECK(doc.addTextureLayer(second));
+    CHECK(doc.textureLayers.size() == 2);
+    CHECK(doc.resourceUsage("r2") == 1);
+
+    // Ids are shared by the whole document; a layer cannot steal one.
+    BrushTextureLayer duplicate;
+    duplicate.id = "t1";
+    duplicate.resourceId = "r2";
+    CHECK(!doc.addTextureLayer(duplicate));
+    BrushTextureLayer missing;
+    missing.resourceId = "missing";
+    CHECK(!doc.addTextureLayer(missing));
+    CHECK(!doc.removeTextureLayer("missing"));
+    CHECK(doc.validate().ok());
+
+    CHECK(doc.moveTextureLayer("t1", 1));
+    CHECK(doc.textureLayers.front().id == "t2");
+    CHECK(doc.moveTextureLayer("t1", 0));
+    CHECK(doc.textureLayers.front().id == "t1");
+    CHECK(doc.textureLayerIndex("t2") == 1);
+
+    // Range, blend and missing-resource problems are reported, never clamped.
+    doc.textureLayers.front().strength = 1.5;
+    CHECK(hasIssue(doc.validate(), "texture-range"));
+    doc.textureLayers.front().strength = 0.5;
+    doc.textureLayers.front().blend = ComponentBlend::Height;
+    CHECK(hasIssue(doc.validate(), "texture-blend"));
+    doc.textureLayers.front().blend = ComponentBlend::Multiply;
+    doc.textureLayers.front().resourceId = "gone";
+    CHECK(hasIssue(doc.validate(), "texture-missing-resource"));
+    doc.textureLayers.front().resourceId = "r1";
+
+    // Removing a layer never removes its image.
+    CHECK(doc.removeTextureLayer("t2"));
+    CHECK(doc.resource("r2") != nullptr);
+    CHECK(doc.resourceUsage("r2") == 0);
+    CHECK(doc.textureLayers.size() == 1);
+    CHECK(doc.validate().ok());
+}
+
 void testFoliageDocumentIsValid() {
     const BrushDocument doc = makeFoliageDocument();
     const ValidationResult result = doc.validate();
@@ -610,6 +668,7 @@ int main() {
     testExposedPropertiesOrderingAndVisibility();
     testExposedPropertiesFollowTheGroupOrder();
     testLegacyMigrationIsLosslessForTheOldFields();
+    testTextureLayerStackIsIndependentAndValidated();
     testFoliageDocumentIsValid();
     testResponseCurve();
 

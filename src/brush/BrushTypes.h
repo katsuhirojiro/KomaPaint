@@ -43,6 +43,11 @@ enum class ComponentBlend { Normal, Multiply, Screen, Overlay, Height, Mask };
 // How a group picks which of its members is used for a given stamp.
 enum class SelectionMode { All, Random, Weighted, Sequence, Alternating, Combination };
 
+// Where a texture is sampled. These are deliberately artist words, not shader
+// words: Tip follows each stamp, Stroke follows the movement of the line, and
+// Canvas stays still under the moving brush.
+enum class TexturePlacement { Tip, Stroke, Canvas };
+
 // How marks are produced. Generators are combinable, never mutually exclusive
 // brush categories (Part 3).
 enum class GeneratorKind {
@@ -73,6 +78,7 @@ const char* toString(Engine value) noexcept;
 const char* toString(ComponentKind value) noexcept;
 const char* toString(ComponentBlend value) noexcept;
 const char* toString(SelectionMode value) noexcept;
+const char* toString(TexturePlacement value) noexcept;
 const char* toString(GeneratorKind value) noexcept;
 const char* toString(Signal value) noexcept;
 const char* toString(Distribution value) noexcept;
@@ -85,6 +91,7 @@ bool parseEngine(std::string_view text, Engine* out) noexcept;
 bool parseComponentKind(std::string_view text, ComponentKind* out) noexcept;
 bool parseComponentBlend(std::string_view text, ComponentBlend* out) noexcept;
 bool parseSelectionMode(std::string_view text, SelectionMode* out) noexcept;
+bool parseTexturePlacement(std::string_view text, TexturePlacement* out) noexcept;
 bool parseGeneratorKind(std::string_view text, GeneratorKind* out) noexcept;
 bool parseSignal(std::string_view text, Signal* out) noexcept;
 bool parseDistribution(std::string_view text, Distribution* out) noexcept;

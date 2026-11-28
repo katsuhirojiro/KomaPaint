@@ -276,6 +276,24 @@ DigitalCapabilityReport inspectDigitalBrush(const brush::BrushDocument& doc) {
         }
         return false;
     };
+    // The brush-wide texture stack is rendered by the Digital rasterizer. It
+    // is not a component, so it must be checked here independently of the
+    // component graph: a broken image or an unknown placement is a paint error.
+    for (const auto& layer : doc.textureLayers) {
+        if (layer.resourceId.empty() || !doc.resource(layer.resourceId)) {
+            add("texture:" + layer.id, "Texture layer '" + layer.name +
+                "' has no stored texture image. The layer is kept in the brush file.");
+            continue;
+        }
+        if (!std::isfinite(layer.strength) || layer.strength < 0.0 || layer.strength > 1.0 ||
+            !std::isfinite(layer.scale) || layer.scale < 0.05 || layer.scale > 20.0 ||
+            !std::isfinite(layer.contrast) || layer.contrast < 0.0 || layer.contrast > 2.0 ||
+            !std::isfinite(layer.variation) || layer.variation < 0.0 || layer.variation > 1.0) {
+            add("texture:" + layer.id, "Texture layer '" + layer.name +
+                "' has a stored value Digital cannot paint. It is kept in the brush file.");
+        }
+    }
+
     const double hardness = doc.parameters.value("hardness", 100.0);
     const double blendStrength = doc.parameters.value("blend-strength", 0.0);
     bool hasTip = false;

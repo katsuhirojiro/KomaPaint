@@ -519,6 +519,31 @@ DocumentStroke::DocumentStroke(SparseTileStore& store, std::shared_ptr<const bru
     }
     if (!std::isfinite(m_base.stampReach)) { m_failed = true; m_failureReason = SparseTileStore::WriteResult::InvalidPixel; return; }
     m_base.randomSeed = m_strokeSeed;
+    // Build the texture stack once per stroke. Every dab shares the same
+    // immutable images and controls; no per-stamp texture loading or allocation.
+    std::vector<TextureGate> gates;
+    gates.reserve(m_document->textureLayers.size());
+    for (const auto& layer : m_document->textureLayers) {
+        if (!layer.enabled || layer.strength <= 0.0) continue;
+        const auto* image = m_document->resource(layer.resourceId);
+        if (!image || image->pixels().empty()) continue;
+        TextureGate gate;
+        gate.image = image;
+        gate.strength = std::clamp(layer.strength, 0.0, 1.0);
+        gate.scale = std::clamp(layer.scale, 0.05, 20.0);
+        gate.rotationRadians = layer.rotationDegrees * (kPi / 180.0);
+        gate.offsetX = layer.offsetX;
+        gate.offsetY = layer.offsetY;
+        gate.contrast = std::clamp(layer.contrast, 0.0, 2.0);
+        gate.invert = layer.invert;
+        gate.variation = std::clamp(layer.variation, 0.0, 1.0);
+        gate.placement = layer.placement;
+        gate.blend = layer.blend;
+        gate.pressureStrength = layer.pressureStrength;
+        gates.push_back(gate);
+    }
+    if (!gates.empty())
+        m_base.textureGates = std::make_shared<const std::vector<TextureGate>>(std::move(gates));
     m_stroke = std::make_unique<BrushStroke>(store, m_base, &DocumentStroke::sink, this);
     if (m_stroke->failed()) {
         m_failed = true;
@@ -527,7 +552,10 @@ DocumentStroke::DocumentStroke(SparseTileStore& store, std::shared_ptr<const bru
 }
 
 bool DocumentStroke::begin(InputSample sample) {
-    return m_stroke && m_stroke->begin(sample);
+    if (!m_stroke) return false;
+    m_base.strokeOriginX = sample.x;
+    m_base.strokeOriginY = sample.y;
+    return m_stroke->begin(sample);
 }
 
 bool DocumentStroke::extend(InputSample sample) {
@@ -641,6 +669,9 @@ SparseTileStore::WriteResult DocumentStroke::paintStamp(SparseTileStore& store,
         }
 
         InputSample dabSample = sample;
+        dabBrush.stampSeed = m_strokeSeed * 1664525u + std::uint32_t(m_stampCount) * 1013904223u;
+        dabBrush.strokeOriginX = m_base.strokeOriginX;
+        dabBrush.strokeOriginY = m_base.strokeOriginY;
         dabBrush.color = variedColour(brush.color, stored(*m_document, "hue-variation"),
                                       stored(*m_document, "saturation-variation"),
                                       stored(*m_document, "brightness-variation"),
