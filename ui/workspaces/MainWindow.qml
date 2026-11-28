@@ -59,6 +59,7 @@ ApplicationWindow {
     // A Levels session opened from Create Brush Tip targets the extracted
     // image, not the document. The result is carried back as a PNG so the
     // tip dialog can create exactly the artwork the artist previewed.
+    property var pendingTipData: null
     property string pendingTipPng: ""
     property string pendingTipKey: ""
     property bool tipLevelsActive: false
@@ -72,6 +73,7 @@ ApplicationWindow {
         brushTipDialog.previousTips = studio ? studio.tipChoices : []
         brushTipDialog.error = ""
         brushTipDialog.levelsStatus = ""
+        pendingTipData = null
         pendingTipPng = ""
         pendingTipKey = ""
         tipLevelsActive = false
@@ -107,6 +109,7 @@ ApplicationWindow {
             brushTipDialog.error = Workspace.levels.error
             return
         }
+        pendingTipData = data
         pendingTipPng = ""
         pendingTipKey = tipChoicesKey()
         tipLevelsActive = true
@@ -125,6 +128,7 @@ ApplicationWindow {
         // Cancelling a tip Levels session also cancels any earlier adjusted
         // copy, so Create cannot quietly use artwork the artist just rejected.
         if (!tipLevelsActive) return
+        pendingTipData = null
         pendingTipPng = ""
         pendingTipKey = ""
         brushTipDialog.levelsStatus = ""
@@ -132,20 +136,25 @@ ApplicationWindow {
     }
 
     function createBrushTipFromDialog(continuePrevious) {
-        const data = Workspace.createBrushTipSource(brushTipDialog.selectedSource,
-                                                    brushTipDialog.useSelection,
-                                                    brushTipDialog.selectedCoverage)
+        // When Levels was used, keep the exact extracted artwork the artist
+        // previewed instead of reading the document a second time.
+        let data
+        if (pendingTipPng.length > 0 && pendingTipKey === tipChoicesKey() && pendingTipData) {
+            data = Object.assign({}, pendingTipData)
+            data.png = pendingTipPng
+        } else {
+            data = Workspace.createBrushTipSource(brushTipDialog.selectedSource,
+                                                 brushTipDialog.useSelection,
+                                                 brushTipDialog.selectedCoverage)
+        }
         if (!data.ok) {
             brushTipDialog.error = data.error
             return
         }
-        // Use the Levels-adjusted copy only when the artist has not changed
-        // which artwork or coverage the tip is made from since Levels opened.
-        if (pendingTipPng.length > 0 && pendingTipKey === tipChoicesKey()) {
-            data.png = pendingTipPng
-        } else if (pendingTipPng.length > 0) {
+        if (pendingTipPng.length > 0 && pendingTipKey !== tipChoicesKey()) {
             // The artwork source or coverage changed since Levels was applied;
             // the old adjusted copy no longer describes this tip.
+            pendingTipData = null
             pendingTipPng = ""
             brushTipDialog.levelsStatus = ""
         }
