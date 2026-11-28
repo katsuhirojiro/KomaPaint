@@ -1402,7 +1402,6 @@ bool BrushStudioModel::addTextureLayer(brush::BrushTextureLayer layer, const cha
         m_selectedTextureId = QString::fromStdString(layer.id);
         return true;
     });
-    if (added) emit textureChanged();
     return added;
 }
 
@@ -1441,7 +1440,6 @@ bool BrushStudioModel::addBuiltInTexture(const QString& kind) try {
         m_selectedTextureId = QString::fromStdString(layer.id);
         return true;
     });
-    if (added) emit textureChanged();
     return added;
 } catch (const std::bad_alloc&) { return historyMemoryError(); }
   catch (const std::length_error&) { return fail(tr("That texture is too large to store on this system.")); }
@@ -1479,7 +1477,6 @@ bool BrushStudioModel::importTextureLayer(const QUrl& url) try {
         m_selectedTextureId = QString::fromStdString(layer.id);
         return true;
     });
-    if (added) emit textureChanged();
     return added;
 } catch (const std::bad_alloc&) {
     return fail(tr("Not enough memory to import the texture image. Nothing was changed."));
@@ -1496,7 +1493,6 @@ bool BrushStudioModel::removeTextureLayer(const QString& id) {
                 : QString::fromStdString(m_document.textureLayers.front().id);
         return true;
     });
-    if (removed) emit textureChanged();
     return removed;
 }
 
@@ -1507,7 +1503,6 @@ bool BrushStudioModel::moveTextureLayer(const QString& id, int newIndex) {
     const bool moved = edit("Reorder texture layers", [this, &id, newIndex] {
         return m_document.moveTextureLayer(id.toStdString(), newIndex);
     });
-    if (moved) emit textureChanged();
     return moved;
 }
 
@@ -1515,16 +1510,12 @@ bool BrushStudioModel::setTextureLayerName(const QString& id, const QString& nam
     auto* layer = editableTextureLayer(id);
     if (!layer) return false;
     if (name.trimmed().isEmpty()) return fail(tr("A texture layer needs a name."));
-    const bool changed = changeSetting("Rename texture layer", layer->name, name.toStdString());
-    if (changed) emit textureChanged();
-    return changed;
+    return changeSetting("Rename texture layer", layer->name, name.toStdString());
 }
 
 bool BrushStudioModel::setTextureLayerEnabled(const QString& id, bool enabled) {
     auto* layer = editableTextureLayer(id);
-    const bool changed = layer && changeSetting("Toggle texture layer", layer->enabled, enabled);
-    if (changed) emit textureChanged();
-    return changed;
+    return layer && changeSetting("Toggle texture layer", layer->enabled, enabled);
 }
 
 bool BrushStudioModel::setTextureLayerResource(const QString& id, const QString& resourceId) {
@@ -1533,9 +1524,7 @@ bool BrushStudioModel::setTextureLayerResource(const QString& id, const QString&
     const auto* resource = m_document.resource(resourceId.toStdString());
     if (!resource || resource->pixels().empty())
         return fail(tr("Choose a texture image that is already in this brush."));
-    const bool changed = changeSetting("Texture image", layer->resourceId, resourceId.toStdString());
-    if (changed) emit textureChanged();
-    return changed;
+    return changeSetting("Texture image", layer->resourceId, resourceId.toStdString());
 }
 
 bool BrushStudioModel::setTextureLayerSetting(const QString& id, const QString& key, double value) {
@@ -1558,32 +1547,25 @@ bool BrushStudioModel::setTextureLayerSetting(const QString& id, const QString& 
     else if (key == QStringLiteral("offsetY")) changed = changeSetting("Texture position", layer->offsetY, value);
     else if (key == QStringLiteral("contrast")) changed = changeSetting("Texture contrast", layer->contrast, value);
     else if (key == QStringLiteral("variation")) changed = changeSetting("Texture variation", layer->variation, value);
-    if (changed) emit textureChanged();
     return changed;
 }
 
 bool BrushStudioModel::setTextureLayerInvert(const QString& id, bool invert) {
     auto* layer = editableTextureLayer(id);
-    const bool changed = layer && changeSetting("Invert texture", layer->invert, invert);
-    if (changed) emit textureChanged();
-    return changed;
+    return layer && changeSetting("Invert texture", layer->invert, invert);
 }
 
 bool BrushStudioModel::setTextureLayerPressure(const QString& id, bool enabled) {
     auto* layer = editableTextureLayer(id);
-    const bool changed = layer && changeSetting("Pressure grain", layer->pressureStrength, enabled);
-    if (changed) emit textureChanged();
-    return changed;
+    return layer && changeSetting("Pressure grain", layer->pressureStrength, enabled);
 }
 
 bool BrushStudioModel::setTextureLayerPlacement(const QString& id, int placement) {
     auto* layer = editableTextureLayer(id);
     if (!layer) return false;
     if (placement < 0 || placement > 2) return fail(tr("That texture placement is not available."));
-    const bool changed = changeSetting("Texture placement", layer->placement,
-                                       static_cast<brush::TexturePlacement>(placement));
-    if (changed) emit textureChanged();
-    return changed;
+    return changeSetting("Texture placement", layer->placement,
+                         static_cast<brush::TexturePlacement>(placement));
 }
 
 bool BrushStudioModel::setTextureLayerBlend(const QString& id, int blend) {
@@ -1591,10 +1573,8 @@ bool BrushStudioModel::setTextureLayerBlend(const QString& id, int blend) {
     if (!layer) return false;
     if (blend < int(ComponentBlend::Normal) || blend > int(ComponentBlend::Overlay))
         return fail(tr("That texture blending mode is not available."));
-    const bool changed = changeSetting("Texture blending", layer->blend,
-                                       static_cast<ComponentBlend>(blend));
-    if (changed) emit textureChanged();
-    return changed;
+    return changeSetting("Texture blending", layer->blend,
+                         static_cast<ComponentBlend>(blend));
 }
 
 QString BrushStudioModel::createGroup(const QString& name) {

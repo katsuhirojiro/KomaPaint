@@ -1238,7 +1238,10 @@ void TestBrushStudioModel::textureLayersAreEditableUndoableAndKeepTheirImage() {
     QVERIFY(model.selectedTextureLayer().value(QStringLiteral("pressure")).toBool());
     QCOMPARE(model.document().textureLayers.front().rotationDegrees, -25.0);
 
-    // A second independent layer, reordering, and removal that keeps the image.
+    // A second independent layer, reordering, and removal that keeps the image
+    // and leaves every other brush setting alone.
+    const auto componentsBefore = model.document().components;
+    const auto parametersBefore = model.document().parameters;
     QVERIFY(model.addBuiltInTexture(QStringLiteral("canvas")));
     QCOMPARE(model.textureLayerCount(), 2);
     QVERIFY(model.moveTextureLayer(paperId, 1));
@@ -1248,6 +1251,8 @@ void TestBrushStudioModel::textureLayersAreEditableUndoableAndKeepTheirImage() {
     QVERIFY(model.document().resource(paperResource.toStdString()) != nullptr);
     QVERIFY(model.removeTextureLayer(QString::fromStdString(model.document().textureLayers.front().id)));
     QVERIFY(!model.document().resources.empty()); // removal never deletes the image
+    QVERIFY(model.document().components == componentsBefore);
+    QVERIFY(model.document().parameters == parametersBefore);
 
     // Reuse the retained image without importing it again.
     QVERIFY(model.addTextureLayerFromResource(paperResource));
