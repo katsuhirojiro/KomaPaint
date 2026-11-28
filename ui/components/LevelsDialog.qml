@@ -22,6 +22,7 @@ KpDialog {
     readonly property bool imageTarget: ready && controller.targetKind === "image"
 
     signal appliedToTarget()
+    signal levelsCanceled()
 
     function openForCurrentTarget() {
         applied = false
@@ -31,8 +32,10 @@ KpDialog {
     onClosed: {
         // Closing with the window button or Escape is a cancel, never a
         // silent commit of whatever preview happened to be on screen.
-        if (!applied && controller && controller.active)
+        if (!applied && controller && controller.active) {
             controller.cancel()
+            levelsCanceled()
+        }
     }
 
     body: [

@@ -121,6 +121,16 @@ ApplicationWindow {
         tipLevelsActive = false
     }
 
+    function levelsCanceled() {
+        // Cancelling a tip Levels session also cancels any earlier adjusted
+        // copy, so Create cannot quietly use artwork the artist just rejected.
+        if (!tipLevelsActive) return
+        pendingTipPng = ""
+        pendingTipKey = ""
+        brushTipDialog.levelsStatus = ""
+        tipLevelsActive = false
+    }
+
     function createBrushTipFromDialog(continuePrevious) {
         const data = Workspace.createBrushTipSource(brushTipDialog.selectedSource,
                                                     brushTipDialog.useSelection,
@@ -1494,6 +1504,7 @@ ApplicationWindow {
     LevelsDialog {
         id: levelsDialog
         onAppliedToTarget: root.levelsApplied()
+        onLevelsCanceled: root.levelsCanceled()
     }
     NewProjectDialog {
         id: newProjectDialog
