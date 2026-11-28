@@ -134,7 +134,12 @@ BitmapSample sampleTexture(const brush::BrushResource& bitmap, double u, double 
     auto wrap = [](double value) {
         value = std::fmod(value + 1.0, 2.0);
         if (value < 0.0) value += 2.0;
-        return value - 1.0;
+        value -= 1.0;
+        // sampleBitmap treats the outer edge as outside the image. A repeating
+        // texture must have no seam there, so land just inside it.
+        if (value <= -1.0) return -0.999999;
+        if (value >= 1.0) return 0.999999;
+        return value;
     };
     const double wu = wrap(u);
     const double wv = wrap(v);
