@@ -1,9 +1,9 @@
 # Advanced Texture Studio — audit and feature matrix
 
-Status: stages 1–4 and the first persistence/undo pass are implemented on
-`arena/64f169fc-komapaint`. Stage 5 (tablet/touch adaptation) and stage 6
-(regression verification) are tracked below; Android hardware remains
-unverified because this repository has no Android CI or device farm.
+Status: stages 1–6 are implemented on `arena/64f169fc-komapaint` against the
+shared evaluator, with desktop CI and Qt-free pixel tests. Android hardware,
+stylus feel and long-session device memory remain unverified because this
+repository has no Android CI or device farm.
 
 ## What artists get
 
@@ -19,7 +19,10 @@ Starting a new texture layer never changes the tip or removes paint by itself:
 it adds an independent grain layer. The layer can be switched off or removed
 without deleting its image resource. Rotation, contrast, inversion, position,
 variation, pressure response and grain blending are behind **More texture
-controls**.
+controls**. Every control explains itself on hover, keyboard focus and press
+(touch long-press), and the layer rows and primary buttons use larger hit
+targets. With the Realistic engine the render controls are visibly disabled
+with the reason shown, while the stored layers remain intact.
 
 ## Audit at the start of the work
 
@@ -121,6 +124,10 @@ there is no mock renderer and no separate preview shader.
   the Qt application; that is not device testing.
 * Stylus pressure was exercised through unit-level genuine-pressure samples,
   not on physical tablet hardware. Touch/stylus feel remains a human test.
+* A brush's resources, including textures, are decoded when the brush opens.
+  There is no lazy texture streamer yet; the engine does not re-load or copy an
+  image per stamp, but a brush that intentionally contains many very large
+  textures still pays their stored size while it is open.
 * The Studio does not yet expose a texture library outside the brush; images
   are imported into the brush or added as starters. Reuse from the brush's
   existing resources is available through the texture chooser.
@@ -141,12 +148,15 @@ Qt-free suites (run locally with `g++ -std=c++20`):
   deterministic bytes, duplicate/corrupt chunk handling.
 * `tests/unit/TestBrushDocumentEngine.cpp` — production pixel tests for grain
   removal, disable, two-layer combination, tip/stroke/canvas differences,
-  variation, opt-in genuine pressure, and no pressure fabrication.
+  variation, opt-in genuine pressure, no pressure fabrication, and
+  byte-identical repeat painting (the property the preview shares with the
+  canvas).
 
 Qt suite (CI):
 
 * `tests/unit/TestBrushStudioModel.cpp` — add starter/import, candidates,
   selection, one-step slider undo/redo, placement and advanced fields,
-  reorder/remove that preserves resources, save/reopen, Realistic honesty.
+  reorder/remove that preserves resources, colour import preserving RGBA,
+  save/reopen, Realistic honesty.
 * Existing QML UI tests cover the Studio shell; a dedicated touch-target and
   long-press pass is still required on hardware.

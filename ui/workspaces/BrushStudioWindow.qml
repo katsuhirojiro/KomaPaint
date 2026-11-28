@@ -168,6 +168,17 @@ Window {
     }
 
     FileDialog {
+        id: importTexture
+        parentWindow: studio
+        modality: Qt.WindowModal
+        objectName: "brushStudioTextureImageDialog"
+        title: qsTr("Import a texture image")
+        fileMode: FileDialog.OpenFile
+        nameFilters: [qsTr("Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)")]
+        onAccepted: brushDraft.importTextureLayer(selectedFile)
+    }
+
+    FileDialog {
         id: importTip
         parentWindow: studio
         modality: Qt.WindowModal
@@ -228,6 +239,7 @@ Window {
                 Layout.fillHeight: true
                 draft: brushDraft
                 onImportImageRequested: importTip.open()
+                onTextureImportRequested: importTexture.open()
             }
             StudioSettings {
                 objectName: "brushStudioSettings"

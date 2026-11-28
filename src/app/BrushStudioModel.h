@@ -47,6 +47,14 @@ class BrushStudioModel : public QObject {
     Q_PROPERTY(int hiddenComponentCount READ hiddenComponentCount NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList groups READ groups NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList maskCandidates READ maskCandidates NOTIFY componentsChanged)
+    // Brush Studio -> Texture. These are independent texture layers, not
+    // components in the mark graph; the list is ordered bottom-to-top.
+    Q_PROPERTY(QVariantList textureLayers READ textureLayers NOTIFY textureChanged)
+    Q_PROPERTY(QVariantMap selectedTextureLayer READ selectedTextureLayer NOTIFY textureChanged)
+    Q_PROPERTY(int textureLayerCount READ textureLayerCount NOTIFY textureChanged)
+    Q_PROPERTY(QVariantList textureCandidates READ textureCandidates NOTIFY componentsChanged)
+    Q_PROPERTY(bool textureEditingSupported READ textureEditingSupported NOTIFY documentChanged)
+    Q_PROPERTY(QString selectedTextureId READ selectedTextureId NOTIFY textureChanged)
     Q_PROPERTY(QVariantList parameters READ parameters NOTIFY componentsChanged)
     Q_PROPERTY(QVariantList settingSections READ settingSections CONSTANT)
     Q_PROPERTY(QVariantMap settingState READ settingState NOTIFY componentsChanged)
@@ -148,6 +156,31 @@ public:
     Q_INVOKABLE bool setComponentTransform(const QString& id, const QString& key, double value);
     Q_INVOKABLE bool setComponentWeight(const QString& id, double weight);
     Q_INVOKABLE bool setComponentMask(const QString& id, const QString& maskId);
+
+    // ---- texture stack -----------------------------------------------------
+    QVariantList textureLayers() const;
+    QVariantMap selectedTextureLayer() const;
+    QString selectedTextureId() const;
+    int textureLayerCount() const { return static_cast<int>(m_document.textureLayers.size()); }
+    // False for Realistic: the physical paper engine does not sample image
+    // textures. The layers are still edited and saved, and the Studio explains
+    // that they will paint in Digital only.
+    bool textureEditingSupported() const { return m_document.engine == brush::Engine::Digital; }
+    QVariantList textureCandidates() const;
+    Q_INVOKABLE bool selectTextureLayer(const QString& id);
+    Q_INVOKABLE bool addTextureLayerFromResource(const QString& resourceId);
+    Q_INVOKABLE bool addBuiltInTexture(const QString& kind);
+    Q_INVOKABLE bool importTextureLayer(const QUrl& url);
+    Q_INVOKABLE bool removeTextureLayer(const QString& id);
+    Q_INVOKABLE bool moveTextureLayer(const QString& id, int newIndex);
+    Q_INVOKABLE bool setTextureLayerName(const QString& id, const QString& name);
+    Q_INVOKABLE bool setTextureLayerEnabled(const QString& id, bool enabled);
+    Q_INVOKABLE bool setTextureLayerResource(const QString& id, const QString& resourceId);
+    Q_INVOKABLE bool setTextureLayerSetting(const QString& id, const QString& key, double value);
+    Q_INVOKABLE bool setTextureLayerInvert(const QString& id, bool invert);
+    Q_INVOKABLE bool setTextureLayerPressure(const QString& id, bool enabled);
+    Q_INVOKABLE bool setTextureLayerPlacement(const QString& id, int placement);
+    Q_INVOKABLE bool setTextureLayerBlend(const QString& id, int blend);
     Q_INVOKABLE QString createGroup(const QString& name);
     Q_INVOKABLE QString createGroupInParent(const QString& name, const QString& parentId);
     Q_INVOKABLE bool assignToGroup(const QString& componentId, const QString& groupId);
@@ -190,8 +223,8 @@ public:
     Q_INVOKABLE void redo();
     // Opens a step: every edit between beginStep() and commitStep() lands in one
     // undo entry. Edits outside a step are their own step.
-    void beginStep(const QString& label);
-    void commitStep();
+    Q_INVOKABLE void beginStep(const QString& label);
+    Q_INVOKABLE void commitStep();
 
     struct StorageUse {
         std::size_t metadataBytes; // active document + undo/redo node and metadata capacities
@@ -215,6 +248,7 @@ signals:
     void historyChanged();
     void errorChanged();
     void stashChanged();
+    void textureChanged();
 
 private:
     enum class EditMode { Change, Replace, LoadSaved };
@@ -241,6 +275,9 @@ private:
     bool replaceDocument(brush::BrushDocument&& document, EditMode mode, const char* label = "Open brush");
     bool writeBrush(const QString& path);
     QVariantMap componentRow(int index) const;
+    QVariantMap textureLayerRow(int index) const;
+    brush::BrushTextureLayer* editableTextureLayer(const QString& id);
+    bool addTextureLayer(brush::BrushTextureLayer layer, const char* label);
     const brush::BrushComponent* selectedComponentData() const;
     brush::BrushComponent* editableComponent(const QString& id);
     bool fail(const QString& message);
@@ -265,6 +302,7 @@ private:
     };
     std::optional<StashedDraft> m_stashed;
     int m_selectedIndex = -1;
+    QString m_selectedTextureId;
     bool m_modified = false;
 
     struct Step {

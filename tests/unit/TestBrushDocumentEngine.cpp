@@ -1083,6 +1083,27 @@ void testTextureLayersReachTheProductionPixels() {
     CHECK((both.pixel({56, 48}).value_or(0) >> 24) == 0U);
 }
 
+void testPreviewAndCanvasShareTheSameProductionPixels() {
+    // The Studio pad and the canvas both drive DocumentStroke. Two independent
+    // stores painted from the same document and seed must be byte-identical;
+    // this is the property the preview relies on, not a second renderer.
+    StrokeRuntime runtime;
+    runtime.color = 0xff204060;
+    auto document = textureDocument(true);
+    document.textureLayers.front().variation = 0.7;
+    auto paint = [&] {
+        SparseTileStore store(kWidth, kHeight);
+        drawing::DocumentStroke stroke(store, document,
+                                       drawing::digitalDefinition(document, runtime), 99u);
+        CHECK(stroke.begin({24, 40, 0.7}));
+        for (int i = 1; i <= 30; ++i) CHECK(stroke.extend({24.0 + i * 2.0, 40.0 + i * 0.5, 0.7}));
+        CHECK(stroke.end({84, 55, 0.7}));
+        CHECK(!stroke.failed());
+        return pixelsOf(store);
+    };
+    CHECK(paint() == paint());
+}
+
 void testTexturePressureNeedsGenuinePressureAndOptIn() {
     StrokeRuntime runtime;
     runtime.color = 0xff000000;
@@ -1179,6 +1200,7 @@ int main() {
     testStrokeDelayTrailsThePointer();
     testRealisticDocumentPaintsThroughTheMaterialEngine();
     testTextureLayersReachTheProductionPixels();
+    testPreviewAndCanvasShareTheSameProductionPixels();
     testTexturePressureNeedsGenuinePressureAndOptIn();
     testTexturePlacementAndVariationAreReal();
     testInvalidStrokeIsReportedNotSilent();

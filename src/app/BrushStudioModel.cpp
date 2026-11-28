@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <iterator>
 #include <limits>
@@ -172,6 +173,93 @@ std::string newDraftId() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
 }
 
+QString texturePlacementLabel(brush::TexturePlacement placement) {
+    switch (placement) {
+    case brush::TexturePlacement::Stroke: return BrushStudioModel::tr("Follows the stroke");
+    case brush::TexturePlacement::Canvas: return BrushStudioModel::tr("Fixed on the canvas");
+    case brush::TexturePlacement::Tip: break;
+    }
+    return BrushStudioModel::tr("Follows each stamp");
+}
+
+QString textureBlendLabel(ComponentBlend blend) {
+    switch (blend) {
+    case ComponentBlend::Screen: return BrushStudioModel::tr("Light grain breaks paint");
+    case ComponentBlend::Overlay: return BrushStudioModel::tr("Crisp grain");
+    case ComponentBlend::Normal: return BrushStudioModel::tr("Soft grain");
+    case ComponentBlend::Multiply: break;
+    default: break;
+    }
+    return BrushStudioModel::tr("Dark grain breaks paint");
+}
+
+// Small, useful starter textures. They are ordinary grayscale resources, so
+// they save, share and install through exactly the same path as an import.
+QImage builtInTexture(const QString& kind) {
+    QImage image(256, 256, QImage::Format_Grayscale8);
+    if (image.isNull()) return {};
+    auto hash = [](int x, int y, std::uint32_t seed) {
+        std::uint32_t n = std::uint32_t(x) * 0x8da6b343U ^ std::uint32_t(y) * 0xd8163841U ^ seed * 0x9e3779b9U;
+        n ^= n >> 13; n *= 0x85ebca6bU; n ^= n >> 16; return n;
+    };
+    for (int y = 0; y < image.height(); ++y) {
+        auto* row = image.scanLine(y);
+        for (int x = 0; x < image.width(); ++x) {
+            double value = 0.0;
+            if (kind == QStringLiteral("paper")) {
+                const double fine = (hash(x, y, 3U) & 255U) / 255.0;
+                const double fibre = (hash(x / 3, y, 11U) & 255U) / 255.0;
+                value = 0.30 + 0.42 * fine + 0.28 * fibre;
+            } else if (kind == QStringLiteral("canvas")) {
+                const double warp = 0.5 + 0.5 * std::sin(x * 0.42 + 0.9 * std::sin(y * 0.05));
+                const double weft = 0.5 + 0.5 * std::sin(y * 0.42 + 0.9 * std::sin(x * 0.05));
+                value = 0.18 + 0.55 * std::max(warp, weft) + 0.12 * ((hash(x, y, 7U) & 255U) / 255.0);
+            } else if (kind == QStringLiteral("speckle")) {
+                const double grain = (hash(x, y, 23U) & 255U) / 255.0;
+                const double cell = (hash(x / 2, y / 2, 29U) & 255U) / 255.0;
+                value = std::clamp((grain * 0.65 + cell * 0.35 - 0.30) * 2.2, 0.0, 1.0);
+            } else if (kind == QStringLiteral("mottle")) {
+                const double low = (hash(x / 7, y / 7, 41U) & 255U) / 255.0;
+                const double mid = (hash(x / 2, y / 2, 43U) & 255U) / 255.0;
+                value = 0.35 + 0.45 * low + 0.20 * mid;
+            } else {
+                return {};
+            }
+            row[x] = std::uint8_t(std::clamp(std::lround(value * 255.0), 0L, 255L));
+        }
+    }
+    return image;
+}
+
+brush::BrushResource textureResourceFromImage(const QImage& image, const QString& name) {
+    brush::BrushResource resource;
+    resource.name = name.toStdString();
+    resource.width = image.width();
+    resource.height = image.height();
+    // Keep a colour or transparent source intact. The renderer reads its
+    // brightness and alpha as texture coverage, so importing never has to
+    // discard the artist's source pixels or colour depth.
+    if (image.format() == QImage::Format_Grayscale8) {
+        resource.kind = brush::ResourceKind::Grayscale8;
+        const auto bytes = resource.expectedBytes();
+        std::vector<std::uint8_t> buffer(bytes);
+        for (int row = 0; row < image.height(); ++row)
+            std::memcpy(buffer.data() + std::size_t(row) * std::size_t(image.width()),
+                        image.constScanLine(row), std::size_t(image.width()));
+        resource.setPixels(std::move(buffer));
+        return resource;
+    }
+    const auto rgba = image.convertToFormat(QImage::Format_RGBA8888);
+    resource.kind = brush::ResourceKind::Rgba8;
+    const auto bytes = resource.expectedBytes();
+    std::vector<std::uint8_t> buffer(bytes);
+    for (int row = 0; row < rgba.height(); ++row)
+        std::memcpy(buffer.data() + std::size_t(row) * std::size_t(rgba.width()) * 4,
+                    rgba.constScanLine(row), std::size_t(rgba.width()) * 4);
+    resource.setPixels(std::move(buffer));
+    return resource;
+}
+
 BrushDocument defaultDraft() {
     BrushDocument document;
     document.name = "Untitled brush";
@@ -215,6 +303,8 @@ bool BrushStudioModel::setDocument(const BrushDocument& document) {
     return edit("Open brush", [&] {
         m_document = document;
         m_selectedIndex = m_document.components.empty() ? -1 : 0;
+        m_selectedTextureId = m_document.textureLayers.empty() ? QString{}
+            : QString::fromStdString(m_document.textureLayers.front().id);
         m_tipOriginals.clear();
     }, EditMode::Replace, &document);
 }
@@ -227,6 +317,8 @@ bool BrushStudioModel::replaceDocument(BrushDocument&& document, EditMode mode, 
     return edit(label, [&] {
         m_document = std::move(document);
         m_selectedIndex = m_document.components.empty() ? -1 : 0;
+        m_selectedTextureId = m_document.textureLayers.empty() ? QString{}
+            : QString::fromStdString(m_document.textureLayers.front().id);
         m_tipOriginals.clear();
     }, mode);
 }
@@ -1215,6 +1307,294 @@ bool BrushStudioModel::setComponentMask(const QString& id, const QString& maskId
             return fail(tr("The chosen texture or mask has no pixels."));
     }
     return changeSetting("Component mask", component->maskComponentId, mask);
+}
+
+// ---- texture stack ---------------------------------------------------------
+
+QVariantMap BrushStudioModel::textureLayerRow(int index) const {
+    QVariantMap map;
+    if (index < 0 || static_cast<std::size_t>(index) >= m_document.textureLayers.size()) return map;
+    const auto& layer = m_document.textureLayers[static_cast<std::size_t>(index)];
+    const auto* image = m_document.resource(layer.resourceId);
+    map.insert(QStringLiteral("id"), QString::fromStdString(layer.id));
+    map.insert(QStringLiteral("index"), index);
+    map.insert(QStringLiteral("name"), QString::fromStdString(layer.name));
+    map.insert(QStringLiteral("resourceId"), QString::fromStdString(layer.resourceId));
+    map.insert(QStringLiteral("resourceName"), image ? QString::fromStdString(image->name) : QString{});
+    map.insert(QStringLiteral("resourceWidth"), image ? image->width : 0);
+    map.insert(QStringLiteral("resourceHeight"), image ? image->height : 0);
+    map.insert(QStringLiteral("enabled"), layer.enabled);
+    map.insert(QStringLiteral("strength"), layer.strength);
+    map.insert(QStringLiteral("scale"), layer.scale);
+    map.insert(QStringLiteral("rotation"), layer.rotationDegrees);
+    map.insert(QStringLiteral("offsetX"), layer.offsetX);
+    map.insert(QStringLiteral("offsetY"), layer.offsetY);
+    map.insert(QStringLiteral("contrast"), layer.contrast);
+    map.insert(QStringLiteral("invert"), layer.invert);
+    map.insert(QStringLiteral("variation"), layer.variation);
+    map.insert(QStringLiteral("pressure"), layer.pressureStrength);
+    map.insert(QStringLiteral("placement"), int(layer.placement));
+    map.insert(QStringLiteral("placementLabel"), texturePlacementLabel(layer.placement));
+    map.insert(QStringLiteral("blend"), int(layer.blend));
+    map.insert(QStringLiteral("blendLabel"), textureBlendLabel(layer.blend));
+    map.insert(QStringLiteral("renders"), textureEditingSupported());
+    map.insert(QStringLiteral("hasPixels"), image && !image->pixels().empty());
+    return map;
+}
+
+QVariantList BrushStudioModel::textureLayers() const {
+    QVariantList rows;
+    rows.reserve(static_cast<qsizetype>(m_document.textureLayers.size()));
+    for (int i = 0; i < static_cast<int>(m_document.textureLayers.size()); ++i)
+        rows.push_back(textureLayerRow(i));
+    return rows;
+}
+
+QString BrushStudioModel::selectedTextureId() const {
+    if (m_document.textureLayers.empty()) return {};
+    if (m_document.textureLayerIndex(m_selectedTextureId.toStdString()) < 0)
+        return QString::fromStdString(m_document.textureLayers.front().id);
+    return m_selectedTextureId;
+}
+
+QVariantMap BrushStudioModel::selectedTextureLayer() const {
+    if (m_document.textureLayers.empty()) return {};
+    int index = m_document.textureLayerIndex(m_selectedTextureId.toStdString());
+    if (index < 0) index = 0;
+    return textureLayerRow(index);
+}
+
+QVariantList BrushStudioModel::textureCandidates() const {
+    QVariantList rows;
+    for (const auto& resource : m_document.resources) {
+        if (resource.width <= 0 || resource.height <= 0 || resource.pixels().empty()) continue;
+        QVariantMap row;
+        row.insert(QStringLiteral("id"), QString::fromStdString(resource.id));
+        row.insert(QStringLiteral("name"), QString::fromStdString(resource.name));
+        row.insert(QStringLiteral("width"), resource.width);
+        row.insert(QStringLiteral("height"), resource.height);
+        row.insert(QStringLiteral("format"),
+                   QString::fromUtf8(brush::toString(resource.kind)));
+        rows.push_back(row);
+    }
+    return rows;
+}
+
+bool BrushStudioModel::selectTextureLayer(const QString& id) {
+    if (!id.isEmpty() && !m_document.textureLayer(id.toStdString()))
+        return fail(tr("There is no texture layer with that id."));
+    if (m_selectedTextureId == id) return true;
+    m_selectedTextureId = id;
+    emit textureChanged();
+    return true;
+}
+
+brush::BrushTextureLayer* BrushStudioModel::editableTextureLayer(const QString& id) {
+    auto* layer = m_document.textureLayer(id.toStdString());
+    if (!layer) fail(tr("Select a texture layer first."));
+    return layer;
+}
+
+bool BrushStudioModel::addTextureLayer(brush::BrushTextureLayer layer, const char* label) {
+    const bool added = edit(label, [this, &layer] {
+        layer.id = m_document.allocateId("t");
+        if (!m_document.addTextureLayer(layer)) return false;
+        m_selectedTextureId = QString::fromStdString(layer.id);
+        return true;
+    });
+    if (added) emit textureChanged();
+    return added;
+}
+
+bool BrushStudioModel::addTextureLayerFromResource(const QString& resourceId) try {
+    const auto* resource = m_document.resource(resourceId.toStdString());
+    if (!resource || resource->pixels().empty())
+        return fail(tr("Choose a texture image that is already in this brush."));
+    brush::BrushTextureLayer layer;
+    layer.name = resource->name.empty() ? tr("Texture").toStdString() : resource->name;
+    layer.resourceId = resourceId.toStdString();
+    return addTextureLayer(std::move(layer), "Add texture layer");
+} catch (const std::bad_alloc&) { return historyMemoryError(); }
+
+bool BrushStudioModel::addBuiltInTexture(const QString& kind) try {
+    const auto image = builtInTexture(kind);
+    if (image.isNull()) return fail(tr("That starter texture is not available."));
+    QString name;
+    if (kind == QStringLiteral("paper")) name = tr("Paper grain");
+    else if (kind == QStringLiteral("canvas")) name = tr("Canvas weave");
+    else if (kind == QStringLiteral("speckle")) name = tr("Dry speckle");
+    else if (kind == QStringLiteral("mottle")) name = tr("Soft mottle");
+    else return fail(tr("That starter texture is not available."));
+    auto resource = textureResourceFromImage(image, name);
+    if (resource.pixels().empty())
+        return fail(tr("Not enough memory to prepare that texture."));
+    if (m_memoryCheck && !m_memoryCheck(m_memoryContext, resource.pixels().size()))
+        return fail(tr("Not enough memory to add that texture layer."));
+    const bool added = edit("Add built-in texture", [this, &resource, &name] {
+        resource.id = m_document.allocateId("r");
+        if (!m_document.addResource(resource)) return false;
+        brush::BrushTextureLayer layer;
+        layer.name = name.toStdString();
+        layer.resourceId = resource.id;
+        layer.id = m_document.allocateId("t");
+        if (!m_document.addTextureLayer(layer)) return false;
+        m_selectedTextureId = QString::fromStdString(layer.id);
+        return true;
+    });
+    if (added) emit textureChanged();
+    return added;
+} catch (const std::bad_alloc&) { return historyMemoryError(); }
+  catch (const std::length_error&) { return fail(tr("That texture is too large to store on this system.")); }
+
+bool BrushStudioModel::importTextureLayer(const QUrl& url) try {
+    if (!url.isLocalFile() || url.toLocalFile().isEmpty())
+        return fail(tr("Choose a local image file."));
+    const QString path = url.toLocalFile();
+    QImageReader reader(path);
+    reader.setAutoTransform(true);
+    const QSize size = reader.size();
+    if (!size.isValid() || size.isEmpty())
+        return fail(tr("Could not read image size: %1").arg(reader.errorString()));
+    const auto pixels = std::uint64_t(size.width()) * std::uint64_t(size.height());
+    if (pixels > std::numeric_limits<std::size_t>::max() / 16 ||
+        (m_memoryCheck && !m_memoryCheck(m_memoryContext, static_cast<std::size_t>(pixels) * 16)))
+        return fail(tr("Not enough memory to import the full-size texture. Nothing was changed."));
+    const auto image = reader.read();
+    if (image.isNull()) return fail(tr("Could not read the texture image: %1").arg(reader.errorString()));
+    auto resource = textureResourceFromImage(image, QFileInfo(path).completeBaseName());
+    if (resource.pixels().empty())
+        return fail(tr("Not enough memory to prepare the texture image. Nothing was changed."));
+    const auto name = QFileInfo(path).completeBaseName();
+    const bool added = edit("Import texture layer", [this, &resource, &name] {
+        resource.id = m_document.allocateId("r");
+        if (!m_document.addResource(resource)) return false;
+        brush::BrushTextureLayer layer;
+        layer.name = name.toStdString();
+        layer.resourceId = resource.id;
+        layer.id = m_document.allocateId("t");
+        layer.strength = 0.65;
+        layer.scale = 1.0;
+        layer.blend = ComponentBlend::Multiply;
+        if (!m_document.addTextureLayer(layer)) return false;
+        m_selectedTextureId = QString::fromStdString(layer.id);
+        return true;
+    });
+    if (added) emit textureChanged();
+    return added;
+} catch (const std::bad_alloc&) {
+    return fail(tr("Not enough memory to import the texture image. Nothing was changed."));
+} catch (const std::length_error&) {
+    return fail(tr("This texture image is too large to import on this system."));
+}
+
+bool BrushStudioModel::removeTextureLayer(const QString& id) {
+    if (!m_document.textureLayer(id.toStdString())) return fail(tr("There is no texture layer with that id."));
+    const bool removed = edit("Remove texture layer", [this, &id] {
+        if (!m_document.removeTextureLayer(id.toStdString())) return false;
+        if (m_selectedTextureId == id)
+            m_selectedTextureId = m_document.textureLayers.empty() ? QString{}
+                : QString::fromStdString(m_document.textureLayers.front().id);
+        return true;
+    });
+    if (removed) emit textureChanged();
+    return removed;
+}
+
+bool BrushStudioModel::moveTextureLayer(const QString& id, int newIndex) {
+    if (!m_document.textureLayer(id.toStdString())) return fail(tr("There is no texture layer with that id."));
+    if (newIndex < 0 || newIndex >= static_cast<int>(m_document.textureLayers.size()))
+        return fail(tr("That texture layer position is outside the list."));
+    const bool moved = edit("Reorder texture layers", [this, &id, newIndex] {
+        return m_document.moveTextureLayer(id.toStdString(), newIndex);
+    });
+    if (moved) emit textureChanged();
+    return moved;
+}
+
+bool BrushStudioModel::setTextureLayerName(const QString& id, const QString& name) {
+    auto* layer = editableTextureLayer(id);
+    if (!layer) return false;
+    if (name.trimmed().isEmpty()) return fail(tr("A texture layer needs a name."));
+    const bool changed = changeSetting("Rename texture layer", layer->name, name.toStdString());
+    if (changed) emit textureChanged();
+    return changed;
+}
+
+bool BrushStudioModel::setTextureLayerEnabled(const QString& id, bool enabled) {
+    auto* layer = editableTextureLayer(id);
+    const bool changed = layer && changeSetting("Toggle texture layer", layer->enabled, enabled);
+    if (changed) emit textureChanged();
+    return changed;
+}
+
+bool BrushStudioModel::setTextureLayerResource(const QString& id, const QString& resourceId) {
+    auto* layer = editableTextureLayer(id);
+    if (!layer) return false;
+    const auto* resource = m_document.resource(resourceId.toStdString());
+    if (!resource || resource->pixels().empty())
+        return fail(tr("Choose a texture image that is already in this brush."));
+    const bool changed = changeSetting("Texture image", layer->resourceId, resourceId.toStdString());
+    if (changed) emit textureChanged();
+    return changed;
+}
+
+bool BrushStudioModel::setTextureLayerSetting(const QString& id, const QString& key, double value) {
+    auto* layer = editableTextureLayer(id);
+    if (!layer || !std::isfinite(value)) return layer != nullptr;
+    const bool valid =
+        (key == QStringLiteral("strength") && value >= 0.0 && value <= 1.0) ||
+        (key == QStringLiteral("scale") && value >= 0.05 && value <= 20.0) ||
+        (key == QStringLiteral("rotation") && value >= -180.0 && value <= 180.0) ||
+        (key == QStringLiteral("offsetX") && value >= -2.0 && value <= 2.0) ||
+        (key == QStringLiteral("offsetY") && value >= -2.0 && value <= 2.0) ||
+        (key == QStringLiteral("contrast") && value >= 0.0 && value <= 2.0) ||
+        (key == QStringLiteral("variation") && value >= 0.0 && value <= 1.0);
+    if (!valid) return fail(tr("That texture value is outside the supported range."));
+    bool changed = false;
+    if (key == QStringLiteral("strength")) changed = changeSetting("Texture strength", layer->strength, value);
+    else if (key == QStringLiteral("scale")) changed = changeSetting("Texture scale", layer->scale, value);
+    else if (key == QStringLiteral("rotation")) changed = changeSetting("Texture rotation", layer->rotationDegrees, value);
+    else if (key == QStringLiteral("offsetX")) changed = changeSetting("Texture position", layer->offsetX, value);
+    else if (key == QStringLiteral("offsetY")) changed = changeSetting("Texture position", layer->offsetY, value);
+    else if (key == QStringLiteral("contrast")) changed = changeSetting("Texture contrast", layer->contrast, value);
+    else if (key == QStringLiteral("variation")) changed = changeSetting("Texture variation", layer->variation, value);
+    if (changed) emit textureChanged();
+    return changed;
+}
+
+bool BrushStudioModel::setTextureLayerInvert(const QString& id, bool invert) {
+    auto* layer = editableTextureLayer(id);
+    const bool changed = layer && changeSetting("Invert texture", layer->invert, invert);
+    if (changed) emit textureChanged();
+    return changed;
+}
+
+bool BrushStudioModel::setTextureLayerPressure(const QString& id, bool enabled) {
+    auto* layer = editableTextureLayer(id);
+    const bool changed = layer && changeSetting("Pressure grain", layer->pressureStrength, enabled);
+    if (changed) emit textureChanged();
+    return changed;
+}
+
+bool BrushStudioModel::setTextureLayerPlacement(const QString& id, int placement) {
+    auto* layer = editableTextureLayer(id);
+    if (!layer) return false;
+    if (placement < 0 || placement > 2) return fail(tr("That texture placement is not available."));
+    const bool changed = changeSetting("Texture placement", layer->placement,
+                                       static_cast<brush::TexturePlacement>(placement));
+    if (changed) emit textureChanged();
+    return changed;
+}
+
+bool BrushStudioModel::setTextureLayerBlend(const QString& id, int blend) {
+    auto* layer = editableTextureLayer(id);
+    if (!layer) return false;
+    if (blend < int(ComponentBlend::Normal) || blend > int(ComponentBlend::Overlay))
+        return fail(tr("That texture blending mode is not available."));
+    const bool changed = changeSetting("Texture blending", layer->blend,
+                                       static_cast<ComponentBlend>(blend));
+    if (changed) emit textureChanged();
+    return changed;
 }
 
 QString BrushStudioModel::createGroup(const QString& name) {

@@ -9,6 +9,7 @@ Rectangle {
     id: editor
     required property BrushStudioModel draft
     signal importImageRequested()
+    signal textureImportRequested()
     property string modeOverride: ""
     readonly property var selected: draft.selectedComponent
     readonly property string mode: modeOverride || (selected.texture ? "texture" : "tip")
@@ -207,8 +208,16 @@ Rectangle {
                 BrushStudioAssetView {
                     id: asset
                     objectName: "brushStudioAsset"
-                    anchors.fill: parent
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
                     anchors.topMargin: KP.panelHeaderH
+                    // In Texture mode the component image and the independent
+                    // texture stack are both useful. The image keeps its old
+                    // tiled viewer above the stack rather than disappearing.
+                    height: editor.mode === "texture"
+                            ? Math.max(120, (parent.height - KP.panelHeaderH) * 0.34)
+                            : parent.height - KP.panelHeaderH
                     draft: editor.draft
                     tiled: editor.mode === "texture"
                     magnification: editor.magnification
@@ -216,12 +225,23 @@ Rectangle {
                     checkerDark: KP.transparencyDark
                     visible: hasImage && editor.matching && !editor.editingPixels
                 }
+                StudioTextures {
+                    objectName: "brushStudioTexturePanel"
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.top: asset.visible ? asset.bottom : parent.top
+                    anchors.topMargin: asset.visible ? 0 : KP.panelHeaderH
+                    visible: editor.mode === "texture"
+                    draft: editor.draft
+                    onImportRequested: editor.textureImportRequested()
+                }
                 StudioTipEditor {
                     objectName: "brushStudioTipEditor"
                     anchors.fill: parent
                     anchors.topMargin: KP.panelHeaderH
                     draft: editor.draft
-                    visible: editor.editingPixels && editor.matching
+                    visible: editor.editingPixels && editor.matching && editor.mode !== "texture"
                     onImportImageRequested: editor.importImageRequested()
                 }
                 Text {
@@ -245,7 +265,7 @@ Rectangle {
                 }
                 Text {
                     objectName: "brushStudioEditorNotice"
-                    visible: !asset.visible
+                    visible: editor.mode !== "texture" && !asset.visible
                     anchors.centerIn: parent
                     width: Math.max(0, Math.min(336, parent.width - 2 * KP.gapL))
                     text: editor.mode === "nodes" ? qsTr("Node graph editing is unavailable.")

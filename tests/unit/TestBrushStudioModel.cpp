@@ -73,6 +73,8 @@ private slots:
     void failedOverwriteLeavesUnicodeBrushAndDraftIntact();
     void aCorruptFileChangesNothing();
     void unsupportedDataSurvivesOpenAndResave();
+    void textureLayersAreEditableUndoableAndKeepTheirImage();
+    void texturesSurviveSaveAndRemainHonestForRealistic();
 };
 
 void TestBrushStudioModel::newBrushIsPaintable() {
@@ -1194,6 +1196,110 @@ void TestBrushStudioModel::failedOverwriteLeavesUnicodeBrushAndDraftIntact() {
     QVERIFY2(restored.save(path), qPrintable(restored.error()));
     QVERIFY2(model.load(path), qPrintable(model.error()));
     QCOMPARE(model.name(), QStringLiteral("Next draft"));
+}
+
+void TestBrushStudioModel::textureLayersAreEditableUndoableAndKeepTheirImage() {
+    BrushStudioModel model;
+    QCOMPARE(model.textureLayerCount(), 0);
+    QVERIFY(model.selectedTextureLayer().isEmpty());
+    QVERIFY(model.textureEditingSupported());
+
+    QSignalSpy changed(&model, &BrushStudioModel::textureChanged);
+    QVERIFY(model.addBuiltInTexture(QStringLiteral("paper")));
+    QCOMPARE(model.textureLayerCount(), 1);
+    QCOMPARE(changed.count(), 1);
+    const QVariantMap paper = model.selectedTextureLayer();
+    QVERIFY(!paper.value(QStringLiteral("id")).toString().isEmpty());
+    QCOMPARE(paper.value(QStringLiteral("placement")).toInt(), int(brush::TexturePlacement::Tip));
+    QCOMPARE(paper.value(QStringLiteral("blend")).toInt(), int(brush::ComponentBlend::Multiply));
+    const QString paperId = paper.value(QStringLiteral("id")).toString();
+    const QString paperResource = paper.value(QStringLiteral("resourceId")).toString();
+    QVERIFY(!paperResource.isEmpty());
+    QCOMPARE(int(model.textureCandidates().size()), 1);
+
+    // An ordinary slider edit is one undo step and reaches the brush document.
+    QVERIFY(model.setTextureLayerSetting(paperId, QStringLiteral("strength"), 0.4));
+    QCOMPARE(model.document().textureLayers.front().strength, 0.4);
+    QCOMPARE(model.selectedTextureLayer().value(QStringLiteral("strength")).toDouble(), 0.4);
+    model.undo();
+    QCOMPARE(model.document().textureLayers.front().strength, 0.65);
+    model.redo();
+    QCOMPARE(model.document().textureLayers.front().strength, 0.4);
+
+    // Placement and advanced controls are real fields, not decoration.
+    QVERIFY(model.setTextureLayerPlacement(paperId, 2));
+    QCOMPARE(model.document().textureLayers.front().placement, brush::TexturePlacement::Canvas);
+    QVERIFY(model.setTextureLayerSetting(paperId, QStringLiteral("rotation"), -25.0));
+    QVERIFY(model.setTextureLayerSetting(paperId, QStringLiteral("contrast"), 1.3));
+    QVERIFY(model.setTextureLayerInvert(paperId, true));
+    QVERIFY(model.setTextureLayerSetting(paperId, QStringLiteral("variation"), 0.5));
+    QVERIFY(model.setTextureLayerBlend(paperId, int(brush::ComponentBlend::Overlay)));
+    QVERIFY(model.setTextureLayerPressure(paperId, true));
+    QVERIFY(model.selectedTextureLayer().value(QStringLiteral("pressure")).toBool());
+    QCOMPARE(model.document().textureLayers.front().rotationDegrees, -25.0);
+
+    // A second independent layer, reordering, and removal that keeps the image.
+    QVERIFY(model.addBuiltInTexture(QStringLiteral("canvas")));
+    QCOMPARE(model.textureLayerCount(), 2);
+    QVERIFY(model.moveTextureLayer(paperId, 1));
+    QCOMPARE(QString::fromStdString(model.document().textureLayers.back().id), paperId);
+    QVERIFY(model.removeTextureLayer(paperId));
+    QCOMPARE(model.textureLayerCount(), 1);
+    QVERIFY(model.document().resource(paperResource.toStdString()) != nullptr);
+    QVERIFY(model.removeTextureLayer(QString::fromStdString(model.document().textureLayers.front().id)));
+    QVERIFY(!model.document().resources.empty()); // removal never deletes the image
+
+    // Reuse the retained image without importing it again.
+    QVERIFY(model.addTextureLayerFromResource(paperResource));
+    QCOMPARE(model.textureLayerCount(), 1);
+    QCOMPARE(model.document().textureLayers.front().resourceId, paperResource.toStdString());
+
+    // A colour import keeps its RGBA source rather than being flattened to
+    // grey; the engine reads brightness and alpha as coverage.
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QImage colour(4, 4, QImage::Format_RGBA8888);
+    colour.fill(QColor(200, 60, 20, 128));
+    const QString imagePath = dir.filePath(QStringLiteral("colour.png"));
+    QVERIFY(colour.save(imagePath));
+    QVERIFY(model.importTextureLayer(QUrl::fromLocalFile(imagePath)));
+    QCOMPARE(model.textureLayerCount(), 2);
+    const auto imported = model.document().resources.back();
+    QCOMPARE(imported.kind, brush::ResourceKind::Rgba8);
+    QCOMPARE(imported.width, 4);
+    QCOMPARE(imported.height, 4);
+    QCOMPARE(imported.pixels().size(), std::size_t(64));
+}
+
+void TestBrushStudioModel::texturesSurviveSaveAndRemainHonestForRealistic() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("texture.kb"));
+
+    BrushStudioModel model;
+    QVERIFY(model.addBuiltInTexture(QStringLiteral("speckle")));
+    const QString textureId = model.selectedTextureLayer().value(QStringLiteral("id")).toString();
+    QVERIFY(model.setTextureLayerSetting(textureId, QStringLiteral("scale"), 2.0));
+    QVERIFY(model.save(path));
+    QVERIFY(QFileInfo::exists(path));
+
+    BrushStudioModel reopened;
+    QVERIFY(reopened.load(path));
+    QCOMPARE(reopened.textureLayerCount(), 1);
+    QCOMPARE(reopened.selectedTextureLayer().value(QStringLiteral("scale")).toDouble(), 2.0);
+    QCOMPARE(int(reopened.textureCandidates().size()), 1);
+
+    // Realistic does not sample image textures. The layer is still edited and
+    // saved; the model says so instead of pretending it renders.
+    reopened.setEngine(QStringLiteral("realistic"));
+    QCOMPARE(reopened.engine(), QStringLiteral("realistic"));
+    QVERIFY(!reopened.textureEditingSupported());
+    QVERIFY(!reopened.selectedTextureLayer().value(QStringLiteral("renders")).toBool());
+    QVERIFY(reopened.addBuiltInTexture(QStringLiteral("paper")));
+    QVERIFY(reopened.save(path));
+    BrushStudioModel again;
+    QVERIFY(again.load(path));
+    QCOMPARE(again.textureLayerCount(), 2);
 }
 
 void TestBrushStudioModel::unsupportedDataSurvivesOpenAndResave() {

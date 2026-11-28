@@ -70,6 +70,8 @@ public:
         for (const auto& rule : d.randomization) text(rule.parameter);
         buffer(d.exposed);
         for (const auto& prop : d.exposed) { text(prop.parameter); text(prop.label); text(prop.section); }
+        buffer(d.textureLayers);
+        for (const auto& layer : d.textureLayers) { text(layer.id); text(layer.name); text(layer.resourceId); }
         buffer(d.resources);
         for (const auto& r : d.resources) { text(r.id); text(r.name); }
         bag(d.parameters);
@@ -161,6 +163,7 @@ bool BrushStudioModel::editTransaction(const char* label, void* context, bool (*
     clearError();
     if (documentChangedByEdit || m_modified != wasModified) emit documentChanged();
     if (documentChangedByEdit || selectionChangedByEdit) emit componentsChanged();
+    if (documentChangedByEdit || selectionChangedByEdit) emit textureChanged();
     if (selectionChangedByEdit) emit selectionChanged();
     if (documentChangedByEdit) {
         emit exposureChanged();
@@ -187,6 +190,7 @@ void BrushStudioModel::replay(History& source, History& destination) {
     clearError();
     emit documentChanged();
     emit componentsChanged();
+    emit textureChanged();
     emit selectionChanged();
     emit exposureChanged();
     emit historyChanged();

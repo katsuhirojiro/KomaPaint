@@ -1019,7 +1019,8 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
             InputSample initSample{
                 sample.docX, sample.docY, sample.pressure,
                 sample.tiltX, sample.tiltY, sample.rotationRadians,
-                sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation
+                sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation,
+                0.0, sample.capabilities.hasPressure
             };
             m_stabilizer.begin(initSample);
             const material::BrushInput mInput{
@@ -1095,7 +1096,7 @@ bool CanvasViewport::beginStrokeSample(const input::PointerSample& sample, Brush
         sample.docX, sample.docY, sample.pressure,
         sample.tiltX, sample.tiltY, sample.rotationRadians,
         sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation,
-        sample.speedNormalized
+        sample.speedNormalized, sample.capabilities.hasPressure
     };
     m_stabilizer.begin(initSample);
     if (!m_stroke->begin(initSample)) {
@@ -1124,7 +1125,7 @@ void CanvasViewport::continueStrokeSample(const input::PointerSample& sample)
         sample.docX, sample.docY, sample.pressure,
         sample.tiltX, sample.tiltY, sample.rotationRadians,
         sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation,
-        sample.speedNormalized
+        sample.speedNormalized, sample.capabilities.hasPressure
     });
     const double tiltMag = filtered.hasTilt
         ? std::clamp(std::hypot(filtered.tiltX, filtered.tiltY) / 90.0, 0.0, 1.0)
@@ -1163,7 +1164,7 @@ void CanvasViewport::endStrokeSample(const input::PointerSample& sample)
         sample.docX, sample.docY, sample.pressure,
         sample.tiltX, sample.tiltY, sample.rotationRadians,
         sample.tangentialPressure, sample.capabilities.hasTilt, sample.capabilities.hasRotation,
-        sample.speedNormalized
+        sample.speedNormalized, sample.capabilities.hasPressure
     };
     const bool ok = materialStroke
         ? m_materialStroke->end({sample.docX, sample.docY,

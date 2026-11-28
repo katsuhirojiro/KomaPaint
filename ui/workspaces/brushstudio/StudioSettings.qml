@@ -14,9 +14,17 @@ Rectangle {
     readonly property var sections: draft.settingSections
     // Only view order changes between modes. Registry keys, values and scopes
     // still describe the same document, and the entire inspector is scrollable.
-    readonly property var orderedSections: textureMode
-        ? sections.filter(group => group.textureFirst).concat(sections.filter(group => !group.textureFirst))
-        : sections
+    // With a texture stack, the old brush-wide Texture section would be a
+    // second, conflicting set of grain controls. Those stored values still
+    // belong to legacy component masks; hide them here while the stack is used.
+    readonly property var orderedSections: {
+        let list = textureMode
+            ? sections.filter(group => group.textureFirst).concat(sections.filter(group => !group.textureFirst))
+            : sections
+        if (textureMode && draft.textureLayerCount > 0)
+            list = list.filter(group => group.title !== "Texture")
+        return list
+    }
     color: KP.paneBg
 
     onTextureModeChanged: if (settingsView) settingsView.contentY = 0
