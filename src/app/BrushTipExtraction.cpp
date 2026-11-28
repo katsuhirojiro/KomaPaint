@@ -19,7 +19,8 @@ namespace {
 
 const material::MaterialRenderer& materialRenderer()
 {
-    static const material::MaterialEngine engine;
+    static const material::PigmentLibrary pigments;
+    static const material::MaterialEngine engine(pigments);
     static const material::MaterialRenderer renderer(engine);
     return renderer;
 }
@@ -275,10 +276,10 @@ Result extract(const CanvasDocument& document, const Request& request)
                 result.error = QStringLiteral("There is not enough memory to read the chosen artwork.");
                 return result;
             }
-            const std::int64_t startX = std::max(rect.left(), tileBounds->left);
-            const std::int64_t startY = std::max(rect.top(), tileBounds->top);
-            const std::int64_t endX = std::min(rect.right(), tileBounds->left + tileWidth);
-            const std::int64_t endY = std::min(rect.bottom(), tileBounds->top + tileHeight);
+            const std::int64_t startX = std::max<std::int64_t>(rect.left(), tileBounds->left);
+            const std::int64_t startY = std::max<std::int64_t>(rect.top(), tileBounds->top);
+            const std::int64_t endX = std::min<std::int64_t>(rect.right(), tileBounds->left + tileWidth);
+            const std::int64_t endY = std::min<std::int64_t>(rect.bottom(), tileBounds->top + tileHeight);
             for (std::int64_t y = startY; y < endY; ++y) {
                 for (std::int64_t x = startX; x < endX; ++x) {
                     const auto localX = x - tileBounds->left;
