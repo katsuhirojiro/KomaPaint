@@ -985,6 +985,28 @@ void TestBrushUi::createBrushTipFromSelectionWorkflow()
     QTRY_COMPARE(draft->componentCount(), 2);
     QVERIFY(draft->tipComponents().size() >= 2);
     QVERIFY(draft->document().validate().ok());
+
+    // Save and install the brush made from the selection, then paint with the
+    // installed definition on the illustration. This is the production
+    // Digital engine, not a Studio-only preview.
+    QTemporaryDir files;
+    QVERIFY(files.isValid());
+    auto* library = app.workspace.subTools();
+    QVERIFY(library->initializePersistence(files.filePath(QStringLiteral("library.json"))));
+    const QString brushFile = files.filePath(QStringLiteral("selection-tip.kb"));
+    QVariant saved;
+    QVERIFY(QMetaObject::invokeMethod(studio, "saveDraftToLibrary", Q_RETURN_ARG(QVariant, saved),
+                                      Q_ARG(QVariant, QVariant::fromValue(QUrl::fromLocalFile(brushFile)))));
+    QVERIFY(saved.toBool());
+    QCOMPARE(studio->property("saveOutcome").toString(), QStringLiteral("savedInstalled"));
+    QVERIFY(QFile::exists(brushFile));
+    QVERIFY(!library->currentBrushId().isEmpty());
+    studio->close();
+    QTRY_VERIFY(!studio->isVisible());
+
+    drag(app, {onCanvas(app, 100, 100), onCanvas(app, 160, 100)});
+    QVERIFY2(alpha(app, 130, 100) > 0,
+             "the brush made from selected artwork did not paint on the illustration");
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(u'\n')));
 }
 
