@@ -214,6 +214,7 @@ randomization run per stamp through `BrushEvaluator`.
 | Component stack: add, select, reorder, rename, hide, remove, blend, masks, image import | yes |
 | Tip / Texture source view and pixel tip editing | yes, shared immutable resources |
 | Create Brush Tip from Selection (current layer, selected layers, merged visible) | yes, from the real layers and selection mask |
+| Multiple layers for a tip | yes; Control/Command-click toggles rows in the Layers panel (Shift range is not implemented) |
 | Tip crop, rotate, flip, invert, contrast, fade, grayscale, outline, resize, reset | yes, each one undoable and non-destructive |
 | Add / replace a tip from selected Illustration artwork | yes, in the previous draft or a new brush |
 | Previous unsaved draft kept when starting a new brush | yes, restorable from the Studio banner |
