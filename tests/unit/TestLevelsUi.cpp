@@ -86,6 +86,12 @@ void TestLevelsUi::menuOpensDialogAndApplyCreatesUndo()
     auto* dialog = root->findChild<QObject*>(QStringLiteral("levelsDialog"));
     QVERIFY(dialog);
     QTRY_VERIFY(dialog->property("visible").toBool());
+    QVERIFY(dialog->property("width").toReal() > 300);
+    QVERIFY(dialog->property("height").toReal() > 300);
+    auto* histogram = qobject_cast<QQuickItem*>(root->findChild<QObject*>(QStringLiteral("levelsHistogram")));
+    auto* blackPoint = qobject_cast<QQuickItem*>(root->findChild<QObject*>(QStringLiteral("levelsBlackPoint")));
+    QVERIFY(histogram && histogram->width() > 0 && histogram->height() > 0);
+    QVERIFY(blackPoint && blackPoint->width() > 0);
     auto* levels = workspace.levels();
     QVERIFY(levels && levels->isActive());
 
