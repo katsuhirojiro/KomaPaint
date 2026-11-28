@@ -21,6 +21,7 @@ const std::vector<ShortcutManager::ActionEntry>& defaultActionTable()
         { QStringLiteral("edit.undo"),       QStringLiteral("Undo"),                   QStringLiteral("Edit"),   QStringLiteral("Ctrl+Z"),       QStringLiteral("Ctrl+Z") },
         { QStringLiteral("edit.redo"),       QStringLiteral("Redo"),                   QStringLiteral("Edit"),   QStringLiteral("Ctrl+Y"),       QStringLiteral("Ctrl+Y") },
         { QStringLiteral("edit.redoAlt"),    QStringLiteral("Redo (Alternate)"),       QStringLiteral("Edit"),   QStringLiteral("Ctrl+Shift+Z"), QStringLiteral("Ctrl+Shift+Z") },
+        { QStringLiteral("edit.levels"),     QStringLiteral("Levels"),                 QStringLiteral("Edit"),   QStringLiteral("Ctrl+L"),       QStringLiteral("Ctrl+L") },
         // Select
         { QStringLiteral("select.all"),      QStringLiteral("Select All"),             QStringLiteral("Select"), QStringLiteral("Ctrl+A"),       QStringLiteral("Ctrl+A") },
         { QStringLiteral("select.deselect"), QStringLiteral("Deselect"),               QStringLiteral("Select"), QStringLiteral("Ctrl+D"),       QStringLiteral("Ctrl+D") },

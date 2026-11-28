@@ -56,6 +56,12 @@ ApplicationWindow {
     property bool pendingBrushTipAdd: true
     property string pendingBrushTipReplace: ""
     property bool pendingBrushTipColour: false
+    // A Levels session opened from Create Brush Tip targets the extracted
+    // image, not the document. The result is carried back as a PNG so the
+    // tip dialog can create exactly the artwork the artist previewed.
+    property string pendingTipPng: ""
+    property string pendingTipKey: ""
+    property bool tipLevelsActive: false
 
     function openCreateBrushTip() {
         if (!Workspace.document) return
@@ -65,7 +71,54 @@ ApplicationWindow {
         brushTipDialog.previousRealistic = !!studio && studio.draftEngine === "realistic"
         brushTipDialog.previousTips = studio ? studio.tipChoices : []
         brushTipDialog.error = ""
+        brushTipDialog.levelsStatus = ""
+        pendingTipPng = ""
+        pendingTipKey = ""
+        tipLevelsActive = false
         brushTipDialog.open()
+    }
+
+    function tipChoicesKey() {
+        return brushTipDialog.selectedSource + "|"
+             + (brushTipDialog.useSelection ? "1" : "0") + "|"
+             + brushTipDialog.selectedCoverage
+    }
+
+    function openLevels() {
+        tipLevelsActive = false
+        if (!Workspace.beginLevels()) {
+            // The dialog still opens so its error explains what is missing;
+            // Apply stays disabled while the controller has no target.
+            levelsDialog.openForCurrentTarget()
+            return
+        }
+        levelsDialog.openForCurrentTarget()
+    }
+
+    function openTipLevels() {
+        const data = Workspace.createBrushTipSource(brushTipDialog.selectedSource,
+                                                    brushTipDialog.useSelection,
+                                                    brushTipDialog.selectedCoverage)
+        if (!data.ok) {
+            brushTipDialog.error = data.error
+            return
+        }
+        if (!Workspace.levels.beginImageBase64(data.png, data.name)) {
+            brushTipDialog.error = Workspace.levels.error
+            return
+        }
+        pendingTipPng = ""
+        pendingTipKey = tipChoicesKey()
+        tipLevelsActive = true
+        levelsDialog.openForCurrentTarget()
+    }
+
+    function levelsApplied() {
+        if (tipLevelsActive && Workspace.levels.resultPngBase64().length > 0) {
+            pendingTipPng = Workspace.levels.resultPngBase64()
+            brushTipDialog.levelsStatus = qsTr("Levels applied to the extracted tip artwork.")
+        }
+        tipLevelsActive = false
     }
 
     function createBrushTipFromDialog(continuePrevious) {
@@ -75,6 +128,16 @@ ApplicationWindow {
         if (!data.ok) {
             brushTipDialog.error = data.error
             return
+        }
+        // Use the Levels-adjusted copy only when the artist has not changed
+        // which artwork or coverage the tip is made from since Levels opened.
+        if (pendingTipPng.length > 0 && pendingTipKey === tipChoicesKey()) {
+            data.png = pendingTipPng
+        } else if (pendingTipPng.length > 0) {
+            // The artwork source or coverage changed since Levels was applied;
+            // the old adjusted copy no longer describes this tip.
+            pendingTipPng = ""
+            brushTipDialog.levelsStatus = ""
         }
         const colourTip = brushTipDialog.selectedCoverage === "colour"
         const addAsNew = brushTipDialog.addTipAsNew
@@ -265,6 +328,7 @@ ApplicationWindow {
     Shortcut { sequence: root.shortcutSeq("edit.undo"); enabled: root.shortcutsEnabled && Workspace.history && Workspace.history.canUndo; onActivated: Workspace.history.undo() }
     Shortcut { sequence: root.shortcutSeq("edit.redo"); enabled: root.shortcutsEnabled && Workspace.history && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
     Shortcut { sequence: root.shortcutSeq("edit.redoAlt"); enabled: root.shortcutsEnabled && Workspace.history && Workspace.history.canRedo; onActivated: Workspace.history.redo() }
+    Shortcut { sequence: root.shortcutSeq("edit.levels"); enabled: root.shortcutsEnabled && Workspace.document !== null; onActivated: root.openLevels() }
     Shortcut { sequence: root.shortcutSeq("file.new"); enabled: root.shortcutsEnabled; onActivated: root.requestNewDocument() }
     Shortcut { sequence: root.shortcutSeq("file.open"); enabled: root.shortcutsEnabled; onActivated: root.requestOpenImage() }
     Shortcut { sequence: root.shortcutSeq("file.save"); enabled: root.shortcutsEnabled && Workspace.document; onActivated: root.saveImage() }
@@ -636,6 +700,22 @@ ApplicationWindow {
                     text: qsTr("Clear Artwork History...")
                     enabled: Workspace.history !== null && (Workspace.history.canUndo || Workspace.history.canRedo)
                     onTriggered: clearHistoryDialog.open()
+                }
+                KpMenuSeparator {
+                }
+                KpMenu {
+                    objectName: "adjustmentsMenu"
+                    title: qsTr("Adjustments")
+                    enabled: Workspace.document !== null
+                    KpMenuItem {
+                        objectName: "adjustmentsLevelsMenuItem"
+                        text: qsTr("Levels...") + root.menuShortcutSuffix("edit.levels")
+                        explanation: qsTr("Adjust black point, white point, midtones and output range. Applies to the active layer or the selected area.")
+                        enabled: Workspace.document !== null
+                                 && Workspace.layers.activeLayerIndex >= 0
+                                 && Workspace.layers.layerAt(Workspace.layers.activeLayerIndex) !== null
+                        onTriggered: root.openLevels()
+                    }
                 }
                 KpMenuSeparator {
                 }
@@ -1409,6 +1489,11 @@ ApplicationWindow {
     CreateBrushTipDialog {
         id: brushTipDialog
         onCreateRequested: function(continuePrevious) { root.createBrushTipFromDialog(continuePrevious) }
+        onLevelsRequested: root.openTipLevels()
+    }
+    LevelsDialog {
+        id: levelsDialog
+        onAppliedToTarget: root.levelsApplied()
     }
     NewProjectDialog {
         id: newProjectDialog

@@ -20,7 +20,9 @@ KpDialog {
     property bool previousRealistic: false
     property var previousTips: []
     property string error: ""
+    property string levelsStatus: ""
     signal createRequested(bool continuePrevious)
+    signal levelsRequested()
 
     readonly property bool hasSelection: !!info.hasSelection
     readonly property bool canCreate: hasSelection || wholeLayer.checked
@@ -51,6 +53,7 @@ KpDialog {
 
     function resetChoices() {
         error = ""
+        levelsStatus = ""
         sourceModel = sourceRows()
         sourceChoice.currentIndex = 0
         coverageChoice.currentIndex = 0
@@ -110,7 +113,10 @@ KpDialog {
                 text: qsTr("Use the current layer's whole contents")
                 Accessible.name: text
                 Accessible.description: qsTr("Uses all drawn pixels on the active layer. Empty margins are trimmed so the tip is not mostly transparency.")
-                onToggled: dialog.error = ""
+                onToggled: {
+                    dialog.error = ""
+                    dialog.levelsStatus = ""
+                }
             }
 
             Text {
@@ -132,7 +138,10 @@ KpDialog {
                 ToolTip.text: Accessible.description
                 ToolTip.visible: hovered || activeFocus
                 ToolTip.delay: 500
-                onActivated: dialog.error = ""
+                onActivated: {
+                    dialog.error = ""
+                    dialog.levelsStatus = ""
+                }
             }
             Text {
                 Layout.fillWidth: true
@@ -168,6 +177,34 @@ KpDialog {
                 ToolTip.text: Accessible.description
                 ToolTip.visible: hovered || activeFocus
                 ToolTip.delay: 500
+                onActivated: {
+                    dialog.error = ""
+                    dialog.levelsStatus = ""
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: KP.gapS
+                KpButton {
+                    objectName: "brushTipLevelsButton"
+                    label: qsTr("Adjust Levels…")
+                    variant: "ghost"
+                    enabled: dialog.canCreate && dialog.selectedCoverage === "colour"
+                    onClicked: dialog.levelsRequested()
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: dialog.selectedCoverage === "colour"
+                          ? (dialog.levelsStatus.length > 0
+                             ? dialog.levelsStatus
+                             : qsTr("Adjust the extracted artwork's tones before it becomes a tip."))
+                          : qsTr("Levels applies to Full colour tips. Transparency and Darkness tips contain no colour to adjust.")
+                    color: dialog.levelsStatus.length > 0 ? KP.textMuted : KP.textSubtle
+                    font.family: KP.fontUi
+                    font.pixelSize: KP.fontXS
+                    wrapMode: Text.WordWrap
+                }
             }
 
             CheckBox {
@@ -184,6 +221,7 @@ KpDialog {
                 onToggled: {
                     targetRow.visible = dialog.previousUsable && !checked && dialog.previousTips.length > 0
                     dialog.error = ""
+                    dialog.levelsStatus = ""
                 }
             }
             RowLayout {

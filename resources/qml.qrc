@@ -21,6 +21,7 @@
         <file alias="components/StatusBar.qml">../ui/components/StatusBar.qml</file>
         <file alias="components/NewProjectDialog.qml">../ui/components/NewProjectDialog.qml</file>
         <file alias="components/CreateBrushTipDialog.qml">../ui/components/CreateBrushTipDialog.qml</file>
+        <file alias="components/LevelsDialog.qml">../ui/components/LevelsDialog.qml</file>
         <file alias="panels/LayersPanel.qml">../ui/panels/LayersPanel.qml</file>
         <file alias="panels/PropertiesPanel.qml">../ui/panels/PropertiesPanel.qml</file>
         <file alias="panels/ColorPanel.qml">../ui/panels/ColorPanel.qml</file>
