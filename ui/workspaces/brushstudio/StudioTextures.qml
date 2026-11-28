@@ -111,7 +111,7 @@ Item {
                     .arg(modelData.placementLabel).arg(modelData.blendLabel)
                     .arg(Math.round(modelData.strength * 100))
                 ToolTip.text: Accessible.description
-                ToolTip.visible: hovered || activeFocus
+                ToolTip.visible: hovered || activeFocus || pressed
                 ToolTip.delay: 500
                 onClicked: draft.selectTextureLayer(modelData.id)
                 background: Rectangle {
@@ -255,7 +255,7 @@ Item {
                         Accessible.name: qsTr("Texture image")
                         Accessible.description: qsTr("Choose an image already in this brush, or import a new one.")
                         ToolTip.text: Accessible.description
-                        ToolTip.visible: hovered || activeFocus
+                        ToolTip.visible: hovered || activeFocus || down
                         ToolTip.delay: 500
                         currentIndex: {
                             const at = model.findIndex(entry => entry.id === root.selected.resourceId)
@@ -485,7 +485,7 @@ Item {
                         Accessible.name: qsTr("Texture grain blending")
                         Accessible.description: qsTr("Choose which parts of the texture break the paint. Dark grain is the usual paper-tooth choice.")
                         ToolTip.text: Accessible.description
-                        ToolTip.visible: hovered || activeFocus
+                        ToolTip.visible: hovered || activeFocus || down
                         ToolTip.delay: 500
                         currentIndex: {
                             const at = model.findIndex(entry => entry.value === root.selected.blend)
