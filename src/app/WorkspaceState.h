@@ -8,6 +8,7 @@
 #include "../input/TabletInputSettings.h"
 #include "../layers/LayerModel.h"
 #include "DocumentRecovery.h"
+#include "LevelsController.h"
 #include "PaintMixerController.h"
 #include "PerformanceSettings.h"
 #include "ProjectCreationService.h"
@@ -63,6 +64,7 @@ class WorkspaceState : public QObject
     Q_PROPERTY(ColorPalette*   colors    READ colors    CONSTANT)
     Q_PROPERTY(PaintMixerController* mixer READ mixer   CONSTANT)
     Q_PROPERTY(UndoStack*      history   READ history   NOTIFY documentChanged)
+    Q_PROPERTY(LevelsController* levels  READ levels    CONSTANT)
     Q_PROPERTY(QVariantList projectTabs READ projectTabs NOTIFY tabsChanged)
     Q_PROPERTY(int activeTab READ activeTab NOTIFY tabsChanged)
     Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryAvailableChanged)
@@ -94,6 +96,7 @@ public:
     ColorPalette*   colors()   const { return m_colors; }
     PaintMixerController* mixer() const { return m_mixer; }
     UndoStack*      history()  const { return m_history; }
+    LevelsController* levels() const { return m_levels; }
 
     QString activeTool() const { return m_activeTool; }
     QString defaultTool() const { return m_defaultTool; }
@@ -123,6 +126,11 @@ public:
     // image type. The document, selection and brush library are never changed.
     Q_INVOKABLE QVariantMap createBrushTipSource(const QString& source, bool useSelection,
                                                  const QString& coverage) const;
+    // ---- Colour adjustments ---------------------------------------------
+    // Opens Levels on the active layer, clipped to the selection when one
+    // exists. Returns false with Workspace.levels.error explaining why, so the
+    // dialog can still open and show the reason instead of failing silently.
+    Q_INVOKABLE bool beginLevels();
     QString currentFile() const { return m_currentFile; }
     QVariantList projectTabs() const;
     int activeTab() const { return m_activeTab; }
@@ -335,6 +343,7 @@ private:
     ColorPalette*   m_colors = nullptr;
     PaintMixerController* m_mixer = nullptr;
     UndoStack*      m_history = nullptr;
+    LevelsController* m_levels = nullptr;
     ProjectCreationService* m_creationService;
     QString         m_activeTool = QStringLiteral("brush");
     QString         m_defaultTool = QStringLiteral("brush");

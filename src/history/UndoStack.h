@@ -26,7 +26,10 @@ public:
     QString undoText() const;
     QString redoText() const;
     qulonglong memoryBytes() const { return m_bytes + m_currentBytes; }
-    bool beginStroke(Layer* layer);
+    // label is shown by undoText/redoText; empty keeps the historical
+    // "Brush stroke" wording. Pixel edits (adjustments) use the same
+    // tile-snapshot transaction as a stroke.
+    bool beginStroke(Layer* layer, const QString& label = {});
     bool beginMaterialStroke(Layer* layer);
     bool commitStroke();
     bool cancelStroke();
@@ -54,6 +57,7 @@ private:
         std::vector<material::MaterialTileSnapshot> materialBefore, materialAfter;
         std::vector<std::size_t> materialBeforeCharges;
         bool materialStroke = false;
+        QString label;
         std::vector<CompactTile> compact;
         std::size_t bytes = 0;
         std::shared_ptr<DocumentMemoryBudget> budget;

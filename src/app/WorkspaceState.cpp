@@ -1,4 +1,5 @@
 #include "WorkspaceState.h"
+#include "LevelsController.h"
 
 #include <QColor>
 #include <algorithm>
@@ -183,6 +184,7 @@ WorkspaceState::WorkspaceState(QObject* parent) : QObject(parent)
     // detached empty layer model only keeps existing panel bindings safe.
     m_document = nullptr;
     m_history = nullptr;
+    m_levels = new LevelsController(this);
 }
 
 void WorkspaceState::bindInputSettings(Settings* settings)
@@ -1322,6 +1324,15 @@ void WorkspaceState::clearDiagnosticLog()
 {
     QFile file(diagnosticLogPath());
     if (file.exists()) file.remove();
+}
+
+bool WorkspaceState::beginLevels()
+{
+    if (!m_document || !m_history) {
+        return m_levels->beginDocument(nullptr, nullptr, nullptr);
+    }
+    Layer* layer = m_document->layers()->layerAt(m_document->layers()->activeLayerIndex());
+    return m_levels->beginDocument(m_document, layer, m_history);
 }
 
 QVariantMap WorkspaceState::brushTipSourceInfo() const

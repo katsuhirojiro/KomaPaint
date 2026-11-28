@@ -1,4 +1,6 @@
 #include "KomaPaintApp.h"
+#include "LevelsController.h"
+#include "LevelsPreviewItem.h"
 #include "BrushStudioAssetView.h"
 #include "BrushStudioModel.h"
 #include "BrushStudioPad.h"
@@ -78,6 +80,9 @@ void KomaPaintApp::registerTypes()
     qmlRegisterType<BrushStudioAssetView>("KomaPaint", 1, 0, "BrushStudioAssetView");
     qmlRegisterType<BrushStudioModel>("KomaPaint", 1, 0, "BrushStudioModel");
     qmlRegisterType<BrushStudioPad>("KomaPaint", 1, 0, "BrushStudioPad");
+    qmlRegisterUncreatableType<LevelsController>("KomaPaint", 1, 0, "LevelsController",
+        QStringLiteral("LevelsController is owned by WorkspaceState."));
+    qmlRegisterType<LevelsPreviewItem>("KomaPaint", 1, 0, "LevelsPreview");
 }
 
 void KomaPaintApp::loadStyles() {}

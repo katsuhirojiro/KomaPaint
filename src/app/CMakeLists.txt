@@ -26,6 +26,10 @@ add_library(komapaint_app STATIC
     FileAssociation.cpp
     FileAssociation.h
     KomaPaintApp.cpp
+    LevelsController.cpp
+    LevelsController.h
+    LevelsPreviewItem.cpp
+    LevelsPreviewItem.h
     KomaPaintApp.h
     MixerSurfaceItem.cpp
     MixerSurfaceItem.h
@@ -73,6 +77,7 @@ target_link_libraries(komapaint_app PUBLIC
     komapaint::animation
     komapaint::color
     komapaint::history
+    komapaint::adjustments
     komapaint::files
     Qt6::Core
     Qt6::Gui

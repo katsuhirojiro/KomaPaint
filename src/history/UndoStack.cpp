@@ -35,15 +35,21 @@ UndoStack::~UndoStack() {
 }
 QString UndoStack::undoText() const
 {
-    return canUndo() ? (m_commands[m_cursor - 1]->materialStroke ? QStringLiteral("Material stroke")
-                                                                : QStringLiteral("Brush stroke")) : QString();
+    if (!canUndo()) return {};
+    const auto& command = m_commands[m_cursor - 1];
+    if (!command->label.isEmpty()) return command->label;
+    return command->materialStroke ? QStringLiteral("Material stroke")
+                                   : QStringLiteral("Brush stroke");
 }
 QString UndoStack::redoText() const
 {
-    return canRedo() ? (m_commands[m_cursor]->materialStroke ? QStringLiteral("Material stroke")
-                                                             : QStringLiteral("Brush stroke")) : QString();
+    if (!canRedo()) return {};
+    const auto& command = m_commands[m_cursor];
+    if (!command->label.isEmpty()) return command->label;
+    return command->materialStroke ? QStringLiteral("Material stroke")
+                                   : QStringLiteral("Brush stroke");
 }
-bool UndoStack::beginStroke(Layer* layer)
+bool UndoStack::beginStroke(Layer* layer, const QString& label)
 {
     if (!layer || m_current || m_replaying) return false;
     try {
@@ -69,6 +75,7 @@ bool UndoStack::beginStroke(Layer* layer)
         } // commit must not allocate
         m_current = std::make_unique<StrokeCommand>();
         m_current->layer = layer;
+        m_current->label = label;
         m_current->budget = layer->tiles().documentBudget();
         if (!layer->tiles().beginRecordedStroke()) { m_current.reset(); return false; }
         layer->tiles().setBeforeChange(&UndoStack::capture, this);
