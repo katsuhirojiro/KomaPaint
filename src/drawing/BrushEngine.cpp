@@ -420,7 +420,8 @@ SparseTileStore::WriteResult BrushRasterizer::dab(SparseTileStore& store, const 
             resolved.placement = gate.placement;
             resolved.blend = gate.blend;
             const double angle = gate.rotationRadians +
-                (gate.placement == brush::TexturePlacement::Stroke ? strokeAngle : 0.0);
+                (gate.placement == brush::TexturePlacement::Stroke ? strokeAngle
+                 : gate.placement == brush::TexturePlacement::Tip ? totalAngle : 0.0);
             resolved.cosR = std::cos(-angle);
             resolved.sinR = std::sin(-angle);
             if (gate.variation > 0.0) {
