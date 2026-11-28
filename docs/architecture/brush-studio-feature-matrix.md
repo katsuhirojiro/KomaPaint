@@ -213,12 +213,32 @@ randomization run per stamp through `BrushEvaluator`.
 | Disabled controls with plain-language reason | yes, including unsupported stored values |
 | Component stack: add, select, reorder, rename, hide, remove, blend, masks, image import | yes |
 | Tip / Texture source view and pixel tip editing | yes, shared immutable resources |
+| Create Brush Tip from Selection (current layer, selected layers, merged visible) | yes, from the real layers and selection mask |
+| Tip crop, rotate, flip, invert, contrast, fade, grayscale, outline, resize, reset | yes, each one undoable and non-destructive |
+| Add / replace a tip from selected Illustration artwork | yes, in the previous draft or a new brush |
+| Previous unsaved draft kept when starting a new brush | yes, restorable from the Studio banner |
 | Creator exposure page | add, rename, remove, reorder, restore; does not change values |
 | Private production preview pad | Digital and Realistic, Clear, Undo stroke |
 | Save only / Save and install / Export | yes, with five explicit outcomes |
 | Native sub-tool overrides and reset | yes; original `.kb` and library snapshot stay immutable |
 | Compact layout at the 540×400 minimum | yes |
-| GUI automation coverage | `test_brush_ui`, `test_brush_studio_model`, `test_native_brush_controls` |
+| GUI automation coverage | `test_brush_ui`, `test_brush_studio_model`, `test_native_brush_controls`, `test_brush_tip_extraction` |
+
+## Create Brush Tip from Selection — truthfulness
+
+| Source | Offered when | What it reads |
+| --- | --- | --- |
+| Current layer | the active layer has pixels | that layer only |
+| Selected layers | more than one layer is selected and has pixels | those rows |
+| Merged visible | any visible layer has pixels | the same compositor the canvas uses |
+
+Full colour is stored as an `Image` component. Transparency outline and
+darkness are stored as a `Tip` component. The source illustration, layer
+visibility, blend modes and selection are never changed.
+
+Realistic brushes use physical/procedural tips; a bitmap tip is retained and not
+painted by Realistic. The dialog therefore does not continue a Realistic draft
+with a bitmap tip.
 
 ## Deliberately unsupported
 
