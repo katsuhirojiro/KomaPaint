@@ -129,6 +129,9 @@ add_test(NAME test_adjustments COMMAND test_adjustments)
 # The controller is the only path from QML to document pixels and undo.
 komapaint_add_test(test_levels_controller TestLevelsController.cpp)
 target_link_libraries(test_levels_controller PRIVATE komapaint::app)
+komapaint_add_test(test_levels_ui TestLevelsUi.cpp)
+target_sources(test_levels_ui PRIVATE ${CMAKE_SOURCE_DIR}/resources/qml.qrc)
+target_link_libraries(test_levels_ui PRIVATE komapaint::app Qt6::Widgets Qt6::Quick)
 
 # Brush model and the .kb container are pure C++ (no Qt): the same test
 # binaries run in CI and on a machine with only a compiler.
