@@ -118,6 +118,18 @@ set_target_properties(test_digital_capabilities PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
 add_test(NAME test_digital_capabilities COMMAND test_digital_capabilities)
 
+# Colour adjustment maths is pure C++: the same LUT and histogram code runs in
+# the document controller and in brush-tip creation.
+add_executable(test_adjustments TestAdjustments.cpp)
+target_link_libraries(test_adjustments PRIVATE komapaint::adjustments)
+set_target_properties(test_adjustments PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${KOMAPAINT_TEST_OUTPUT_DIR}")
+add_test(NAME test_adjustments COMMAND test_adjustments)
+
+# The controller is the only path from QML to document pixels and undo.
+komapaint_add_test(test_levels_controller TestLevelsController.cpp)
+target_link_libraries(test_levels_controller PRIVATE komapaint::app)
+
 # Brush model and the .kb container are pure C++ (no Qt): the same test
 # binaries run in CI and on a machine with only a compiler.
 foreach(brush_test IN ITEMS brush_parameters brush_model brush_format brush_evaluator)
