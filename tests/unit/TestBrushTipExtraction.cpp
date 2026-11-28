@@ -43,6 +43,7 @@ private slots:
     void currentLayerWithoutSelectionTrimsTransparency();
     void lassoSelectionRespectsItsBoundary();
     void rectangleSelectionIsSelectableWithoutLosingColour();
+    void ellipseSelectionKeepsItsRoundBoundary();
     void selectedLayersComposeOnlyTheirArtwork();
     void mergedVisibleHonoursHiddenLayers();
     void alphaAndLuminanceProduceCoverageTips();
@@ -109,6 +110,22 @@ void TestBrushTipExtraction::rectangleSelectionIsSelectableWithoutLosingColour()
     QCOMPARE(qGreen(pixel(result.image, 2, 2)), 0x22);
     QCOMPARE(qBlue(pixel(result.image, 2, 2)), 0x33);
     QCOMPARE(qAlpha(pixel(result.image, 2, 2)), 255);
+    QCOMPARE(qAlpha(pixel(result.image, 0, 0)), 0);
+}
+
+void TestBrushTipExtraction::ellipseSelectionKeepsItsRoundBoundary()
+{
+    CanvasDocument document;
+    document.setSize({64, 64});
+    put(document, 0, 5, 5, 0xFF44AA22);
+    document.selection().applyShape(region::SelectionShape::Ellipse, 2, 2, 8, 8,
+                                    false, 0, region::SelectionOp::Replace);
+    brushtip::Request request;
+    request.useSelection = true;
+    const auto result = brushtip::extract(document, request);
+    QVERIFY2(result.ok(), qPrintable(result.error));
+    QCOMPARE(result.sourceRect, QRect(2, 2, 6, 6));
+    QCOMPARE(qAlpha(pixel(result.image, 3, 3)), 255);
     QCOMPARE(qAlpha(pixel(result.image, 0, 0)), 0);
 }
 
