@@ -6,6 +6,7 @@ StatusBar 1.0 StatusBar.qml
 NewProjectDialog 1.0 NewProjectDialog.qml
 CreateBrushTipDialog 1.0 CreateBrushTipDialog.qml
 LevelsDialog 1.0 LevelsDialog.qml
+LevelsPreviewPane 1.0 LevelsPreviewPane.qml
 KpIcon 1.0 KpIcon.qml
 IconButton 1.0 IconButton.qml
 ColorWheel 1.0 ColorWheel.qml

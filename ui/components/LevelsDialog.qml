@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import KomaPaint 1.0
 import "../themes"
 
 // Levels: the first colour adjustment and the reusable frame for later ones.
@@ -147,11 +146,19 @@ KpDialog {
                     visible: dialog.imageTarget
                     clip: true
 
-                    LevelsPreview {
-                        objectName: "levelsImagePreview"
+                    // Kept in its own file and loaded only for the brush-tip
+                    // target. Document Levels previews on the canvas, so the
+                    // ordinary Edit > Adjustments path never needs this type.
+                    Loader {
+                        id: imagePreviewLoader
+                        objectName: "levelsImagePreviewLoader"
                         anchors.fill: parent
-                        controller: dialog.controller
-                        borderColor: KP.border
+                        active: dialog.imageTarget
+                        source: active ? "LevelsPreviewPane.qml" : ""
+                        onLoaded: {
+                            item.controller = dialog.controller
+                            item.borderColor = KP.border
+                        }
                     }
                 }
 
