@@ -943,7 +943,8 @@ void TestBrushUi::createBrushTipFromSelectionWorkflow()
     QTRY_VERIFY(dialog && dialog->property("opened").toBool());
     QVERIFY(item(app, QStringLiteral("brushTipSourceChoice")));
     QVERIFY(item(app, QStringLiteral("brushTipCoverageChoice")));
-    QVERIFY(item(app, QStringLiteral("brushTipContinueButton")) == nullptr); // no previous draft yet
+    auto* noPrevious = item(app, QStringLiteral("brushTipContinueButton"));
+    QVERIFY(noPrevious && !noPrevious->isVisible()); // no genuine previous draft yet
 
     // Cancel is a real no-op: nothing is loaded and the selection stays.
     QVERIFY(clickNamed(app, QStringLiteral("brushTipCancelButton")));

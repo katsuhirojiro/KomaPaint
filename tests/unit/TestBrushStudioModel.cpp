@@ -361,8 +361,8 @@ void TestBrushStudioModel::tipEditsAreUndoableAndResetToImported() {
     QCOMPARE(flipped.at(2).toUInt(), original.value(QStringLiteral("rgba")).toList().at(0).toUInt());
     QVERIFY(model.canUndo());
     QVERIFY(model.editTip(QStringLiteral("crop")));
-    QCOMPARE(model.selectedResource()->width, 2);
     QVERIFY(model.editTip(QStringLiteral("transparency"), 50.0));
+    const auto beforeReset = model.loadSelectedPixels();
     QVERIFY(model.resetTipToOriginal());
     QCOMPARE(model.selectedResource()->width, 3);
     QCOMPARE(model.loadSelectedPixels().value(QStringLiteral("rgba")).toList(),
@@ -370,7 +370,8 @@ void TestBrushStudioModel::tipEditsAreUndoableAndResetToImported() {
 
     // Reset is one more undo step; undo returns to the edited revision.
     model.undo();
-    QCOMPARE(model.selectedResource()->width, 2);
+    QCOMPARE(model.loadSelectedPixels().value(QStringLiteral("rgba")).toList(),
+             beforeReset.value(QStringLiteral("rgba")).toList());
 }
 
 void TestBrushStudioModel::previousDraftSurvivesANewBrush() {

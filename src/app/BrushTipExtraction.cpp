@@ -259,7 +259,11 @@ Result extract(const CanvasDocument& document, const Request& request)
     image.fill(Qt::transparent);
 
     TileGeometry geometry(document.width(), document.height());
-    const auto range = geometry.tilesForRect({rect.left(), rect.top(), rect.right(), rect.bottom()});
+    // QRect::right()/bottom() are inclusive; TileGeometry uses exclusive
+    // edges. Using right() directly made a one-pixel tip look empty.
+    const auto range = geometry.tilesForRect({rect.left(), rect.top(),
+                                              rect.left() + rect.width(),
+                                              rect.top() + rect.height()});
     if (!range) {
         result.error = QStringLiteral("That area is not on the canvas.");
         return result;
