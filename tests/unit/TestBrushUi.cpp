@@ -461,6 +461,7 @@ private slots:
     void brushStudioWindowIsIndependentAndReusable();
     void brushStudioCommandsAndCompactLayout();
     void nativeBrushStudioPadToArtwork();
+    void createBrushTipFromSelectionWorkflow();
     void brushStudioReportsSaveAndInstallOutcomes();
     void artistVerificationSevenBrushes();
     void brushStudioComponentsAndReadOnlyEditor();
@@ -919,6 +920,70 @@ void TestBrushUi::nativeBrushStudioPadToArtwork()
     WorkspaceState reopened;
     QVERIFY(reopened.openFromPath(koma));
     QCOMPARE(artworkPixels(reopened.layers()->layerAt(0)->tiles()), expected);
+    QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(u'\n')));
+}
+
+void TestBrushUi::createBrushTipFromSelectionWorkflow()
+{
+    Running app;
+    QVERIFY(start(app, QStringLiteral("BrushTipFromSelection")));
+    app.workspace.setActiveTool(QStringLiteral("brush"));
+    auto* artwork = qobject_cast<CanvasDocument*>(app.canvas->document());
+    QVERIFY(artwork);
+    auto* layer = artwork->layers()->layerAt(0);
+    QVERIFY(layer);
+    QCOMPARE(layer->tiles().setPixel({10, 10}, 0xFFFF3020),
+             SparseTileStore::WriteResult::Changed);
+    QCOMPARE(layer->tiles().setPixel({11, 10}, 0xFF20A0FF),
+             SparseTileStore::WriteResult::Changed);
+    artwork->selectAll();
+
+    QVERIFY(QMetaObject::invokeMethod(app.root.get(), "openCreateBrushTip"));
+    auto* dialog = app.window->findChild<QObject*>(QStringLiteral("createBrushTipDialog"));
+    QTRY_VERIFY(dialog && dialog->property("opened").toBool());
+    QVERIFY(item(app, QStringLiteral("brushTipSourceChoice")));
+    QVERIFY(item(app, QStringLiteral("brushTipCoverageChoice")));
+    QVERIFY(item(app, QStringLiteral("brushTipContinueButton")) == nullptr); // no previous draft yet
+
+    // Cancel is a real no-op: nothing is loaded and the selection stays.
+    QVERIFY(clickNamed(app, QStringLiteral("brushTipCancelButton")));
+    QTRY_VERIFY(!dialog->property("opened").toBool());
+    QVERIFY(studioWindow() == nullptr);
+    QVERIFY(artwork->hasSelection());
+    QCOMPARE(layer->tiles().pixel({10, 10}).value(), 0xFFFF3020U);
+
+    // With no selection the dialog explains how to continue, and the explicit
+    // whole-layer choice makes a tip from the drawn pixels.
+    artwork->deselect();
+    QVERIFY(QMetaObject::invokeMethod(app.root.get(), "openCreateBrushTip"));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    auto* wholeLayer = item(app, QStringLiteral("brushTipWholeLayer"));
+    QVERIFY(wholeLayer && wholeLayer->isVisible());
+    QVERIFY(wholeLayer->property("checked").toBool());
+    QVERIFY(clickNamed(app, QStringLiteral("brushTipNewButton")));
+    QQuickWindow* studio = nullptr;
+    QTRY_VERIFY((studio = studioWindow()) && studio->isVisible());
+    auto* draft = studio->findChild<BrushStudioModel*>();
+    QVERIFY(draft);
+    QCOMPARE(draft->componentCount(), 1);
+    QCOMPARE(draft->selectedIndex(), 0);
+    QVERIFY(draft->selectedResource());
+    QCOMPARE(draft->selectedResource()->width, 2);
+    QCOMPARE(draft->selectedResource()->height, 1);
+    QVERIFY(draft->document().validate().ok());
+
+    // Continue previous brush is only offered for a real draft, and adds the
+    // new artwork without replacing the tip that is already there.
+    studio->close();
+    QTRY_VERIFY(!studio->isVisible());
+    QVERIFY(QMetaObject::invokeMethod(app.root.get(), "openCreateBrushTip"));
+    QTRY_VERIFY(dialog->property("opened").toBool());
+    auto* continueButton = item(app, QStringLiteral("brushTipContinueButton"));
+    QVERIFY(continueButton && continueButton->isVisible());
+    QVERIFY(clickNamed(app, QStringLiteral("brushTipContinueButton")));
+    QTRY_COMPARE(draft->componentCount(), 2);
+    QVERIFY(draft->tipComponents().size() >= 2);
+    QVERIFY(draft->document().validate().ok());
     QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join(u'\n')));
 }
 
