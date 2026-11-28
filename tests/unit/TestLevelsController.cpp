@@ -123,7 +123,7 @@ void TestLevelsController::lockedAndEmptyLayersAreRejected()
 
     QVERIFY(!levels.beginDocument(&document, layer, &history));
     QVERIFY(!levels.error().isEmpty());
-    QVERIFY(!levels.active());
+    QVERIFY(!levels.isActive());
 
     QCOMPARE(layer->tiles().setPixel({0, 0}, 0xff404040U), SparseTileStore::WriteResult::Changed);
     layer->setLocked(true);
