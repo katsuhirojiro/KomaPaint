@@ -91,7 +91,9 @@ layer never invents pixels.
   transform, group membership, dynamics and all other components.
 - **New brush** starts from the same default draft as the New command, then
   replaces its first tip. A modified previous draft is kept in memory and can be
-  restored from the Studio banner.
+  restored from the Studio banner. "Continue previous brush" is offered only
+  when a draft was edited, imported, opened or saved in this session; opening
+  Studio and leaving the untouched default is not treated as a previous brush.
 - PNG bytes are decoded and stored as a normal resource; save, reopen and install
   use the existing `.kb` path.
 
@@ -119,8 +121,10 @@ one a stamp uses.
   bitmap tip is retained in `.kb` but is not painted by Realistic. The dialog
   refuses to continue a Realistic draft with a bitmap tip and says why.
 - A multi-layer selection is only offered when more than one layer is selected.
-  The extraction API accepts explicit rows; the Layers panel's ordinary click
-  still selects one layer.
+  In the Layers panel a plain click makes one layer current; Control-click (or
+  Command-click on macOS) adds or removes a row from the selected set. Shift
+  range selection is not implemented. Selected-layer order follows the layer
+  stack, not click order.
 - Crop is to the visible alpha bounds; there is no freehand crop rectangle.
 - Rotate is in quarter turns; the stored tip is resampled only for Resize.
 - The "reset to artwork" source survives the session, not a save/reopen. Undo

@@ -36,10 +36,11 @@ Window {
     property var workspace: null
     property var tabletSettings: null
     property color previewInk: "black"
-    // True once the artist has actually opened Studio in this session. The
-    // Create Brush Tip dialog may only offer "Continue previous brush" for a
-    // real draft, never for an arbitrary default library entry.
-    property bool hasPreviousBrush: false
+    // A default, untouched draft is not a previous brush. The Create Brush
+    // Tip dialog may offer "Continue previous brush" only after the artist has
+    // actually edited, imported, opened or saved a draft in this session.
+    property bool previousBrushAvailable: false
+    readonly property bool hasPreviousBrush: previousBrushAvailable || brushDraft.modified
     property var tipChoices: brushDraft.tipComponents
     readonly property string draftEngine: brushDraft.engine
     readonly property string draftError: brushDraft.error
@@ -61,7 +62,7 @@ Window {
                 ? qsTr("Tip added from the selected artwork")
                 : qsTr("Selected tip replaced from the artwork")
         }
-        hasPreviousBrush = true
+        previousBrushAvailable = true
         present()
         return true
     }
@@ -75,6 +76,7 @@ Window {
             libraryNotice = qsTr("Brush file was not saved: %1").arg(brushDraft.error)
             return false
         }
+        previousBrushAvailable = true
         if (!brushLibrary) {
             saveOutcome = "savedOnly"
             fileNotice = qsTr("Brush file saved · install it from the Sub-Tool panel")
@@ -115,7 +117,6 @@ Window {
         else show()
         raise()
         requestActivate()
-        hasPreviousBrush = true
     }
 
     function togglePreview() { previewPreference = previewExpanded ? 0 : 1 }
@@ -138,7 +139,10 @@ Window {
         title: qsTr("Import a KomaPaint brush")
         fileMode: FileDialog.OpenFile
         nameFilters: [qsTr("KomaPaint brushes (*.kb)")]
-        onAccepted: if (brushDraft.openDraft(selectedFile)) studio.fileNotice = qsTr("Brush opened from file")
+        onAccepted: if (brushDraft.openDraft(selectedFile)) {
+            studio.previousBrushAvailable = true
+            studio.fileNotice = qsTr("Brush opened from file")
+        }
     }
     FileDialog {
         id: saveBrush

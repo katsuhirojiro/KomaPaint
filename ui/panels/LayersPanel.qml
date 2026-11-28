@@ -212,6 +212,11 @@ Rectangle {
                 readonly property bool layerLocked: layerObject ? layerObject.locked : false
                 readonly property int labelIndex: layerObject ? layerObject.colorLabel : 0
                 readonly property real layerOpacity: layerObject ? layerObject.opacity : 1
+                // selectedLayerRows notifies when the set changes. Ctrl-click
+                // adds or removes a row so multi-layer tools such as Create
+                // Brush Tip can act on exactly the artwork the artist chose.
+                readonly property var selectedRows: Workspace.layers.selectedLayerRows
+                readonly property bool rowSelected: selectedRows.indexOf(index) >= 0
                 property bool renaming: false
                 function startRename() {
                     Workspace.layers.setActiveLayerIndex(index)
@@ -235,13 +240,18 @@ Rectangle {
                 hoverEnabled: true
                 focusPolicy: Qt.StrongFocus
                 Accessible.name: row.layerName
+                Accessible.description: qsTr("Click to make this the current layer. Control-click to add it to the selected layers.")
                 Keys.onPressed: function(event) {
                     if (event.key === Qt.Key_F2) { row.startRename(); event.accepted = true }
                 }
-                onClicked: Workspace.layers.setActiveLayerIndex(row.index)
+                onClicked: {
+                    const modifiers = Qt.keyboardModifiers()
+                    const additive = (modifiers & (Qt.ControlModifier | Qt.MetaModifier)) !== 0
+                    Workspace.layers.selectLayerRow(row.index, additive)
+                }
 
                 background: Rectangle {
-                    color: row.current ? KP.rowSelected
+                    color: row.current || row.rowSelected ? KP.rowSelected
                          : row.hovered ? KP.hoverOverlay : (row.index % 2 === 0 ? "transparent" : KP.hoverOverlay)
                     Rectangle {
                         visible: row.current
