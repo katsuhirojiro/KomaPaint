@@ -36,6 +36,35 @@ Window {
     property var workspace: null
     property var tabletSettings: null
     property color previewInk: "black"
+    // True once the artist has actually opened Studio in this session. The
+    // Create Brush Tip dialog may only offer "Continue previous brush" for a
+    // real draft, never for an arbitrary default library entry.
+    property bool hasPreviousBrush: false
+    property var tipChoices: brushDraft.tipComponents
+    readonly property string draftEngine: brushDraft.engine
+    readonly property string draftError: brushDraft.error
+
+    function importBrushTip(data, continuePrevious, addAsNew, replaceId, colourTip) {
+        if (!data || !data.ok) return false
+        fileNotice = ""
+        libraryNotice = ""
+        saveOutcome = ""
+        if (!continuePrevious) {
+            // Never silently replace an unsaved draft. stashCurrentDraft()
+            // refuses if one is already kept, leaving both intact.
+            if (!brushDraft.stashCurrentDraft()) return false
+            if (!brushDraft.newDraftFromTipPng(data.png, data.name, colourTip)) return false
+            fileNotice = qsTr("New brush started from the selected artwork")
+        } else {
+            if (!brushDraft.importTipPng(data.png, data.name, addAsNew, replaceId, colourTip)) return false
+            fileNotice = addAsNew
+                ? qsTr("Tip added from the selected artwork")
+                : qsTr("Selected tip replaced from the artwork")
+        }
+        hasPreviousBrush = true
+        present()
+        return true
+    }
 
     function saveDraftToLibrary(url) {
         libraryNotice = ""
@@ -86,6 +115,7 @@ Window {
         else show()
         raise()
         requestActivate()
+        hasPreviousBrush = true
     }
 
     function togglePreview() { previewPreference = previewExpanded ? 0 : 1 }
@@ -218,6 +248,30 @@ Window {
             font.family: KP.fontUi
             font.pixelSize: KP.fontS
             wrapMode: Text.Wrap
+        }
+        RowLayout {
+            objectName: "brushStudioStashedDraft"
+            visible: brushDraft.hasStashedDraft
+            Layout.fillWidth: true
+            Layout.leftMargin: KP.panelInset
+            Layout.rightMargin: KP.panelInset
+            Layout.topMargin: visible ? KP.gapS : 0
+            spacing: KP.gapS
+            Text {
+                Layout.fillWidth: true
+                text: qsTr("Previous unsaved brush “%1” is kept while you work on this one.").arg(brushDraft.stashedDraftName)
+                color: KP.textMuted
+                font.family: KP.fontUi
+                font.pixelSize: KP.fontS
+                wrapMode: Text.Wrap
+            }
+            KpButton {
+                objectName: "brushStudioRestoreStash"
+                small: true
+                label: qsTr("Restore previous brush")
+                tip: qsTr("Reopen the brush draft that was kept when this new brush started. The current draft stays in its own undo history.")
+                onClicked: brushDraft.restoreStashedDraft()
+            }
         }
         Text {
             objectName: "brushStudioError"

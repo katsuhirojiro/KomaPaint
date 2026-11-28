@@ -4,6 +4,7 @@ ToolPalette 1.0 ToolPalette.qml
 CanvasWorkspace 1.0 CanvasWorkspace.qml
 StatusBar 1.0 StatusBar.qml
 NewProjectDialog 1.0 NewProjectDialog.qml
+CreateBrushTipDialog 1.0 CreateBrushTipDialog.qml
 KpIcon 1.0 KpIcon.qml
 IconButton 1.0 IconButton.qml
 ColorWheel 1.0 ColorWheel.qml

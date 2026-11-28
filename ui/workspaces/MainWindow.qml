@@ -50,6 +50,56 @@ ApplicationWindow {
         if (brushStudioLoader.item) brushStudioLoader.item.present()
         else brushStudioLoader.active = true
     }
+    // ---- Create Brush Tip from Selection -----------------------------------
+    property var pendingBrushTip: null
+    property bool pendingBrushTipContinue: false
+    property bool pendingBrushTipAdd: true
+    property string pendingBrushTipReplace: ""
+    property bool pendingBrushTipColour: false
+
+    function openCreateBrushTip() {
+        if (!Workspace.document) return
+        const studio = brushStudioLoader.item
+        brushTipDialog.info = Workspace.brushTipSourceInfo()
+        brushTipDialog.hasPrevious = !!studio && studio.hasPreviousBrush
+        brushTipDialog.previousRealistic = !!studio && studio.draftEngine === "realistic"
+        brushTipDialog.previousTips = studio ? studio.tipChoices : []
+        brushTipDialog.error = ""
+        brushTipDialog.open()
+    }
+
+    function createBrushTipFromDialog(continuePrevious) {
+        const data = Workspace.createBrushTipSource(brushTipDialog.selectedSource,
+                                                    brushTipDialog.useSelection,
+                                                    brushTipDialog.selectedCoverage)
+        if (!data.ok) {
+            brushTipDialog.error = data.error
+            return
+        }
+        const colourTip = brushTipDialog.selectedCoverage === "colour"
+        const addAsNew = brushTipDialog.addTipAsNew
+        const replaceId = brushTipDialog.replaceTipId
+        const studio = brushStudioLoader.item
+        if (studio) {
+            if (!studio.importBrushTip(data, continuePrevious, addAsNew, replaceId, colourTip)) {
+                brushTipDialog.error = studio.draftError.length > 0
+                    ? studio.draftError
+                    : qsTr("Brush Studio could not use this tip.")
+                return
+            }
+            brushTipDialog.accept()
+            return
+        }
+        // The first use of Studio loads it lazily. Keep the decision until the
+        // window and its model exist, then perform the same import.
+        pendingBrushTip = data
+        pendingBrushTipContinue = continuePrevious
+        pendingBrushTipAdd = addAsNew
+        pendingBrushTipReplace = replaceId
+        pendingBrushTipColour = colourTip
+        brushTipDialog.accept()
+        brushStudioLoader.active = true
+    }
     // Keep one Studio and its own model alive across closes. Loading by URL
     // delays their creation until the artist first uses the Edit menu action.
     Loader {
@@ -62,6 +112,15 @@ ApplicationWindow {
             item.workspace = Workspace
             item.tabletSettings = Workspace.inputSettings
             item.previewInk = Qt.binding(function() { return Workspace.colors.foreground })
+            if (root.pendingBrushTip) {
+                const data = root.pendingBrushTip
+                const keep = root.pendingBrushTipContinue
+                const add = root.pendingBrushTipAdd
+                const replace = root.pendingBrushTipReplace
+                const colour = root.pendingBrushTipColour
+                root.pendingBrushTip = null
+                item.importBrushTip(data, keep, add, replace, colour)
+            }
             item.present()
         }
     }
@@ -598,6 +657,12 @@ ApplicationWindow {
                     objectName: "brushStudioMenuItem"
                     text: qsTr("Brush Studio")
                     onTriggered: root.openBrushStudio()
+                }
+                KpMenuItem {
+                    objectName: "createBrushTipFromSelectionMenuItem"
+                    text: qsTr("Create Brush Tip from Selection...")
+                    enabled: Workspace.document !== null
+                    onTriggered: root.openCreateBrushTip()
                 }
                 KpMenuSeparator { }
                 KpMenuItem {
@@ -1340,6 +1405,10 @@ ApplicationWindow {
                 onClicked: { discardForNew.accept(); newProjectDialog.open() }
             }
         ]
+    }
+    CreateBrushTipDialog {
+        id: brushTipDialog
+        onCreateRequested: function(continuePrevious) { root.createBrushTipFromDialog(continuePrevious) }
     }
     NewProjectDialog {
         id: newProjectDialog
